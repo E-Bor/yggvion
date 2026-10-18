@@ -1,0 +1,12 @@
+[Unit]
+Description=Yggvion local calendar reminders
+After=graphical-session.target
+PartOf=graphical-session.target
+
+[Service]
+ExecStart=%h/.local/bin/yggvion-reminders --database %h/.local/share/dev.yggvion.yggvion/yggvion.sqlite
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=graphical-session.target

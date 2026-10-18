@@ -1,0 +1,59 @@
+name: yggvion
+description: "Личная система планирования, времени и заметок."
+publish_to: 'none'
+version: 0.1.0
+
+environment:
+  sdk: ^3.10.7
+
+dependencies:
+  flutter:
+    sdk: flutter
+  flutter_localizations:
+    sdk: flutter
+  flutter_riverpod: ^2.6.1
+  drift: ^2.30.0
+  sqlite3: ^3.1.1
+  path_provider: ^2.1.5
+  path: ^1.9.1
+  uuid: ^4.5.2
+  dio: ^5.9.2
+  flutter_secure_storage: ^9.2.4
+  flutter_markdown_plus: ^1.0.7
+  flutter_local_notifications: ^19.5.0
+  timezone: ^0.10.1
+  flutter_timezone: ^5.0.1
+  rrule: ^0.2.18
+  file_picker: ^10.3.10
+  url_launcher: ^6.3.2
+  open_filex: ^4.7.0
+  crypto: ^3.0.6
+  intl: ^0.20.2
+  collection: ^1.19.1
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+  msix: ^3.18.0
+
+msix_config:
+  display_name: Yggvion
+  publisher_display_name: Yggvion
+  identity_name: dev.yggvion.yggvion
+  publisher: CN=Yggvion
+  msix_version: 0.1.0.0
+  capabilities: internetClient
+  install_certificate: false
+  sign_msix: false
+  toast_activator:
+    clsid: 37ad4b76-7b08-4604-a3d4-9f96923f4257
+    arguments: --notification-activation
+    display_name: Yggvion
+
+flutter:
+  uses-material-design: true
+  fonts:
+    - family: Inter
+      fonts:
+        - asset: assets/fonts/Inter.ttf

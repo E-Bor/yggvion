@@ -1,0 +1,267 @@
+import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../domain/models.dart';
+import 'providers.dart';
+import 'task_editor.dart';
+import 'theme.dart';
+
+class BoardTask extends StatelessWidget {
+  const BoardTask({super.key, required this.task});
+  final Task task;
+  @override
+  Widget build(BuildContext context) {
+    final card = TaskCard(
+      key: ValueKey('board-task-${task.id}'),
+      task: task,
+      enableLongPress: false,
+    );
+    final feedback = Material(
+      color: Colors.transparent,
+      elevation: 12,
+      borderRadius: BorderRadius.circular(12),
+      child: SizedBox(
+        width: 260,
+        child: IgnorePointer(
+          child: TaskCard(task: task, enableLongPress: false),
+        ),
+      ),
+    );
+    final ghost = Opacity(opacity: .25, child: card);
+    final mobile =
+        defaultTargetPlatform == TargetPlatform.iOS ||
+        defaultTargetPlatform == TargetPlatform.android;
+    if (mobile) {
+      return LongPressDraggable<Task>(
+        data: task,
+        feedback: feedback,
+        childWhenDragging: ghost,
+        hapticFeedbackOnStart: true,
+        child: card,
+      );
+    }
+    return MouseRegion(
+      cursor: SystemMouseCursors.grab,
+      child: Draggable<Task>(
+        data: task,
+        feedback: feedback,
+        childWhenDragging: ghost,
+        child: card,
+      ),
+    );
+  }
+}
+
+class TaskCard extends ConsumerWidget {
+  const TaskCard({
+    super.key,
+    required this.task,
+    this.selected = false,
+    this.onSelect,
+    this.compact = false,
+    this.enableLongPress = true,
+  });
+  final Task task;
+  final bool selected, compact, enableLongPress;
+  final VoidCallback? onSelect;
+  void action(BuildContext context, WidgetRef ref, String value) {
+    final repo = ref.read(appProvider);
+    guard(context, () async {
+      switch (value) {
+        case 'review':
+          await repo.completeForReview(task);
+        case 'time':
+          await editSession(context, task);
+        case 'delete':
+          await deleteTask(context, ref, task);
+        default:
+          if (value.startsWith('status:')) {
+            await repo.status(task, TaskStatus.parse(value.substring(7)));
+          }
+      }
+    });
+  }
+
+  List<PopupMenuEntry<String>> menu() => [
+    if (!task.done)
+      const PopupMenuItem(
+        value: 'review',
+        child: Text('Готово → создать проверку'),
+      ),
+    const PopupMenuItem(
+      value: 'time',
+      child: Text('Добавить потраченное время'),
+    ),
+    const PopupMenuDivider(),
+    for (final s in TaskStatus.values)
+      PopupMenuItem(value: 'status:${s.wire}', child: Text(s.label)),
+    const PopupMenuDivider(),
+    const PopupMenuItem(value: 'delete', child: Text('Удалить')),
+  ];
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final repo = ref.watch(appProvider),
+        project = repo.snapshot.project(task.projectId),
+        running = repo.snapshot.sessions.any(
+          (s) => s.taskId == task.id && s.running,
+        );
+    return GestureDetector(
+      onSecondaryTapDown: (details) async {
+        final value = await showMenu<String>(
+          context: context,
+          position: menuPosition(context, details.globalPosition),
+          items: menu(),
+        );
+        if (value != null && context.mounted) action(context, ref, value);
+      },
+      onLongPress: !enableLongPress
+          ? null
+          : () async {
+              final box = context.findRenderObject() as RenderBox;
+              final point = box.localToGlobal(Offset.zero);
+              final value = await showMenu<String>(
+                context: context,
+                position: menuPosition(context, point),
+                items: menu(),
+              );
+              if (value != null && context.mounted) action(context, ref, value);
+            },
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 120),
+        margin: const EdgeInsets.only(bottom: 8),
+        decoration: BoxDecoration(
+          color: selected
+              ? Palette.blue.withValues(alpha: .10)
+              : running
+              ? Palette.pink.withValues(alpha: .06)
+              : Palette.surface,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: selected
+                ? Palette.blue
+                : running
+                ? Palette.pink.withValues(alpha: .5)
+                : Palette.border,
+            width: .7,
+          ),
+        ),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(12),
+          onTap: onSelect ?? () => openTask(context, task: task),
+          child: Padding(
+            padding: EdgeInsets.symmetric(
+              horizontal: compact ? 6 : 10,
+              vertical: compact ? 6 : 10,
+            ),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                SizedBox(
+                  width: 32,
+                  height: 32,
+                  child: Checkbox(
+                    value: task.done,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(5),
+                    ),
+                    onChanged: (v) => guard(
+                      context,
+                      () => repo.status(
+                        task,
+                        v == true ? TaskStatus.done : TaskStatus.todo,
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 5),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const SizedBox(height: 4),
+                      Text(
+                        task.title,
+                        maxLines: compact ? 2 : 4,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w500,
+                          decoration: task.done
+                              ? TextDecoration.lineThrough
+                              : null,
+                          color: task.done ? Palette.muted : Palette.text,
+                        ),
+                      ),
+                      const SizedBox(height: 7),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 4,
+                        children: [
+                          if (project != null)
+                            Text(
+                              '● ${project.title}',
+                              style: TextStyle(
+                                fontSize: 10,
+                                color: Color(project.color),
+                              ),
+                            ),
+                          if (repo.snapshot.estimate(task.id) > Duration.zero)
+                            Text(
+                              formatDuration(repo.snapshot.estimate(task.id)),
+                              style: const TextStyle(
+                                fontSize: 10,
+                                color: Palette.muted,
+                              ),
+                            ),
+                          if (running ||
+                              repo.snapshot.spent(task.id, repo.now()) >
+                                  Duration.zero)
+                            Text(
+                              formatDuration(
+                                repo.snapshot.spent(task.id, repo.now()),
+                              ),
+                              style: const TextStyle(
+                                fontSize: 10,
+                                color: Palette.pink,
+                              ),
+                            ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+                SizedBox(
+                  width: 32,
+                  height: 32,
+                  child: IconButton(
+                    padding: EdgeInsets.zero,
+                    tooltip: running ? 'Остановить таймер' : 'Начать работу',
+                    onPressed: task.done
+                        ? null
+                        : () => guard(context, () => repo.toggleTimer(task)),
+                    icon: Icon(
+                      running ? Icons.pause_rounded : Icons.play_arrow_rounded,
+                      size: 22,
+                      color: running ? Palette.pink : Palette.muted,
+                    ),
+                  ),
+                ),
+                if (!compact)
+                  SizedBox(
+                    width: 25,
+                    height: 32,
+                    child: PopupMenuButton<String>(
+                      padding: EdgeInsets.zero,
+                      iconSize: 17,
+                      onSelected: (v) => action(context, ref, v),
+                      itemBuilder: (_) => menu(),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}

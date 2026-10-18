@@ -1,1 +1,16 @@
 .DS_Store
+.env
+/data/
+/server/data/
+coverage/
+*.db
+*.db-shm
+*.db-wal
+server/yggvion
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+*.pfx
+*.p12
+*.pem
+*.key

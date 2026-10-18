@@ -1,0 +1,277 @@
+openapi: 3.1.0
+info:
+  title: Yggvion personal sync API
+  version: 1.0.0
+  description: >-
+    One owner, device tokens, optimistic record versions. UTC RFC3339 timestamps;
+    IANA timezone retained on blocks/series. Mutations in a batch are atomic.
+    Version conflicts are returned per record without overwriting either side.
+servers:
+  - url: https://planner.example.com/api/v1
+security:
+  - deviceToken: []
+paths:
+  /pair:
+    post:
+      security: []
+      summary: Issue a revocable token for a device
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [name, key]
+              properties:
+                name: {type: string, minLength: 1, maxLength: 100}
+                key: {type: string, minLength: 32, writeOnly: true}
+      responses:
+        '201':
+          description: Device registered
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [device_id, token]
+                properties:
+                  device_id: {type: string}
+                  token: {type: string}
+        '401': {$ref: '#/components/responses/Error'}
+  /sync:
+    post:
+      summary: Apply 1–100 ordered mutations with idempotent operation IDs
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [mutations]
+              properties:
+                mutations:
+                  type: array
+                  minItems: 1
+                  maxItems: 100
+                  items:
+                    type: object
+                    required: [operation_id, record]
+                    properties:
+                      operation_id: {type: string}
+                      record: {$ref: '#/components/schemas/Record'}
+      responses:
+        '200':
+          description: Versioned results; retry an identical operation to get its original result
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [results]
+                properties:
+                  results:
+                    type: array
+                    items:
+                      type: object
+                      required: [operation_id, status, record]
+                      properties:
+                        operation_id: {type: string}
+                        status: {type: string, enum: [applied, conflict]}
+                        record: {$ref: '#/components/schemas/Record'}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '500': {$ref: '#/components/responses/Error'}
+  /changes:
+    get:
+      summary: Read up to 500 ordered changes including tombstones
+      parameters:
+        - in: query
+          name: after
+          schema: {type: integer, format: int64, minimum: 0, default: 0}
+      responses:
+        '200':
+          description: Persist cursor only after applying all records in this page
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [records, cursor, has_more]
+                properties:
+                  records: {type: array, items: {$ref: '#/components/schemas/Record'}}
+                  cursor: {type: integer, format: int64}
+                  has_more: {type: boolean}
+        '401': {$ref: '#/components/responses/Error'}
+  /events:
+    get:
+      summary: SSE sync hints; clients must retrieve durable changes using their cursor
+      responses:
+        '200':
+          description: An event named sync on changes and every 20 seconds
+          content:
+            text/event-stream: {schema: {type: string}}
+        '401': {$ref: '#/components/responses/Error'}
+  /devices:
+    get:
+      responses:
+        '200':
+          description: Active devices of the sole owner
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  devices:
+                    type: array
+                    items:
+                      type: object
+                      required: [id, name]
+                      properties:
+                        id: {type: string}
+                        name: {type: string}
+        '401': {$ref: '#/components/responses/Error'}
+  /devices/{id}:
+    delete:
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: {type: string}
+      responses:
+        '204': {description: Token revoked}
+        '401': {$ref: '#/components/responses/Error'}
+  /attachments/{id}:
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema: {type: string, pattern: '^[a-f0-9]{64}$'}
+    put:
+      summary: Upload at most 50 MiB, ID must equal SHA-256 of the body
+      requestBody:
+        required: true
+        content:
+          application/octet-stream: {schema: {type: string, format: binary}}
+      responses:
+        '201': {description: Stored id and size}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '413': {$ref: '#/components/responses/Error'}
+    get:
+      responses:
+        '200':
+          description: Private attachment
+          content:
+            application/octet-stream: {schema: {type: string, format: binary}}
+        '401': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+components:
+  securitySchemes:
+    deviceToken: {type: http, scheme: bearer}
+  responses:
+    Error:
+      description: A stable error code without internal server details
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [error]
+            properties:
+              error: {type: string}
+  schemas:
+    Record:
+      type: object
+      required: [id, kind, version, deleted, data, seq]
+      properties:
+        id: {type: string, pattern: '^[a-zA-Z0-9_-]{1,160}$'}
+        kind: {type: string, enum: [task, block, session, note, project, settings, series, snooze]}
+        version: {type: integer, minimum: 0, description: '0 for creation, server increments on accepted change'}
+        deleted: {type: boolean}
+        seq: {type: integer, minimum: 0, description: Server change cursor}
+        data:
+          oneOf:
+            - {$ref: '#/components/schemas/Task'}
+            - {$ref: '#/components/schemas/Block'}
+            - {$ref: '#/components/schemas/Session'}
+            - {$ref: '#/components/schemas/Note'}
+            - {$ref: '#/components/schemas/Project'}
+            - {$ref: '#/components/schemas/Settings'}
+            - {$ref: '#/components/schemas/Series'}
+            - {$ref: '#/components/schemas/Snooze'}
+    Task:
+      type: object
+      required: [title, description, project_id, status]
+      properties:
+        title: {type: string, minLength: 1, maxLength: 1000}
+        description: {type: string, description: Markdown}
+        project_id: {type: string, description: Empty string means no project}
+        status: {type: string, enum: [todo, in_progress, waiting, done]}
+        parent_id: {type: string}
+        series_id: {type: string}
+        occurrence: {type: string, description: Original occurrence in UTC; empty for nonrecurring task}
+    Block:
+      type: object
+      required: [task_id, start, end, timezone, all_day, historical, reminders]
+      properties:
+        task_id: {type: string}
+        start: {type: string, format: date-time}
+        end: {type: string, format: date-time, description: Exclusive end greater than start}
+        timezone: {type: string, description: IANA timezone}
+        all_day: {type: boolean}
+        historical: {type: boolean, description: Retained in history and excluded from current estimate}
+        reminders: {type: array, maxItems: 12, items: {type: integer, minimum: 0, maximum: 525600}}
+    Session:
+      type: object
+      required: [task_id, device_id, start, end, discarded]
+      properties:
+        task_id: {type: string}
+        device_id: {type: string}
+        start: {type: string, format: date-time}
+        end: {type: [string, 'null'], format: date-time, description: Null means running}
+        discarded: {type: boolean, description: Original intervals retained after conflict resolution}
+    Note:
+      type: object
+      required: [title, content, pinned]
+      properties:
+        title: {type: string, minLength: 1}
+        content: {type: string, description: Markdown, attachments use attachment:SHA256 URLs}
+        pinned: {type: string, enum: ['', scratchpad, reference]}
+    Project:
+      type: object
+      required: [title, color]
+      properties:
+        title: {type: string, minLength: 1}
+        color: {type: integer, minimum: 0, maximum: 4294967295, description: ARGB}
+    Settings:
+      type: object
+      required: [default_minutes, reminders, timezone]
+      properties:
+        default_minutes: {type: integer, minimum: 5, maximum: 1440}
+        reminders: {type: array, maxItems: 12, items: {type: integer, minimum: 0, maximum: 525600}}
+        timezone: {type: string}
+    Series:
+      type: object
+      required: [title, description, project_id, start, minutes, timezone, rule, reminders, all_day, exceptions]
+      properties:
+        title: {type: string}
+        description: {type: string}
+        project_id: {type: string}
+        start: {type: string, format: date-time}
+        minutes: {type: integer, minimum: 1, maximum: 527040}
+        timezone: {type: string}
+        rule: {type: string, description: RFC5545 RRULE}
+        reminders: {type: array, items: {type: integer}}
+        all_day: {type: boolean}
+        exceptions: {type: array, items: {type: string, format: date-time}}
+        cancelled_from:
+          type: string
+          format: date-time
+          nullable: true
+          description: Inclusive UTC occurrence cutoff for explicit deletion of this and following tasks. Omitted/null for an active series; independent of RRULE UNTIL used when splitting a series. Server tombstones late offline occurrences and their blocks, sessions and snoozes.
+        offset_minutes: {type: integer}
+        anchor_timezone: {type: string, description: Immutable IANA timezone for original occurrence identities}
+        day_span: {type: integer, minimum: 0, maximum: 366, description: Number of civil days for all-day recurrence}
+    Snooze:
+      type: object
+      required: [task_id, at]
+      properties:
+        task_id: {type: string}
+        at: {type: string, format: date-time}

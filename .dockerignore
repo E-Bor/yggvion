@@ -1,0 +1,16 @@
+*
+!server/
+!server/**
+!deploy/
+!deploy/Dockerfile
+server/data/
+server/yggvion
+server/yggvion-reminders
+**/*.db
+**/*.db-shm
+**/*.db-wal
+**/.env
+**/*.key
+**/*.pem
+**/*.pfx
+**/*.p12
