@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -50,6 +51,8 @@ class _WorkspaceState extends ConsumerState<Workspace>
   DateTime? calendarDate, homeDate;
   Timer? ticker;
   bool mobileTasks = true;
+  double? sidebarWidth, sidebarDragOrigin, sidebarDragWidth;
+  bool sidebarEdgeHovered = false;
   String? runtimeError;
   static const labels = [
     'Сегодня',
@@ -271,7 +274,7 @@ class _WorkspaceState extends ConsumerState<Workspace>
                 Expanded(
                   child: Column(
                     children: [
-                      _header(repo, desktop, size),
+                      _header(repo, desktop),
                       if (runtimeError != null)
                         MaterialBanner(
                           content: Text(runtimeError!),
@@ -385,166 +388,180 @@ class _WorkspaceState extends ConsumerState<Workspace>
     );
   }
 
-  Widget _header(Repository repo, bool desktop, Size size) {
-    final home = page == PageKind.today;
-    final zone = tz.getLocation(repo.snapshot.settings.timezone);
-    final now = tz.TZDateTime.from(repo.now(), zone);
-    final date = tz.TZDateTime.from(homeDate ?? now, zone);
-    final wide =
-        desktop && size.width - (repo.sidebarCollapsed ? 72 : 215) >= 1100;
-    final toolbar = CalendarToolbar(
-      date: date,
-      view: repo.calendarView,
-      now: now,
-      timezone: repo.snapshot.settings.timezone,
-      showDate: desktop,
-      onDateChanged: (value) => setState(() => homeDate = value),
-      onViewChanged: (value) => guard(context, () => repo.setView(value)),
-    );
-    final title = home
-        ? Text(
-            CalendarToolbar.dateLabel(date, repo.calendarView),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: const TextStyle(
-              fontSize: 19,
-              fontWeight: FontWeight.w600,
-              letterSpacing: -.5,
-            ),
-          )
-        : Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                labels[page.index],
-                style: TextStyle(
-                  fontSize: desktop ? 26 : 22,
-                  fontWeight: FontWeight.w600,
-                  letterSpacing: -.8,
-                ),
+  Widget _header(Repository repo, bool desktop) => LayoutBuilder(
+    builder: (context, constraints) {
+      final home = page == PageKind.today;
+      final zone = tz.getLocation(repo.snapshot.settings.timezone);
+      final now = tz.TZDateTime.from(repo.now(), zone);
+      final date = tz.TZDateTime.from(homeDate ?? now, zone);
+      final wide = desktop && constraints.maxWidth >= 1100;
+      final toolbar = CalendarToolbar(
+        date: date,
+        view: repo.calendarView,
+        now: now,
+        timezone: repo.snapshot.settings.timezone,
+        showDate: desktop,
+        onDateChanged: (value) => setState(() => homeDate = value),
+        onViewChanged: (value) => guard(context, () => repo.setView(value)),
+      );
+      final title = home
+          ? Text(
+              CalendarToolbar.dateLabel(date, repo.calendarView),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                fontSize: 19,
+                fontWeight: FontWeight.w600,
+                letterSpacing: -.5,
               ),
-              if (desktop)
-                Text(
-                  page == PageKind.planner
-                      ? 'Найдите время для важного'
-                      : page == PageKind.board
-                      ? 'От идеи до завершения'
-                      : page == PageKind.notes
-                      ? 'Место для мыслей и знаний'
-                      : 'Ваше рабочее пространство',
-                  style: const TextStyle(color: Palette.muted, fontSize: 12),
-                ),
-            ],
-          );
-    final actions = <Widget>[
-      if (page != PageKind.settings && page != PageKind.notes)
-        if (desktop && wide)
-          ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 150),
-            child: projectFilter(),
-          )
-        else if (repo.snapshot.projects.isNotEmpty)
-          PopupMenuButton<String>(
-            tooltip: 'Фильтр проектов',
-            icon: Icon(
-              Icons.filter_list_rounded,
-              color: projectId.isEmpty ? Palette.muted : Palette.blue,
-            ),
-            onSelected: (value) => setState(() => projectId = value),
-            itemBuilder: (_) => [
-              const PopupMenuItem(value: '', child: Text('Все проекты')),
-              for (final project in repo.snapshot.projects)
-                PopupMenuItem(value: project.id, child: Text(project.title)),
-            ],
-          ),
-      TimerControl(compact: !wide),
-      IconButton(
-        tooltip: 'Поиск · ⌘F / Ctrl+F',
-        onPressed: search,
-        icon: const Icon(Icons.search_rounded),
-      ),
-      if (!desktop)
-        IconButton(
-          tooltip: 'Настройки',
-          onPressed: () => go(PageKind.settings),
-          icon: const Icon(Icons.tune_rounded),
-        ),
-      if (desktop && page != PageKind.settings) ...[
-        const SizedBox(width: 8),
-        if (wide)
-          OutlinedButton.icon(
-            onPressed: createNote,
-            icon: const Icon(Icons.note_add_outlined, size: 17),
-            label: const Text('Заметка'),
-          )
-        else
-          IconButton(
-            tooltip: 'Создать заметку',
-            onPressed: createNote,
-            icon: const Icon(Icons.note_add_outlined, size: 20),
-          ),
-        const SizedBox(width: 8),
-        if (wide)
-          FilledButton.icon(
-            onPressed: () => openTask(context),
-            icon: const Icon(Icons.add_rounded, size: 18),
-            label: const Text('Задача'),
-          )
-        else
-          IconButton.filled(
-            tooltip: 'Создать задачу',
-            onPressed: () => openTask(context),
-            icon: const Icon(Icons.add_rounded, size: 20),
-          ),
-      ],
-    ];
-    return Container(
-      key: const ValueKey('workspace-header'),
-      height: home && !desktop
-          ? 108
-          : desktop
-          ? 78
-          : 68,
-      padding: EdgeInsets.symmetric(horizontal: desktop ? 24 : 12),
-      child: Column(
-        children: [
-          Expanded(
-            child: Row(
+            )
+          : Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                if (!desktop && page == PageKind.settings)
-                  IconButton(
-                    onPressed: () => go(PageKind.today),
-                    icon: const Icon(Icons.arrow_back_rounded),
+                Text(
+                  labels[page.index],
+                  style: TextStyle(
+                    fontSize: desktop ? 26 : 22,
+                    fontWeight: FontWeight.w600,
+                    letterSpacing: -.8,
                   ),
-                Expanded(child: home && desktop ? toolbar : title),
-                const SizedBox(width: 12),
-                ...actions,
+                ),
+                if (desktop)
+                  Text(
+                    page == PageKind.planner
+                        ? 'Найдите время для важного'
+                        : page == PageKind.board
+                        ? 'От идеи до завершения'
+                        : page == PageKind.notes
+                        ? 'Место для мыслей и знаний'
+                        : 'Ваше рабочее пространство',
+                    style: const TextStyle(color: Palette.muted, fontSize: 12),
+                  ),
+              ],
+            );
+      final actions = <Widget>[
+        if (page != PageKind.settings && page != PageKind.notes)
+          if (desktop && wide)
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 150),
+              child: projectFilter(),
+            )
+          else if (repo.snapshot.projects.isNotEmpty)
+            PopupMenuButton<String>(
+              tooltip: 'Фильтр проектов',
+              icon: Icon(
+                Icons.filter_list_rounded,
+                color: projectId.isEmpty ? Palette.muted : Palette.blue,
+              ),
+              onSelected: (value) => setState(() => projectId = value),
+              itemBuilder: (_) => [
+                const PopupMenuItem(value: '', child: Text('Все проекты')),
+                for (final project in repo.snapshot.projects)
+                  PopupMenuItem(value: project.id, child: Text(project.title)),
               ],
             ),
+        TimerControl(compact: !wide),
+        IconButton(
+          tooltip: 'Поиск · ⌘F / Ctrl+F',
+          onPressed: search,
+          icon: const Icon(Icons.search_rounded),
+        ),
+        if (!desktop)
+          IconButton(
+            tooltip: 'Настройки',
+            onPressed: () => go(PageKind.settings),
+            icon: const Icon(Icons.tune_rounded),
           ),
-          if (home && !desktop)
-            Padding(padding: const EdgeInsets.only(bottom: 8), child: toolbar),
+        if (desktop && page != PageKind.settings) ...[
+          const SizedBox(width: 8),
+          if (wide)
+            OutlinedButton.icon(
+              onPressed: createNote,
+              icon: const Icon(Icons.note_add_outlined, size: 17),
+              label: const Text('Заметка'),
+            )
+          else
+            IconButton(
+              tooltip: 'Создать заметку',
+              onPressed: createNote,
+              icon: const Icon(Icons.note_add_outlined, size: 20),
+            ),
+          const SizedBox(width: 8),
+          if (wide)
+            FilledButton.icon(
+              onPressed: () => openTask(context),
+              icon: const Icon(Icons.add_rounded, size: 18),
+              label: const Text('Задача'),
+            )
+          else
+            IconButton.filled(
+              tooltip: 'Создать задачу',
+              onPressed: () => openTask(context),
+              icon: const Icon(Icons.add_rounded, size: 20),
+            ),
         ],
-      ),
-    );
+      ];
+      return Container(
+        key: const ValueKey('workspace-header'),
+        height: home && !desktop
+            ? 108
+            : desktop
+            ? 78
+            : 68,
+        padding: EdgeInsets.symmetric(horizontal: desktop ? 24 : 12),
+        child: Column(
+          children: [
+            Expanded(
+              child: Row(
+                children: [
+                  if (!desktop && page == PageKind.settings)
+                    IconButton(
+                      onPressed: () => go(PageKind.today),
+                      icon: const Icon(Icons.arrow_back_rounded),
+                    ),
+                  Expanded(child: home && desktop ? toolbar : title),
+                  const SizedBox(width: 12),
+                  ...actions,
+                ],
+              ),
+            ),
+            if (home && !desktop)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: toolbar,
+              ),
+          ],
+        ),
+      );
+    },
+  );
+
+  void cancelSidebarResize() {
+    setState(() {
+      sidebarWidth = null;
+      sidebarDragOrigin = null;
+      sidebarDragWidth = null;
+    });
   }
 
   Widget _sidebar(Repository repo, int conflicts) {
-    final collapsed = repo.sidebarCollapsed;
-    final toggle = IconButton(
-      key: const ValueKey('sidebar-toggle'),
-      tooltip: collapsed ? 'Развернуть меню' : 'Свернуть меню',
-      visualDensity: VisualDensity.compact,
-      onPressed: () =>
-          guard(context, () => repo.setSidebarCollapsed(!collapsed)),
-      icon: Icon(
-        collapsed
-            ? Icons.keyboard_double_arrow_right_rounded
-            : Icons.keyboard_double_arrow_left_rounded,
-        size: 18,
-      ),
-    );
+    const expandedWidth = 215.0, collapsedWidth = 72.0;
+    final width =
+        sidebarWidth ??
+        (repo.sidebarCollapsed ? collapsedWidth : expandedWidth);
+    final collapsed = width < expandedWidth / 2;
+    void finish() {
+      if (sidebarDragOrigin == null) return;
+      final nextCollapsed = (sidebarWidth ?? width) < expandedWidth / 2;
+      guard(context, () => repo.setSidebarCollapsed(nextCollapsed));
+      setState(() {
+        sidebarWidth = null;
+        sidebarDragOrigin = null;
+        sidebarDragWidth = null;
+      });
+    }
+
     final logo = Container(
       width: 30,
       height: 30,
@@ -607,179 +624,255 @@ class _WorkspaceState extends ConsumerState<Workspace>
       );
     }
 
-    return AnimatedSize(
-      duration: const Duration(milliseconds: 180),
+    return AnimatedContainer(
+      duration: sidebarWidth == null
+          ? const Duration(milliseconds: 180)
+          : Duration.zero,
       curve: Curves.easeOutCubic,
-      alignment: Alignment.topLeft,
-      child: Container(
-        key: const ValueKey('workspace-sidebar'),
-        width: collapsed ? 72 : 215,
-        decoration: const BoxDecoration(
-          color: Palette.surface,
-          border: Border(right: BorderSide(color: Palette.border, width: .6)),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            if (collapsed) ...[
-              Padding(
-                padding: const EdgeInsets.only(top: 26, bottom: 12),
-                child: Center(child: logo),
-              ),
-              Center(child: toggle),
-              const SizedBox(height: 12),
-            ] else
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 22, 8, 26),
-                child: Row(
-                  children: [
-                    logo,
-                    const SizedBox(width: 8),
-                    const Expanded(
-                      child: Text(
-                        'yggvion',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          fontSize: 21,
-                          fontWeight: FontWeight.w600,
-                          letterSpacing: -.9,
-                        ),
-                      ),
+      key: const ValueKey('workspace-sidebar'),
+      width: width,
+      decoration: const BoxDecoration(
+        color: Palette.surface,
+        border: Border(right: BorderSide(color: Palette.border, width: .6)),
+      ),
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          ClipRect(
+            child: OverflowBox(
+              alignment: Alignment.centerLeft,
+              minWidth: collapsed ? collapsedWidth : expandedWidth,
+              maxWidth: collapsed ? collapsedWidth : expandedWidth,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  if (collapsed) ...[
+                    Padding(
+                      padding: const EdgeInsets.only(top: 26, bottom: 30),
+                      child: Center(child: logo),
                     ),
-                    toggle,
-                  ],
-                ),
-              ),
-            for (var i = 0; i < 4; i++) navigation(i),
-            if (collapsed)
-              const Spacer()
-            else ...[
-              const SizedBox(height: 30),
-              const Padding(
-                padding: EdgeInsets.symmetric(horizontal: 26),
-                child: Text(
-                  'ПРОЕКТЫ',
-                  style: TextStyle(
-                    fontSize: 10,
-                    letterSpacing: 1.7,
-                    color: Palette.muted,
-                  ),
-                ),
-              ),
-              const SizedBox(height: 12),
-              Expanded(
-                child: ListView(
-                  padding: const EdgeInsets.symmetric(horizontal: 14),
-                  children: [
-                    for (final p in repo.snapshot.projects)
-                      ListTile(
-                        dense: true,
-                        leading: Icon(
-                          Icons.circle,
-                          size: 8,
-                          color: Color(p.color),
-                        ),
-                        title: Text(
-                          p.title,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(fontSize: 12),
-                        ),
-                        selected: projectId == p.id,
-                        onTap: () => setState(
-                          () => projectId = projectId == p.id ? '' : p.id,
-                        ),
-                      ),
-                    if (repo.snapshot.projects.isEmpty)
-                      TextButton.icon(
-                        onPressed: () => go(PageKind.settings),
-                        icon: const Icon(Icons.add_rounded, size: 14),
-                        label: const Text(
-                          'Добавить проект',
-                          style: TextStyle(fontSize: 12),
-                        ),
-                      ),
-                  ],
-                ),
-              ),
-            ],
-            navigation(PageKind.settings.index),
-            if (collapsed) ...[
-              IconButton(
-                tooltip: 'Клавиши · F1',
-                onPressed: () => showShortcutHelp(context),
-                icon: const Icon(Icons.keyboard_outlined, size: 20),
-              ),
-              Padding(
-                padding: const EdgeInsets.symmetric(vertical: 20),
-                child: Tooltip(
-                  message: repo.syncError ?? repo.syncStatus,
-                  child: Icon(
-                    repo.syncError == null
-                        ? Icons.cloud_done_outlined
-                        : Icons.cloud_off_outlined,
-                    size: 16,
-                    color: Palette.muted,
-                  ),
-                ),
-              ),
-            ] else
-              Padding(
-                padding: const EdgeInsets.all(14),
-                child: Column(
-                  children: [
-                    ListTile(
-                      dense: true,
-                      leading: const Icon(Icons.keyboard_outlined, size: 19),
-                      horizontalTitleGap: 10,
-                      minLeadingWidth: 20,
-                      contentPadding: const EdgeInsets.symmetric(
-                        horizontal: 12,
-                      ),
-                      title: const Text(
-                        'Клавиши',
-                        style: TextStyle(fontSize: 12),
-                      ),
-                      trailing: const Text(
-                        'F1',
-                        style: TextStyle(fontSize: 10, color: Palette.muted),
-                      ),
-                      onTap: () => showShortcutHelp(context),
-                    ),
-                    const SizedBox(height: 12),
-                    Tooltip(
-                      message:
-                          repo.syncError ?? 'Данные сохранены на устройстве',
+                  ] else
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 22, 8, 26),
                       child: Row(
                         children: [
-                          Icon(
-                            repo.syncError == null
-                                ? Icons.cloud_done_outlined
-                                : Icons.cloud_off_outlined,
-                            size: 14,
-                            color: Palette.muted,
-                          ),
-                          const SizedBox(width: 7),
-                          Expanded(
+                          logo,
+                          const SizedBox(width: 8),
+                          const Expanded(
                             child: Text(
-                              repo.syncStatus,
-                              style: const TextStyle(
-                                fontSize: 10,
-                                color: Palette.muted,
-                              ),
+                              'yggvion',
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                fontSize: 21,
+                                fontWeight: FontWeight.w600,
+                                letterSpacing: -.9,
+                              ),
                             ),
                           ),
                         ],
                       ),
                     ),
+                  for (var i = 0; i < 4; i++) navigation(i),
+                  if (collapsed)
+                    const Spacer()
+                  else ...[
+                    const SizedBox(height: 30),
+                    const Padding(
+                      padding: EdgeInsets.symmetric(horizontal: 26),
+                      child: Text(
+                        'ПРОЕКТЫ',
+                        style: TextStyle(
+                          fontSize: 10,
+                          letterSpacing: 1.7,
+                          color: Palette.muted,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    Expanded(
+                      child: ListView(
+                        padding: const EdgeInsets.symmetric(horizontal: 14),
+                        children: [
+                          for (final p in repo.snapshot.projects)
+                            ListTile(
+                              dense: true,
+                              leading: Icon(
+                                Icons.circle,
+                                size: 8,
+                                color: Color(p.color),
+                              ),
+                              title: Text(
+                                p.title,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(fontSize: 12),
+                              ),
+                              selected: projectId == p.id,
+                              onTap: () => setState(
+                                () => projectId = projectId == p.id ? '' : p.id,
+                              ),
+                            ),
+                          if (repo.snapshot.projects.isEmpty)
+                            TextButton.icon(
+                              onPressed: () => go(PageKind.settings),
+                              icon: const Icon(Icons.add_rounded, size: 14),
+                              label: const Text(
+                                'Добавить проект',
+                                style: TextStyle(fontSize: 12),
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
                   ],
+                  navigation(PageKind.settings.index),
+                  if (collapsed) ...[
+                    IconButton(
+                      tooltip: 'Клавиши · F1',
+                      onPressed: () => showShortcutHelp(context),
+                      icon: const Icon(Icons.keyboard_outlined, size: 20),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 20),
+                      child: Tooltip(
+                        message: repo.syncError ?? repo.syncStatus,
+                        child: Icon(
+                          repo.syncError == null
+                              ? Icons.cloud_done_outlined
+                              : Icons.cloud_off_outlined,
+                          size: 16,
+                          color: Palette.muted,
+                        ),
+                      ),
+                    ),
+                  ] else
+                    Padding(
+                      padding: const EdgeInsets.all(14),
+                      child: Column(
+                        children: [
+                          ListTile(
+                            dense: true,
+                            leading: const Icon(
+                              Icons.keyboard_outlined,
+                              size: 19,
+                            ),
+                            horizontalTitleGap: 10,
+                            minLeadingWidth: 20,
+                            contentPadding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                            ),
+                            title: const Text(
+                              'Клавиши',
+                              style: TextStyle(fontSize: 12),
+                            ),
+                            trailing: const Text(
+                              'F1',
+                              style: TextStyle(
+                                fontSize: 10,
+                                color: Palette.muted,
+                              ),
+                            ),
+                            onTap: () => showShortcutHelp(context),
+                          ),
+                          const SizedBox(height: 12),
+                          Tooltip(
+                            message:
+                                repo.syncError ??
+                                'Данные сохранены на устройстве',
+                            child: Row(
+                              children: [
+                                Icon(
+                                  repo.syncError == null
+                                      ? Icons.cloud_done_outlined
+                                      : Icons.cloud_off_outlined,
+                                  size: 14,
+                                  color: Palette.muted,
+                                ),
+                                const SizedBox(width: 7),
+                                Expanded(
+                                  child: Text(
+                                    repo.syncStatus,
+                                    style: const TextStyle(
+                                      fontSize: 10,
+                                      color: Palette.muted,
+                                    ),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ),
+          Positioned(
+            top: 0,
+            bottom: 0,
+            right: 0,
+            width: 10,
+            child: Semantics(
+              label: 'Ширина бокового меню',
+              value: collapsed ? 'Свёрнуто' : 'Развёрнуто',
+              increasedValue: 'Развёрнуто',
+              decreasedValue: 'Свёрнуто',
+              onIncrease: () =>
+                  guard(context, () => repo.setSidebarCollapsed(false)),
+              onDecrease: () =>
+                  guard(context, () => repo.setSidebarCollapsed(true)),
+              child: Tooltip(
+                message: 'Потяните границу, чтобы свернуть или развернуть меню',
+                child: MouseRegion(
+                  cursor: SystemMouseCursors.resizeLeftRight,
+                  onEnter: (_) => setState(() => sidebarEdgeHovered = true),
+                  onExit: (_) => setState(() => sidebarEdgeHovered = false),
+                  child: Listener(
+                    onPointerCancel: (_) => cancelSidebarResize(),
+                    child: GestureDetector(
+                      key: const ValueKey('sidebar-resize-handle'),
+                      dragStartBehavior: DragStartBehavior.down,
+                      behavior: HitTestBehavior.opaque,
+                      supportedDevices: const {
+                        PointerDeviceKind.mouse,
+                        PointerDeviceKind.touch,
+                        PointerDeviceKind.stylus,
+                      },
+                      onHorizontalDragStart: (details) => setState(() {
+                        sidebarDragOrigin = details.globalPosition.dx;
+                        sidebarDragWidth = width;
+                        sidebarWidth = width;
+                      }),
+                      onHorizontalDragUpdate: (details) => setState(() {
+                        sidebarWidth =
+                            (sidebarDragWidth! +
+                                    details.globalPosition.dx -
+                                    sidebarDragOrigin!)
+                                .clamp(collapsedWidth, expandedWidth);
+                      }),
+                      onHorizontalDragEnd: (_) => finish(),
+                      onHorizontalDragCancel: cancelSidebarResize,
+                      child: Align(
+                        alignment: Alignment.centerRight,
+                        child: AnimatedContainer(
+                          duration: const Duration(milliseconds: 120),
+                          width: 2,
+                          color: sidebarEdgeHovered || sidebarWidth != null
+                              ? Palette.blue.withValues(alpha: .65)
+                              : Colors.transparent,
+                        ),
+                      ),
+                    ),
+                  ),
                 ),
               ),
-          ],
-        ),
+            ),
+          ),
+        ],
       ),
     );
   }

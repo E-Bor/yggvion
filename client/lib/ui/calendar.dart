@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import 'package:timezone/timezone.dart' as tz;
@@ -103,30 +104,74 @@ class CalendarToolbar extends StatelessWidget {
                 onPressed: () => onDateChanged(now),
                 child: const Text('Сегодня'),
               ),
-              const SizedBox(width: 12),
+              const SizedBox(width: 8),
               if (showDate && !stacked)
                 Expanded(child: label)
               else
                 const Spacer(),
-              const SizedBox(width: 12),
-              DropdownButtonHideUnderline(
-                child: DropdownButton<CalendarView>(
-                  value: view,
-                  isDense: true,
-                  style: const TextStyle(
-                    color: Palette.muted,
-                    fontSize: 13,
-                    fontFamily: 'Inter',
-                  ),
+              const SizedBox(width: 8),
+              PopupMenuButton<CalendarView>(
+                key: const ValueKey('calendar-view-picker'),
+                tooltip: 'Вид календаря',
+                initialValue: view,
+                position: PopupMenuPosition.under,
+                offset: const Offset(0, 6),
+                borderRadius: BorderRadius.circular(8),
+                shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(12),
-                  items: CalendarView.values
-                      .map(
-                        (v) => DropdownMenuItem(value: v, child: Text(v.label)),
-                      )
-                      .toList(),
-                  onChanged: (value) {
-                    if (value != null) onViewChanged(value);
-                  },
+                ),
+                onSelected: onViewChanged,
+                itemBuilder: (_) => [
+                  for (final value in CalendarView.values)
+                    PopupMenuItem(
+                      value: value,
+                      child: Row(
+                        children: [
+                          SizedBox(
+                            width: 24,
+                            child: value == view
+                                ? const Icon(
+                                    Icons.check_rounded,
+                                    size: 17,
+                                    color: Palette.blue,
+                                  )
+                                : null,
+                          ),
+                          const SizedBox(width: 8),
+                          Text(
+                            value.label,
+                            style: const TextStyle(fontSize: 13),
+                          ),
+                        ],
+                      ),
+                    ),
+                ],
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 10,
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        view.label,
+                        style: const TextStyle(
+                          fontFamily: 'Inter',
+                          color: Palette.text,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w500,
+                          height: 1.2,
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                      const Icon(
+                        Icons.expand_more_rounded,
+                        size: 16,
+                        color: Palette.muted,
+                      ),
+                    ],
+                  ),
                 ),
               ),
             ],
@@ -157,10 +202,31 @@ class CalendarPane extends ConsumerStatefulWidget {
   ConsumerState<CalendarPane> createState() => _CalendarPaneState();
 }
 
-class _CalendarPaneState extends ConsumerState<CalendarPane> {
+enum CalendarDragKind { move, start, end }
+
+class _CalendarDrag {
+  _CalendarDrag(this.block, this.kind, this.origin)
+    : start = block.start,
+      end = block.end;
+  final TimeBlock block;
+  final CalendarDragKind kind;
+  final Offset origin;
+  DateTime start, end;
+}
+
+class _CalendarPaneState extends ConsumerState<CalendarPane>
+    with SingleTickerProviderStateMixin {
   late DateTime date;
   final scroll = ScrollController();
   final horizontal = ScrollController();
+  final viewportKey = GlobalKey();
+  late final Ticker edgeTicker;
+  Duration? lastScrollTick;
+  Offset? pointer;
+  _CalendarDrag? drag;
+  late DateTime interactionFirst;
+  double interactionWidth = 0;
+  int interactionCount = 0;
   DateTime? selectionStart, selectionEnd, selectionAnchor;
   String? error;
   int expansion = 0;
@@ -189,6 +255,7 @@ class _CalendarPaneState extends ConsumerState<CalendarPane> {
   @override
   void initState() {
     super.initState();
+    edgeTicker = createTicker(scrollAtEdge);
     date = _midnight(widget.initialDate ?? _clock);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (scroll.hasClients) {
@@ -235,6 +302,7 @@ class _CalendarPaneState extends ConsumerState<CalendarPane> {
 
   @override
   void dispose() {
+    edgeTicker.dispose();
     scroll.dispose();
     horizontal.dispose();
     super.dispose();
@@ -252,6 +320,197 @@ class _CalendarPaneState extends ConsumerState<CalendarPane> {
       first.day + column,
       0,
       minutes.clamp(0, 1435),
+    );
+  }
+
+  Offset contentPosition(Offset global) {
+    final viewport =
+        viewportKey.currentContext!.findRenderObject()! as RenderBox;
+    return viewport.globalToLocal(global) + Offset(0, scroll.offset);
+  }
+
+  void beginInteraction(
+    Offset global,
+    double width,
+    int count,
+    DateTime first,
+  ) {
+    pointer = global;
+    interactionWidth = width;
+    interactionCount = count;
+    interactionFirst = first;
+  }
+
+  void beginDrag(
+    TimeBlock block,
+    CalendarDragKind kind,
+    Offset global,
+    double width,
+    int count,
+    DateTime first,
+  ) {
+    beginInteraction(global, width, count, first);
+    setState(() => drag = _CalendarDrag(block, kind, contentPosition(global)));
+  }
+
+  DateTime shift(DateTime value, int days, int minutes) {
+    final local = _display(value);
+    return tz.TZDateTime(
+      _zone,
+      local.year,
+      local.month,
+      local.day + days,
+      local.hour,
+      local.minute + minutes,
+      local.second,
+    );
+  }
+
+  void updateInteraction(Offset global) {
+    if (drag == null && selectionAnchor == null) return;
+    pointer = global;
+    updatePreview();
+    updateEdgeScroll();
+  }
+
+  void updatePreview() {
+    final point = contentPosition(pointer!);
+    final active = drag;
+    if (active != null) {
+      int column(double x) => ((x - gutter) / interactionWidth).floor().clamp(
+        0,
+        interactionCount - 1,
+      );
+      final days = active.kind == CalendarDragKind.move
+          ? ((point.dx - active.origin.dx) / interactionWidth).round()
+          : column(point.dx) - column(active.origin.dx);
+      final minutes =
+          ((point.dy - active.origin.dy) / hourHeight * 60 / 5).round() * 5;
+      var start = active.block.start, end = active.block.end;
+      switch (active.kind) {
+        case CalendarDragKind.move:
+          start = shift(start, days, minutes);
+          end = start.add(active.block.duration);
+        case CalendarDragKind.start:
+          start = shift(start, days, minutes);
+          final latest = end.subtract(const Duration(minutes: 5));
+          if (start.isAfter(latest)) start = latest;
+        case CalendarDragKind.end:
+          end = shift(end, days, minutes);
+          final earliest = start.add(const Duration(minutes: 5));
+          if (end.isBefore(earliest)) end = earliest;
+      }
+      if (start != active.start || end != active.end) {
+        setState(() {
+          active.start = start;
+          active.end = end;
+        });
+      }
+    } else if (selectionAnchor != null) {
+      final next = at(
+        point,
+        interactionWidth,
+        interactionCount,
+        interactionFirst,
+      );
+      final anchor = selectionAnchor!;
+      final start = next.isBefore(anchor) ? next : anchor;
+      final end = next.isAfter(anchor)
+          ? next
+          : anchor.add(const Duration(minutes: 5));
+      if (start != selectionStart || end != selectionEnd) {
+        setState(() {
+          selectionStart = start;
+          selectionEnd = end;
+        });
+      }
+    }
+  }
+
+  double edgeVelocity() {
+    if (pointer == null ||
+        !scroll.hasClients ||
+        viewportKey.currentContext == null) {
+      return 0;
+    }
+    final viewport =
+        viewportKey.currentContext!.findRenderObject()! as RenderBox;
+    final local = viewport.globalToLocal(pointer!);
+    final zone = viewport.size.height * .2;
+    if (zone <= 0 || local.dx < 0 || local.dx > viewport.size.width) return 0;
+    final pressure = local.dy < zone
+        ? -(1 - local.dy / zone).clamp(0.0, 1.0)
+        : local.dy > viewport.size.height - zone
+        ? ((local.dy - (viewport.size.height - zone)) / zone).clamp(0.0, 1.0)
+        : 0.0;
+    if (pressure < 0 && scroll.offset <= scroll.position.minScrollExtent ||
+        pressure > 0 && scroll.offset >= scroll.position.maxScrollExtent) {
+      return 0;
+    }
+    return pressure * 600;
+  }
+
+  void updateEdgeScroll() {
+    if (edgeVelocity() == 0) {
+      edgeTicker.stop();
+      lastScrollTick = null;
+    } else if (!edgeTicker.isActive) {
+      lastScrollTick = null;
+      edgeTicker.start();
+    }
+  }
+
+  void scrollAtEdge(Duration elapsed) {
+    final seconds = lastScrollTick == null
+        ? 0.0
+        : ((elapsed - lastScrollTick!).inMicroseconds /
+                  Duration.microsecondsPerSecond)
+              .clamp(0.0, .05);
+    lastScrollTick = elapsed;
+    final velocity = edgeVelocity();
+    if (velocity == 0) {
+      updateEdgeScroll();
+      return;
+    }
+    scroll.jumpTo(
+      (scroll.offset + velocity * seconds).clamp(
+        scroll.position.minScrollExtent,
+        scroll.position.maxScrollExtent,
+      ),
+    );
+    updatePreview();
+    updateEdgeScroll();
+  }
+
+  void cancelInteraction() {
+    edgeTicker.stop();
+    lastScrollTick = null;
+    setState(() {
+      pointer = null;
+      drag = null;
+      selectionStart = null;
+      selectionEnd = null;
+      selectionAnchor = null;
+    });
+  }
+
+  void finishDrag() {
+    final active = drag;
+    cancelInteraction();
+    if (active == null ||
+        (active.start == active.block.start &&
+            active.end == active.block.end)) {
+      return;
+    }
+    guard(
+      context,
+      () => moveCalendarBlock(
+        context,
+        ref,
+        active.block,
+        active.start,
+        active.end,
+      ),
     );
   }
 
@@ -355,292 +614,216 @@ class _CalendarPaneState extends ConsumerState<CalendarPane> {
                                 ),
                                 const Divider(),
                                 Expanded(
-                                  child: Scrollbar(
-                                    controller: scroll,
-                                    child: SingleChildScrollView(
+                                  child: SizedBox(
+                                    key: viewportKey,
+                                    child: Scrollbar(
                                       controller: scroll,
-                                      child: SizedBox(
-                                        height: 24 * hourHeight,
-                                        width: fullWidth,
-                                        child: CalendarGestureSurface(
-                                          key: const ValueKey(
-                                            'calendar-grid-gestures',
-                                          ),
-                                          onTap: (position) {
-                                            if (position.dx < gutter) {
-                                              return;
-                                            }
-                                            final start = at(
-                                              position,
-                                              width,
-                                              count,
-                                              first,
-                                            );
-                                            place(
-                                              start,
-                                              start.add(
-                                                Duration(
-                                                  minutes: repo
-                                                      .snapshot
-                                                      .settings
-                                                      .defaultMinutes,
+                                      child: SingleChildScrollView(
+                                        key: const ValueKey('calendar-scroll'),
+                                        controller: scroll,
+                                        child: SizedBox(
+                                          height: 24 * hourHeight,
+                                          width: fullWidth,
+                                          child: CalendarGestureSurface(
+                                            key: const ValueKey(
+                                              'calendar-grid-gestures',
+                                            ),
+                                            onTap: (global) {
+                                              final position = contentPosition(
+                                                global,
+                                              );
+                                              if (position.dx < gutter) {
+                                                return;
+                                              }
+                                              final start = at(
+                                                position,
+                                                width,
+                                                count,
+                                                first,
+                                              );
+                                              place(
+                                                start,
+                                                start.add(
+                                                  Duration(
+                                                    minutes: repo
+                                                        .snapshot
+                                                        .settings
+                                                        .defaultMinutes,
+                                                  ),
                                                 ),
-                                              ),
-                                            );
-                                          },
-                                          onStart: (position) {
-                                            if (position.dx < gutter) {
-                                              return;
-                                            }
-                                            setState(() {
-                                              selectionStart = at(
-                                                position,
+                                              );
+                                            },
+                                            onStart: (global) {
+                                              final position = contentPosition(
+                                                global,
+                                              );
+                                              if (position.dx < gutter) return;
+                                              beginInteraction(
+                                                global,
                                                 width,
                                                 count,
                                                 first,
                                               );
-                                              selectionAnchor = selectionStart;
-                                              selectionEnd = selectionStart!
-                                                  .add(
-                                                    Duration(
-                                                      minutes: repo
-                                                          .snapshot
-                                                          .settings
-                                                          .defaultMinutes,
-                                                    ),
-                                                  );
-                                            });
-                                          },
-                                          onUpdate: (position) {
-                                            if (selectionStart == null) return;
-                                            setState(() {
-                                              final end = at(
-                                                position,
-                                                width,
-                                                count,
-                                                first,
-                                              );
-                                              final anchor = selectionAnchor!;
-                                              selectionStart =
-                                                  end.isBefore(anchor)
-                                                  ? end
-                                                  : anchor;
-                                              selectionEnd = end.isAfter(anchor)
-                                                  ? end
-                                                  : anchor.add(
-                                                      const Duration(
-                                                        minutes: 5,
+                                              setState(() {
+                                                selectionAnchor = at(
+                                                  position,
+                                                  width,
+                                                  count,
+                                                  first,
+                                                );
+                                                selectionStart =
+                                                    selectionAnchor;
+                                                selectionEnd = selectionStart!
+                                                    .add(
+                                                      Duration(
+                                                        minutes: repo
+                                                            .snapshot
+                                                            .settings
+                                                            .defaultMinutes,
                                                       ),
                                                     );
-                                            });
-                                            final y =
-                                                position.dy - scroll.offset;
-                                            if (y >
-                                                    constraints.maxHeight -
-                                                        100 &&
-                                                scroll.offset <
-                                                    scroll
-                                                        .position
-                                                        .maxScrollExtent) {
-                                              scroll.jumpTo(
-                                                math.min(
-                                                  scroll
-                                                      .position
-                                                      .maxScrollExtent,
-                                                  scroll.offset + 12,
-                                                ),
-                                              );
-                                            }
-                                            if (y < 40 && scroll.offset > 0) {
-                                              scroll.jumpTo(
-                                                math.max(0, scroll.offset - 12),
-                                              );
-                                            }
-                                          },
-                                          onCancel: () => setState(() {
-                                            selectionStart = null;
-                                            selectionEnd = null;
-                                          }),
-                                          onEnd: () {
-                                            final start = selectionStart,
-                                                end = selectionEnd;
-                                            setState(() {
-                                              selectionStart = null;
-                                              selectionEnd = null;
-                                            });
-                                            if (start != null && end != null) {
-                                              place(start, end);
-                                            }
-                                          },
-                                          child: Stack(
-                                            clipBehavior: Clip.hardEdge,
-                                            children: [
-                                              Positioned.fill(
-                                                child: CustomPaint(
-                                                  painter: _GridPainter(
-                                                    count: count,
-                                                    columnWidth: width,
-                                                    hourHeight: hourHeight,
-                                                    gutter: gutter,
-                                                  ),
-                                                ),
-                                              ),
-                                              for (var h = 0; h < 24; h++)
-                                                Positioned(
-                                                  left: 8,
-                                                  top: h * hourHeight + 5,
-                                                  child: Text(
-                                                    '${h.toString().padLeft(2, '0')}:00',
-                                                    style: const TextStyle(
-                                                      fontSize: 10,
-                                                      color: Palette.muted,
+                                              });
+                                            },
+                                            onUpdate: updateInteraction,
+                                            onCancel: () {
+                                              if (drag == null) {
+                                                cancelInteraction();
+                                              }
+                                            },
+                                            onEnd: () {
+                                              final start = selectionStart,
+                                                  end = selectionEnd;
+                                              cancelInteraction();
+                                              if (start != null &&
+                                                  end != null) {
+                                                place(start, end);
+                                              }
+                                            },
+                                            child: Stack(
+                                              clipBehavior: Clip.hardEdge,
+                                              children: [
+                                                Positioned.fill(
+                                                  child: CustomPaint(
+                                                    painter: _GridPainter(
+                                                      count: count,
+                                                      columnWidth: width,
+                                                      hourHeight: hourHeight,
+                                                      gutter: gutter,
                                                     ),
                                                   ),
                                                 ),
-                                              for (
-                                                var day = 0;
-                                                day < count;
-                                                day++
-                                              )
-                                                ..._dayBlocks(
-                                                  repo,
-                                                  blocks,
-                                                  _date(
-                                                    first.year,
-                                                    first.month,
-                                                    first.day + day,
+                                                for (var h = 0; h < 24; h++)
+                                                  Positioned(
+                                                    left: 8,
+                                                    top: h * hourHeight + 5,
+                                                    child: Text(
+                                                      '${h.toString().padLeft(2, '0')}:00',
+                                                      style: const TextStyle(
+                                                        fontSize: 10,
+                                                        color: Palette.muted,
+                                                      ),
+                                                    ),
                                                   ),
-                                                  gutter + width * day,
-                                                  width,
-                                                ),
-                                              for (
-                                                var day = 0;
-                                                day < count;
-                                                day++
-                                              )
-                                                ..._tracks(
-                                                  repo,
-                                                  _date(
-                                                    first.year,
-                                                    first.month,
-                                                    first.day + day,
-                                                  ),
-                                                  gutter + width * day,
-                                                ),
-                                              if (!_clock.isBefore(first) &&
-                                                  _clock.isBefore(
+                                                for (
+                                                  var day = 0;
+                                                  day < count;
+                                                  day++
+                                                )
+                                                  ..._dayBlocks(
+                                                    repo,
+                                                    blocks,
                                                     _date(
                                                       first.year,
                                                       first.month,
-                                                      first.day + count,
+                                                      first.day + day,
                                                     ),
-                                                  ))
-                                                Positioned(
-                                                  left:
-                                                      gutter +
-                                                      _dayIndex(_clock, first) *
-                                                          width,
-                                                  top:
-                                                      (_clock.hour +
-                                                          _clock.minute / 60) *
-                                                      hourHeight,
-                                                  right:
-                                                      fullWidth -
-                                                      gutter -
-                                                      (_dayIndex(
-                                                                _clock,
-                                                                first,
-                                                              ) +
-                                                              1) *
-                                                          width,
-                                                  child: IgnorePointer(
-                                                    child: Row(
-                                                      children: [
-                                                        Container(
-                                                          width: 6,
-                                                          height: 6,
-                                                          decoration:
-                                                              const BoxDecoration(
-                                                                color: Palette
-                                                                    .pink,
-                                                                shape: BoxShape
-                                                                    .circle,
-                                                              ),
-                                                        ),
-                                                        Expanded(
-                                                          child: Container(
-                                                            height: 1,
-                                                            color: Palette.pink
-                                                                .withValues(
-                                                                  alpha: .7,
+                                                    gutter + width * day,
+                                                    width,
+                                                    first,
+                                                    count,
+                                                  ),
+                                                for (
+                                                  var day = 0;
+                                                  day < count;
+                                                  day++
+                                                )
+                                                  ..._tracks(
+                                                    repo,
+                                                    _date(
+                                                      first.year,
+                                                      first.month,
+                                                      first.day + day,
+                                                    ),
+                                                    gutter + width * day,
+                                                  ),
+                                                if (!_clock.isBefore(first) &&
+                                                    _clock.isBefore(
+                                                      _date(
+                                                        first.year,
+                                                        first.month,
+                                                        first.day + count,
+                                                      ),
+                                                    ))
+                                                  Positioned(
+                                                    left:
+                                                        gutter +
+                                                        _dayIndex(
+                                                              _clock,
+                                                              first,
+                                                            ) *
+                                                            width,
+                                                    top:
+                                                        (_clock.hour +
+                                                            _clock.minute /
+                                                                60) *
+                                                        hourHeight,
+                                                    right:
+                                                        fullWidth -
+                                                        gutter -
+                                                        (_dayIndex(
+                                                                  _clock,
+                                                                  first,
+                                                                ) +
+                                                                1) *
+                                                            width,
+                                                    child: IgnorePointer(
+                                                      child: Row(
+                                                        children: [
+                                                          Container(
+                                                            width: 6,
+                                                            height: 6,
+                                                            decoration:
+                                                                const BoxDecoration(
+                                                                  color: Palette
+                                                                      .pink,
+                                                                  shape: BoxShape
+                                                                      .circle,
                                                                 ),
                                                           ),
-                                                        ),
-                                                      ],
-                                                    ),
-                                                  ),
-                                                ),
-                                              if (selectionStart != null &&
-                                                  selectionEnd != null)
-                                                Positioned(
-                                                  left:
-                                                      gutter +
-                                                      _dayIndex(
-                                                            selectionStart!,
-                                                            first,
-                                                          ) *
-                                                          width +
-                                                      12,
-                                                  top:
-                                                      (selectionStart!.hour +
-                                                          selectionStart!
-                                                                  .minute /
-                                                              60) *
-                                                      hourHeight,
-                                                  width: width - 18,
-                                                  height: math.max(
-                                                    12,
-                                                    selectionEnd!
-                                                            .difference(
-                                                              selectionStart!,
-                                                            )
-                                                            .inMinutes /
-                                                        60 *
-                                                        hourHeight,
-                                                  ),
-                                                  child: IgnorePointer(
-                                                    child: Container(
-                                                      decoration: BoxDecoration(
-                                                        color: Palette.blue
-                                                            .withValues(
-                                                              alpha: .18,
+                                                          Expanded(
+                                                            child: Container(
+                                                              height: 1,
+                                                              color: Palette
+                                                                  .pink
+                                                                  .withValues(
+                                                                    alpha: .7,
+                                                                  ),
                                                             ),
-                                                        border: Border.all(
-                                                          color: Palette.blue,
-                                                        ),
-                                                        borderRadius:
-                                                            BorderRadius.circular(
-                                                              8,
-                                                            ),
-                                                      ),
-                                                      padding:
-                                                          const EdgeInsets.all(
-                                                            8,
                                                           ),
-                                                      child: Text(
-                                                        widget
-                                                                .selectedTask
-                                                                ?.title ??
-                                                            'Новая задача',
-                                                        style: const TextStyle(
-                                                          fontSize: 12,
-                                                          color: Palette.blue,
-                                                        ),
+                                                        ],
                                                       ),
                                                     ),
                                                   ),
-                                                ),
-                                            ],
+                                                if (drag != null ||
+                                                    selectionStart != null)
+                                                  ...previewSegments(
+                                                    repo,
+                                                    first,
+                                                    width,
+                                                    count,
+                                                  ),
+                                              ],
+                                            ),
                                           ),
                                         ),
                                       ),
@@ -698,6 +881,8 @@ class _CalendarPaneState extends ConsumerState<CalendarPane> {
     DateTime day,
     double left,
     double width,
+    DateTime first,
+    int count,
   ) {
     final end = _date(day.year, day.month, day.day + 1);
     final list =
@@ -731,14 +916,135 @@ class _CalendarPaneState extends ConsumerState<CalendarPane> {
         top: top,
         width: laneWidth - 3,
         height: height,
-        child: CalendarBlock(
-          block: b,
-          day: day,
-          hourHeight: hourHeight,
-          columnWidth: width,
+        child: Opacity(
+          // This segment owns the active gesture even when its preview moves
+          // off screen or continues into another day.
+          opacity: drag?.block.id == b.id ? 0 : 1,
+          child: CalendarBlock(
+            block: b,
+            day: day,
+            onDragStart: (kind, global) =>
+                beginDrag(b, kind, global, width, count, first),
+            onDragUpdate: updateInteraction,
+            onDragEnd: finishDrag,
+            onDragCancel: cancelInteraction,
+          ),
         ),
       );
     }).toList();
+  }
+
+  List<Widget> previewSegments(
+    Repository repo,
+    DateTime first,
+    double width,
+    int count,
+  ) {
+    final start = drag?.start ?? selectionStart!;
+    final end = drag?.end ?? selectionEnd!;
+    final task = drag == null
+        ? widget.selectedTask
+        : repo.snapshot.task(drag!.block.taskId);
+    final color = task == null
+        ? Palette.blue
+        : Color(repo.snapshot.taskColor(task));
+    return [
+      for (var index = 0; index < count; index++)
+        if (start.isBefore(
+              _date(first.year, first.month, first.day + index + 1),
+            ) &&
+            end.isAfter(_date(first.year, first.month, first.day + index)))
+          previewSegment(
+            start,
+            end,
+            _date(first.year, first.month, first.day + index),
+            gutter + width * index + 12,
+            width - 21,
+            task?.title ?? 'Новая задача',
+            color,
+          ),
+    ];
+  }
+
+  Widget previewSegment(
+    DateTime start,
+    DateTime end,
+    DateTime day,
+    double left,
+    double width,
+    String title,
+    Color color,
+  ) {
+    final dayEnd = _date(day.year, day.month, day.day + 1);
+    final begin = start.isBefore(day) ? day : _display(start);
+    final finish = end.isAfter(dayEnd) ? dayEnd : _display(end);
+    final height = math.max(
+      22.0,
+      finish.difference(begin).inMinutes / 60 * hourHeight - 3,
+    );
+    return Positioned(
+      key: ValueKey('calendar-preview-${dayKey(day)}'),
+      left: left,
+      top: (begin.hour + begin.minute / 60) * hourHeight,
+      width: width,
+      height: height,
+      child: IgnorePointer(
+        child: TweenAnimationBuilder<double>(
+          tween: Tween(begin: 0, end: 1),
+          duration: MediaQuery.disableAnimationsOf(context)
+              ? Duration.zero
+              : const Duration(milliseconds: 160),
+          curve: Curves.easeOutCubic,
+          builder: (_, value, child) => Opacity(
+            opacity: value,
+            child: Transform.translate(
+              offset: Offset(0, -8 * (1 - value)),
+              child: child,
+            ),
+          ),
+          child: Container(
+            decoration: BoxDecoration(
+              color: Palette.taskSurface(color, selected: true),
+              border: Border.all(color: color, width: 1.5),
+              borderRadius: BorderRadius.circular(8),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: .2),
+                  blurRadius: 10,
+                  offset: const Offset(0, 3),
+                ),
+              ],
+            ),
+            padding: EdgeInsets.symmetric(
+              horizontal: 9,
+              vertical: height < 40 ? 0 : 7,
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: color,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                if (height > 55)
+                  Text(
+                    '${DateFormat('HH:mm').format(begin)} — ${finish == dayEnd ? '24:00' : DateFormat('HH:mm').format(finish)}',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(color: color, fontSize: 10),
+                  ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
   }
 
   List<Widget> _tracks(Repository repo, DateTime day, double left) {
@@ -922,27 +1228,34 @@ class CalendarGestureSurface extends StatelessWidget {
   final VoidCallback onEnd, onCancel;
   final Widget child;
   @override
-  Widget build(BuildContext context) => GestureDetector(
-    supportedDevices: const {PointerDeviceKind.touch, PointerDeviceKind.stylus},
-    behavior: HitTestBehavior.opaque,
-    onLongPressStart: (d) {
-      HapticFeedback.mediumImpact();
-      onStart(d.localPosition);
-    },
-    onLongPressMoveUpdate: (d) => onUpdate(d.localPosition),
-    onLongPressEnd: (_) => onEnd(),
-    onLongPressCancel: onCancel,
+  Widget build(BuildContext context) => Listener(
+    onPointerCancel: (_) => onCancel(),
     child: GestureDetector(
-      // Two-finger pan/zoom belongs to the scroll view. A pressed trackpad
-      // click is delivered as a mouse pointer and can still select a range.
-      supportedDevices: const {PointerDeviceKind.mouse},
+      supportedDevices: const {
+        PointerDeviceKind.touch,
+        PointerDeviceKind.stylus,
+      },
       behavior: HitTestBehavior.opaque,
-      onTapUp: (d) => onTap(d.localPosition),
-      onPanStart: (d) => onStart(d.localPosition),
-      onPanUpdate: (d) => onUpdate(d.localPosition),
-      onPanEnd: (_) => onEnd(),
-      onPanCancel: onCancel,
-      child: child,
+      onLongPressStart: (d) {
+        HapticFeedback.mediumImpact();
+        onStart(d.globalPosition);
+      },
+      onLongPressMoveUpdate: (d) => onUpdate(d.globalPosition),
+      onLongPressEnd: (_) => onEnd(),
+      onLongPressCancel: onCancel,
+      child: GestureDetector(
+        // Two-finger pan/zoom belongs to the scroll view. A pressed trackpad
+        // click is delivered as a mouse pointer and can still select a range.
+        supportedDevices: const {PointerDeviceKind.mouse},
+        behavior: HitTestBehavior.opaque,
+        onTapUp: (d) => onTap(d.globalPosition),
+        dragStartBehavior: DragStartBehavior.down,
+        onPanStart: (d) => onStart(d.globalPosition),
+        onPanUpdate: (d) => onUpdate(d.globalPosition),
+        onPanEnd: (_) => onEnd(),
+        onPanCancel: onCancel,
+        child: child,
+      ),
     ),
   );
 }
@@ -1027,82 +1340,44 @@ class CalendarBlock extends ConsumerStatefulWidget {
     super.key,
     required this.block,
     required this.day,
-    required this.hourHeight,
-    required this.columnWidth,
+    required this.onDragStart,
+    required this.onDragUpdate,
+    required this.onDragEnd,
+    required this.onDragCancel,
   });
   final TimeBlock block;
   final DateTime day;
-  final double hourHeight, columnWidth;
+  final void Function(CalendarDragKind, Offset) onDragStart;
+  final ValueChanged<Offset> onDragUpdate;
+  final VoidCallback onDragEnd, onDragCancel;
   @override
   ConsumerState<CalendarBlock> createState() => _CalendarBlockState();
 }
 
 class _CalendarBlockState extends ConsumerState<CalendarBlock> {
-  Offset movement = Offset.zero;
-  double startResize = 0, endResize = 0;
   bool editing = false;
+  String? gestureOwner;
   bool get mobile =>
       defaultTargetPlatform == TargetPlatform.iOS ||
       defaultTargetPlatform == TargetPlatform.android;
-  int minutes(double pixels) =>
-      (pixels / widget.hourHeight * 60 / 5).round() * 5;
-  DateTime shift(DateTime value, int days, int mins) {
-    final location = tz.getLocation(
-      ref.read(appProvider).snapshot.settings.timezone,
-    );
-    final local = tz.TZDateTime.from(value, location);
-    return tz.TZDateTime(
-      location,
-      local.year,
-      local.month,
-      local.day + days,
-      local.hour,
-      local.minute + mins,
-      local.second,
-    );
+
+  void beginDrag(String owner, CalendarDragKind kind, Offset position) {
+    gestureOwner = owner;
+    widget.onDragStart(kind, position);
   }
 
-  void reset() => setState(() {
-    movement = Offset.zero;
-    startResize = 0;
-    endResize = 0;
-  });
-  void commitMove() {
-    final days = (movement.dx / widget.columnWidth).round(),
-        mins = minutes(movement.dy);
-    reset();
-    if (days == 0 && mins == 0) return;
-    final start = shift(widget.block.start, days, mins);
-    guard(
-      context,
-      () => moveCalendarBlock(
-        context,
-        ref,
-        widget.block,
-        start,
-        start.add(widget.block.duration),
-      ),
-    );
+  void updateDrag(String owner, Offset position) {
+    if (gestureOwner == owner) widget.onDragUpdate(position);
   }
 
-  void commitResize(bool beginning) {
-    final delta = minutes(beginning ? startResize : endResize);
-    reset();
-    if (delta == 0) return;
-    guard(
-      context,
-      () => moveCalendarBlock(
-        context,
-        ref,
-        widget.block,
-        beginning
-            ? widget.block.start.add(Duration(minutes: delta))
-            : widget.block.start,
-        beginning
-            ? widget.block.end
-            : widget.block.end.add(Duration(minutes: delta)),
-      ),
-    );
+  void endDrag(String owner, {bool cancel = false}) {
+    if (gestureOwner != owner) return;
+    gestureOwner = null;
+    if (cancel) {
+      widget.onDragCancel();
+    } else {
+      widget.onDragEnd();
+    }
   }
 
   Future<void> menu(Offset position) =>
@@ -1116,30 +1391,56 @@ class _CalendarBlockState extends ConsumerState<CalendarBlock> {
     height: mobile ? 20 : 9,
     child: MouseRegion(
       cursor: SystemMouseCursors.resizeUpDown,
-      child: GestureDetector(
+      child: RawGestureDetector(
         key: ValueKey(
           'block-resize-${beginning ? 'start' : 'end'}-${widget.block.id}',
         ),
-        supportedDevices: const {
-          PointerDeviceKind.mouse,
-          PointerDeviceKind.touch,
-          PointerDeviceKind.stylus,
-        },
         behavior: HitTestBehavior.opaque,
-        onVerticalDragStart: (_) {
-          if (mobile) HapticFeedback.selectionClick();
+        gestures: {
+          PanGestureRecognizer:
+              GestureRecognizerFactoryWithHandlers<PanGestureRecognizer>(
+                () => PanGestureRecognizer(
+                  supportedDevices: const {
+                    PointerDeviceKind.mouse,
+                    PointerDeviceKind.touch,
+                    PointerDeviceKind.stylus,
+                  },
+                ),
+                (recognizer) => recognizer
+                  // Keep the previous vertical handle's touch threshold while also
+                  // following the pointer horizontally into a neighbouring day.
+                  ..gestureSettings = DeviceGestureSettings(
+                    touchSlop:
+                        (MediaQuery.gestureSettingsOf(context).touchSlop ??
+                            kTouchSlop) /
+                        2,
+                  )
+                  ..dragStartBehavior = DragStartBehavior.down
+                  ..onStart = (details) {
+                    if (mobile) HapticFeedback.selectionClick();
+                    beginDrag(
+                      beginning ? 'resize-start' : 'resize-end',
+                      beginning ? CalendarDragKind.start : CalendarDragKind.end,
+                      details.globalPosition,
+                    );
+                  }
+                  ..onUpdate = (details) {
+                    updateDrag(
+                      beginning ? 'resize-start' : 'resize-end',
+                      details.globalPosition,
+                    );
+                  }
+                  ..onEnd = (_) {
+                    endDrag(beginning ? 'resize-start' : 'resize-end');
+                  }
+                  ..onCancel = () {
+                    endDrag(
+                      beginning ? 'resize-start' : 'resize-end',
+                      cancel: true,
+                    );
+                  },
+              ),
         },
-        onVerticalDragUpdate: (d) => setState(() {
-          final maxDelta =
-              (widget.block.duration.inMinutes - 5) / 60 * widget.hourHeight;
-          if (beginning) {
-            startResize = math.min(maxDelta, startResize + d.delta.dy);
-          } else {
-            endResize = math.max(-maxDelta, endResize + d.delta.dy);
-          }
-        }),
-        onVerticalDragEnd: (_) => commitResize(beginning),
-        onVerticalDragCancel: reset,
         child: !mobile || !editing
             ? const SizedBox.expand()
             : Align(
@@ -1176,213 +1477,220 @@ class _CalendarBlockState extends ConsumerState<CalendarBlock> {
       (s) => s.taskId == task.id && s.running,
     );
     final canPan = !mobile || editing;
-    return LayoutBuilder(
-      builder: (context, bounds) {
-        final startPixels = minutes(startResize) / 60 * widget.hourHeight;
-        final endPixels = minutes(endResize) / 60 * widget.hourHeight;
-        final height = math.max(
-          22.0,
-          bounds.maxHeight + endPixels - startPixels,
-        );
-        return TapRegion(
-          onTapOutside: (_) {
-            if (editing && mounted) setState(() => editing = false);
-          },
-          child: Transform.translate(
-            offset: movement + Offset(0, startPixels),
-            child: OverflowBox(
-              alignment: Alignment.topCenter,
-              minHeight: height,
-              maxHeight: height,
-              child: GestureDetector(
-                key: ValueKey('calendar-block-${widget.block.id}'),
-                supportedDevices: const {
-                  PointerDeviceKind.mouse,
-                  PointerDeviceKind.touch,
-                  PointerDeviceKind.stylus,
-                },
-                onTap: () =>
-                    openTask(context, task: task, blockId: widget.block.id),
-                onSecondaryTapDown: (d) => menu(d.globalPosition),
-                onLongPressStart: (_) {
-                  HapticFeedback.mediumImpact();
-                  setState(() => editing = true);
-                },
-                onLongPressMoveUpdate: (d) =>
-                    setState(() => movement = d.offsetFromOrigin),
-                onLongPressEnd: (_) => commitMove(),
-                onLongPressCancel: reset,
-                onPanUpdate: !canPan
-                    ? null
-                    : (d) => setState(() => movement += d.delta),
-                onPanEnd: !canPan ? null : (_) => commitMove(),
-                onPanCancel: !canPan ? null : reset,
-                child: Container(
-                  height: height,
-                  decoration: BoxDecoration(
-                    color: Palette.taskSurface(
-                      color,
-                      subdued: task.done || widget.block.historical,
-                      selected: editing,
+    return Listener(
+      onPointerCancel: (_) {
+        if (gestureOwner != null) {
+          gestureOwner = null;
+          widget.onDragCancel();
+        }
+      },
+      child: LayoutBuilder(
+        builder: (context, bounds) {
+          final height = bounds.maxHeight;
+          final zone = tz.getLocation(repo.snapshot.settings.timezone);
+          final dayEnd = tz.TZDateTime(
+            zone,
+            widget.day.year,
+            widget.day.month,
+            widget.day.day + 1,
+          );
+          return TapRegion(
+            onTapOutside: (_) {
+              if (editing && mounted) setState(() => editing = false);
+            },
+            child: GestureDetector(
+              key: ValueKey('calendar-block-${widget.block.id}'),
+              supportedDevices: const {
+                PointerDeviceKind.mouse,
+                PointerDeviceKind.touch,
+                PointerDeviceKind.stylus,
+              },
+              onTap: () =>
+                  openTask(context, task: task, blockId: widget.block.id),
+              onSecondaryTapDown: (d) => menu(d.globalPosition),
+              dragStartBehavior: DragStartBehavior.down,
+              onLongPressStart: (details) {
+                HapticFeedback.mediumImpact();
+                setState(() => editing = true);
+                beginDrag(
+                  'hold',
+                  CalendarDragKind.move,
+                  details.globalPosition,
+                );
+              },
+              onLongPressMoveUpdate: (details) =>
+                  updateDrag('hold', details.globalPosition),
+              onLongPressEnd: (_) => endDrag('hold'),
+              onLongPressCancel: () => endDrag('hold', cancel: true),
+              onPanStart: !canPan
+                  ? null
+                  : (details) => beginDrag(
+                      'pan',
+                      CalendarDragKind.move,
+                      details.globalPosition,
                     ),
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(
-                      color: editing ? color : color.withValues(alpha: .28),
-                      width: editing ? 1.5 : .7,
-                    ),
-                    boxShadow: editing
-                        ? [
-                            BoxShadow(
-                              color: Colors.black.withValues(alpha: .25),
-                              blurRadius: 12,
-                              offset: const Offset(0, 4),
-                            ),
-                          ]
-                        : null,
+              onPanUpdate: !canPan
+                  ? null
+                  : (details) => updateDrag('pan', details.globalPosition),
+              onPanEnd: !canPan ? null : (_) => endDrag('pan'),
+              onPanCancel: !canPan ? null : () => endDrag('pan', cancel: true),
+              child: Container(
+                height: height,
+                decoration: BoxDecoration(
+                  color: Palette.taskSurface(
+                    color,
+                    subdued: task.done || widget.block.historical,
+                    selected: editing,
                   ),
-                  child: LayoutBuilder(
-                    builder: (context, c) {
-                      final small = c.maxHeight < 55;
-                      final zone = tz.getLocation(
-                        repo.snapshot.settings.timezone,
-                      );
-                      final begin = widget.block.start.add(
-                        Duration(minutes: minutes(startResize)),
-                      );
-                      final finish = widget.block.end.add(
-                        Duration(minutes: minutes(endResize)),
-                      );
-                      return Stack(
-                        children: [
-                          Positioned(
-                            left: 0,
-                            top: 6,
-                            bottom: 6,
-                            width: 3,
-                            child: DecoratedBox(
-                              decoration: BoxDecoration(
-                                color: running
-                                    ? Palette.pink
-                                    : color.withValues(alpha: .8),
-                                borderRadius: BorderRadius.circular(3),
-                              ),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(
+                    color: editing ? color : color.withValues(alpha: .28),
+                    width: editing ? 1.5 : .7,
+                  ),
+                  boxShadow: editing
+                      ? [
+                          BoxShadow(
+                            color: Colors.black.withValues(alpha: .25),
+                            blurRadius: 12,
+                            offset: const Offset(0, 4),
+                          ),
+                        ]
+                      : null,
+                ),
+                child: LayoutBuilder(
+                  builder: (context, c) {
+                    final small = c.maxHeight < 55;
+                    final zone = tz.getLocation(
+                      repo.snapshot.settings.timezone,
+                    );
+                    final begin = widget.block.start;
+                    final finish = widget.block.end;
+                    return Stack(
+                      children: [
+                        Positioned(
+                          left: 0,
+                          top: 6,
+                          bottom: 6,
+                          width: 3,
+                          child: DecoratedBox(
+                            decoration: BoxDecoration(
+                              color: running
+                                  ? Palette.pink
+                                  : color.withValues(alpha: .8),
+                              borderRadius: BorderRadius.circular(3),
                             ),
                           ),
-                          Padding(
-                            padding: EdgeInsets.fromLTRB(
-                              9,
-                              small ? 0 : 7,
-                              4,
-                              0,
-                            ),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Row(
-                                  children: [
-                                    Expanded(
-                                      child: Text(
-                                        task.title,
-                                        maxLines: small ? 1 : 2,
-                                        overflow: TextOverflow.ellipsis,
-                                        style: TextStyle(
-                                          fontSize: 12,
-                                          fontWeight: FontWeight.w600,
-                                          color: task.done
-                                              ? Palette.muted
-                                              : color,
-                                          decoration: task.done
-                                              ? TextDecoration.lineThrough
-                                              : null,
+                        ),
+                        Padding(
+                          padding: EdgeInsets.fromLTRB(9, small ? 0 : 7, 4, 0),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: Text(
+                                      task.title,
+                                      maxLines: small ? 1 : 2,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.w600,
+                                        color: task.done
+                                            ? Palette.muted
+                                            : color,
+                                        decoration: task.done
+                                            ? TextDecoration.lineThrough
+                                            : null,
+                                      ),
+                                    ),
+                                  ),
+                                  if (c.maxWidth > 100) ...[
+                                    SizedBox(
+                                      width: 25,
+                                      height: math.min(24, c.maxHeight),
+                                      child: IconButton(
+                                        padding: EdgeInsets.zero,
+                                        tooltip: task.done
+                                            ? 'Вернуть в работу'
+                                            : 'Завершить',
+                                        onPressed: () => guard(
+                                          context,
+                                          () => repo.status(
+                                            task,
+                                            task.done
+                                                ? TaskStatus.todo
+                                                : TaskStatus.done,
+                                          ),
+                                        ),
+                                        icon: Icon(
+                                          task.done
+                                              ? Icons.check_circle_rounded
+                                              : Icons.circle_outlined,
+                                          size: 16,
+                                          color: color,
                                         ),
                                       ),
                                     ),
-                                    if (c.maxWidth > 100) ...[
+                                    if (!task.done)
                                       SizedBox(
                                         width: 25,
                                         height: math.min(24, c.maxHeight),
                                         child: IconButton(
+                                          key: ValueKey(
+                                            'calendar-timer-${widget.block.id}',
+                                          ),
                                           padding: EdgeInsets.zero,
-                                          tooltip: task.done
-                                              ? 'Вернуть в работу'
-                                              : 'Завершить',
+                                          tooltip: running
+                                              ? 'Остановить'
+                                              : 'Начать работу',
                                           onPressed: () => guard(
                                             context,
-                                            () => repo.status(
-                                              task,
-                                              task.done
-                                                  ? TaskStatus.todo
-                                                  : TaskStatus.done,
-                                            ),
+                                            () =>
+                                                repo.toggleCalendarTimer(task),
                                           ),
                                           icon: Icon(
-                                            task.done
-                                                ? Icons.check_circle_rounded
-                                                : Icons.circle_outlined,
-                                            size: 16,
-                                            color: color,
+                                            running
+                                                ? Icons.pause_rounded
+                                                : Icons.play_arrow_rounded,
+                                            size: 19,
+                                            color: running
+                                                ? Palette.pink
+                                                : color,
                                           ),
                                         ),
                                       ),
-                                      if (!task.done)
-                                        SizedBox(
-                                          width: 25,
-                                          height: math.min(24, c.maxHeight),
-                                          child: IconButton(
-                                            key: ValueKey(
-                                              'calendar-timer-${widget.block.id}',
-                                            ),
-                                            padding: EdgeInsets.zero,
-                                            tooltip: running
-                                                ? 'Остановить'
-                                                : 'Начать работу',
-                                            onPressed: () => guard(
-                                              context,
-                                              () => repo.toggleCalendarTimer(
-                                                task,
-                                              ),
-                                            ),
-                                            icon: Icon(
-                                              running
-                                                  ? Icons.pause_rounded
-                                                  : Icons.play_arrow_rounded,
-                                              size: 19,
-                                              color: running
-                                                  ? Palette.pink
-                                                  : color,
-                                            ),
-                                          ),
-                                        ),
-                                    ],
                                   ],
-                                ),
-                                if (!small && c.maxHeight > 75)
-                                  Text(
-                                    '${DateFormat('HH:mm').format(tz.TZDateTime.from(begin, zone))} — ${DateFormat('HH:mm').format(tz.TZDateTime.from(finish, zone))}',
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: TextStyle(
-                                      fontSize: 10,
-                                      color: color.withValues(alpha: .75),
-                                    ),
+                                ],
+                              ),
+                              if (!small && c.maxHeight > 75)
+                                Text(
+                                  '${DateFormat('HH:mm').format(tz.TZDateTime.from(begin, zone))} — ${DateFormat('HH:mm').format(tz.TZDateTime.from(finish, zone))}',
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                    fontSize: 10,
+                                    color: color.withValues(alpha: .75),
                                   ),
-                              ],
-                            ),
+                                ),
+                            ],
                           ),
-                          if (!mobile || editing) ...[
+                        ),
+                        if (!mobile || editing) ...[
+                          if (!widget.block.start.isBefore(widget.day))
                             handle(true, color),
+                          if (!widget.block.end.isAfter(dayEnd))
                             handle(false, color),
-                          ],
                         ],
-                      );
-                    },
-                  ),
+                      ],
+                    );
+                  },
                 ),
               ),
             ),
-          ),
-        );
-      },
+          );
+        },
+      ),
     );
   }
 }

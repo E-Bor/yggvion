@@ -85,7 +85,10 @@ void main() {
         matchesGoldenFile('goldens/workspace_${size.width.toInt()}.png'),
       );
       if (size.width >= 1000) {
-        await tester.tap(find.byKey(const ValueKey('sidebar-toggle')));
+        await tester.drag(
+          find.byKey(const ValueKey('sidebar-resize-handle')),
+          const Offset(-150, 0),
+        );
         await tester.runAsync(
           () => Future<void>.delayed(const Duration(milliseconds: 80)),
         );
@@ -95,10 +98,29 @@ void main() {
           find.byType(YggvionApp),
           matchesGoldenFile('goldens/workspace_collapsed.png'),
         );
-        await tester.tap(find.byKey(const ValueKey('sidebar-toggle')));
+        await tester.drag(
+          find.byKey(const ValueKey('sidebar-resize-handle')),
+          const Offset(150, 0),
+        );
         await tester.runAsync(
           () => Future<void>.delayed(const Duration(milliseconds: 80)),
         );
+        await tester.pumpAndSettle();
+      }
+      if (size.width >= 1000) {
+        await tester.tap(find.byKey(const ValueKey('calendar-view-picker')));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Неделя').last);
+        await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 80)),
+        );
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull);
+        await expectLater(
+          find.byType(YggvionApp),
+          matchesGoldenFile('goldens/workspace_week_1440.png'),
+        );
+        await tester.runAsync(() => repo.setView(CalendarView.day));
         await tester.pumpAndSettle();
       }
       await tester.tap(find.text('Спланировать неделю').first);

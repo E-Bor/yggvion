@@ -115,10 +115,10 @@ void main() {
     ) async {
       final repo = await workspace(tester, mobile: mobile);
       final dropdown = find.byWidgetPredicate(
-        (w) => w is DropdownButton<CalendarView>,
+        (w) => w is PopupMenuButton<CalendarView>,
       );
       expect(
-        tester.widget<DropdownButton<CalendarView>>(dropdown).value,
+        tester.widget<PopupMenuButton<CalendarView>>(dropdown).initialValue,
         CalendarView.day,
       );
       await tester.tap(find.text('Планировщик').last);
@@ -140,7 +140,7 @@ void main() {
       }
       await settle(tester);
       expect(
-        tester.widget<DropdownButton<CalendarView>>(dropdown).value,
+        tester.widget<PopupMenuButton<CalendarView>>(dropdown).initialValue,
         CalendarView.day,
       );
       await tester.runAsync(() => repo.initialize());
@@ -151,7 +151,7 @@ void main() {
         await settle(tester);
       }
       expect(
-        tester.widget<DropdownButton<CalendarView>>(dropdown).value,
+        tester.widget<PopupMenuButton<CalendarView>>(dropdown).initialValue,
         CalendarView.week,
       );
     });
@@ -415,7 +415,10 @@ void main() {
       );
       final grid = find.byKey(const ValueKey('calendar-grid-gestures'));
       final width = tester.getSize(grid).width;
-      await tester.tap(find.byKey(const ValueKey('sidebar-toggle')));
+      await tester.drag(
+        find.byKey(const ValueKey('sidebar-resize-handle')),
+        const Offset(-150, 0),
+      );
       await settle(tester);
       expect(repo.sidebarCollapsed, isTrue);
       expect(find.text('yggvion'), findsNothing);
@@ -437,16 +440,62 @@ void main() {
       await tester.tap(find.text('Сегодня'));
       await settle(tester);
       expect(find.text('19 октября 2026'), findsOneWidget);
-      await tester.tap(find.byKey(const ValueKey('sidebar-toggle')));
+      await tester.drag(
+        find.byKey(const ValueKey('sidebar-resize-handle')),
+        const Offset(150, 0),
+      );
       await settle(tester);
       expect(repo.sidebarCollapsed, isFalse);
       expect(find.text('yggvion'), findsOneWidget);
       tester.view.physicalSize = const Size(1000, 720);
       await tester.pumpAndSettle();
       expect(tester.takeException(), isNull);
-      await tester.tap(find.byKey(const ValueKey('sidebar-toggle')));
+      await tester.drag(
+        find.byKey(const ValueKey('sidebar-resize-handle')),
+        const Offset(-150, 0),
+      );
       await settle(tester);
       expect(tester.takeException(), isNull);
+    },
+  );
+
+  testInteraction(
+    'sidebar snaps at half its expanded width and cancels without saving',
+    (tester) async {
+      final repo = await workspace(tester);
+      final edge = find.byKey(const ValueKey('sidebar-resize-handle'));
+      final sidebar = find.byKey(const ValueKey('workspace-sidebar'));
+      expect(find.byKey(const ValueKey('sidebar-toggle')), findsNothing);
+      Future<void> resize(double delta, {bool cancel = false}) async {
+        final gesture = await tester.startGesture(
+          tester.getCenter(edge),
+          kind: PointerDeviceKind.mouse,
+        );
+        await gesture.moveBy(Offset(delta, 0));
+        await tester.pump();
+        if (cancel) {
+          await gesture.cancel();
+        } else {
+          await gesture.up();
+        }
+        await settle(tester);
+        expect(tester.takeException(), isNull);
+      }
+
+      await resize(-104);
+      expect(tester.getSize(sidebar).width, 215);
+      expect(repo.sidebarCollapsed, isFalse);
+      await resize(-109, cancel: true);
+      expect(tester.getSize(sidebar).width, 215);
+      expect(repo.sidebarCollapsed, isFalse);
+      await resize(-109);
+      expect(tester.getSize(sidebar).width, 72);
+      expect(repo.sidebarCollapsed, isTrue);
+      await resize(35);
+      expect(tester.getSize(sidebar).width, 72);
+      await resize(36);
+      expect(tester.getSize(sidebar).width, 215);
+      expect(repo.sidebarCollapsed, isFalse);
     },
   );
 
@@ -658,6 +707,260 @@ void main() {
       await settle(tester);
       expect(repo.snapshot.blocks.single.end.isAfter(beforeEnd), isTrue);
       expect(tester.takeException(), isNull);
+    },
+  );
+
+  for (final mobile in [false, true]) {
+    testInteraction(
+      'stationary resize pointer scrolls in the outer 20 percent and stops on cancel (mobile: $mobile)',
+      (tester) async {
+        final repo = await workspace(
+          tester,
+          mobile: mobile,
+          prepare: (repo) async {
+            await repo.createTask(
+              'Автопрокрутка',
+              start: repo.now().add(const Duration(hours: 1)),
+              end: repo.now().add(const Duration(hours: 2)),
+            );
+          },
+        );
+        final original = repo.snapshot.blocks.single;
+        final viewport = find.byKey(const ValueKey('calendar-scroll'));
+        final controller = tester
+            .widget<SingleChildScrollView>(viewport)
+            .controller!;
+        final initialOffset = controller.offset;
+        if (mobile) {
+          final hold = await tester.startGesture(
+            tester.getCenter(
+              find.byKey(ValueKey('calendar-block-${original.id}')),
+            ),
+          );
+          await tester.pump(const Duration(milliseconds: 600));
+          await hold.up();
+          await settle(tester);
+        }
+        for (final beginning in [false, true]) {
+          controller.jumpTo(initialOffset);
+          await tester.pumpAndSettle();
+          final handle = find.byKey(
+            ValueKey(
+              'block-resize-${beginning ? 'start' : 'end'}-${original.id}',
+            ),
+          );
+          final gesture = await tester.startGesture(
+            tester.getCenter(handle),
+            kind: mobile ? PointerDeviceKind.touch : PointerDeviceKind.mouse,
+          );
+          final bounds = tester.getRect(viewport);
+          await gesture.moveTo(
+            Offset(
+              bounds.center.dx,
+              beginning
+                  ? bounds.top + bounds.height * .05
+                  : bounds.bottom - bounds.height * .05,
+            ),
+          );
+          await tester.pump();
+          final before = controller.offset;
+          for (var frame = 0; frame < 40; frame++) {
+            await tester.pump(const Duration(milliseconds: 16));
+          }
+          expect(
+            controller.offset,
+            beginning ? lessThan(before) : greaterThan(before),
+          );
+          expect(repo.snapshot.blocks.single.start, original.start);
+          expect(repo.snapshot.blocks.single.end, original.end);
+          await gesture.moveTo(bounds.center);
+          await tester.pump();
+          final stopped = controller.offset;
+          for (var frame = 0; frame < 20; frame++) {
+            await tester.pump(const Duration(milliseconds: 16));
+          }
+          expect(controller.offset, stopped);
+          await gesture.cancel();
+          await settle(tester);
+          final cancelled = controller.offset;
+          await tester.pump(const Duration(milliseconds: 300));
+          expect(controller.offset, cancelled);
+          expect(
+            find.byKey(const ValueKey('calendar-preview-2026-10-19')),
+            findsNothing,
+          );
+          expect(repo.snapshot.blocks.single.start, original.start);
+          expect(repo.snapshot.blocks.single.end, original.end);
+          expect(tester.takeException(), isNull);
+        }
+      },
+    );
+  }
+
+  for (final mobile in [false, true]) {
+    testInteraction(
+      'resizing 21:00 across midnight previews both days and saves 02:00 (mobile: $mobile)',
+      (tester) async {
+        final repo = await workspace(
+          tester,
+          mobile: mobile,
+          prepare: (repo) async {
+            await repo.setView(CalendarView.threeDays);
+            await repo.createTask(
+              'Через полночь',
+              start: DateTime.utc(2026, 10, 19, 21),
+              end: DateTime.utc(2026, 10, 19, 22),
+            );
+          },
+        );
+        final original = repo.snapshot.blocks.single;
+        final viewport = find.byKey(const ValueKey('calendar-scroll'));
+        final controller = tester
+            .widget<SingleChildScrollView>(viewport)
+            .controller!;
+        controller.jumpTo(controller.position.maxScrollExtent);
+        await tester.pumpAndSettle();
+        if (mobile) {
+          final hold = await tester.startGesture(
+            tester.getCenter(
+              find.byKey(ValueKey('calendar-block-${original.id}')),
+            ),
+          );
+          await tester.pump(const Duration(milliseconds: 600));
+          await hold.up();
+          await settle(tester);
+        }
+        final bounds = tester.getRect(viewport);
+        final handle = find.byKey(ValueKey('block-resize-end-${original.id}'));
+        final origin = tester.getCenter(handle);
+        final originContentY = origin.dy - bounds.top + controller.offset;
+        final width =
+            (tester
+                    .getSize(
+                      find.byKey(const ValueKey('calendar-grid-gestures')),
+                    )
+                    .width -
+                48) /
+            3;
+        final gesture = await tester.startGesture(
+          origin,
+          kind: mobile ? PointerDeviceKind.touch : PointerDeviceKind.mouse,
+        );
+        await gesture.moveTo(Offset(origin.dx + width, bounds.top + 20));
+        await tester.pump();
+        final second = find.byKey(
+          const ValueKey('calendar-preview-2026-10-20'),
+        );
+        expect(second, findsOneWidget);
+        expect(tester.widget<Positioned>(second).top, 0);
+        final opacity = find.descendant(
+          of: second,
+          matching: find.byType(Opacity),
+        );
+        expect(tester.widget<Opacity>(opacity).opacity, lessThan(1));
+        for (var frame = 0; frame < 220; frame++) {
+          await tester.pump(const Duration(milliseconds: 16));
+        }
+        expect(controller.offset, 0);
+        await gesture.moveTo(
+          Offset(origin.dx + width, bounds.top + originContentY - 20 * 72),
+        );
+        await tester.pump();
+        expect(
+          find.byKey(const ValueKey('calendar-preview-2026-10-19')),
+          findsOneWidget,
+        );
+        expect(
+          tester.widget<Positioned>(second).height,
+          closeTo(2 * 72 - 3, .1),
+        );
+        expect(repo.snapshot.blocks.single.end, original.end);
+        await gesture.up();
+        await settle(tester);
+        expect(repo.snapshot.blocks.single.start, original.start);
+        expect(repo.snapshot.blocks.single.end, DateTime.utc(2026, 10, 20, 2));
+        expect(
+          find.byKey(ValueKey('calendar-block-${original.id}')),
+          findsNWidgets(2),
+        );
+        expect(
+          find.byKey(ValueKey('block-resize-start-${original.id}')),
+          findsOneWidget,
+        );
+        if (mobile) {
+          // The new day's segment enters touch editing after its own hold.
+          expect(
+            find.byKey(ValueKey('block-resize-end-${original.id}')),
+            findsNothing,
+          );
+          final hold = await tester.startGesture(
+            tester.getCenter(
+              find.byKey(ValueKey('calendar-block-${original.id}')).last,
+            ),
+          );
+          await tester.pump(const Duration(milliseconds: 600));
+          await hold.up();
+          await settle(tester);
+          expect(
+            find.byKey(ValueKey('block-resize-start-${original.id}')),
+            findsNothing,
+          );
+        }
+        expect(
+          find.byKey(ValueKey('block-resize-end-${original.id}')),
+          findsOneWidget,
+        );
+        expect(tester.takeException(), isNull);
+      },
+    );
+  }
+
+  testInteraction(
+    'moving and selecting time share edge scrolling and cancellation',
+    (tester) async {
+      final repo = await workspace(
+        tester,
+        prepare: (repo) async {
+          await repo.createTask(
+            'Перенос',
+            start: repo.now().add(const Duration(hours: 1)),
+            end: repo.now().add(const Duration(hours: 2)),
+          );
+        },
+      );
+      final original = repo.snapshot.blocks.single;
+      final viewport = find.byKey(const ValueKey('calendar-scroll'));
+      final controller = tester
+          .widget<SingleChildScrollView>(viewport)
+          .controller!;
+      final initialOffset = controller.offset;
+      for (final moving in [true, false]) {
+        controller.jumpTo(initialOffset);
+        await tester.pumpAndSettle();
+        final bounds = tester.getRect(viewport);
+        final origin = moving
+            ? tester.getCenter(
+                find.byKey(ValueKey('calendar-block-${original.id}')),
+              )
+            : bounds.center + const Offset(0, 40);
+        final gesture = await tester.startGesture(
+          origin,
+          kind: PointerDeviceKind.mouse,
+        );
+        await gesture.moveTo(Offset(origin.dx, bounds.bottom - 15));
+        await tester.pump();
+        for (var frame = 0; frame < 30; frame++) {
+          await tester.pump(const Duration(milliseconds: 16));
+        }
+        expect(controller.offset, greaterThan(initialOffset));
+        expect(repo.snapshot.blocks.single.start, original.start);
+        await gesture.cancel();
+        await settle(tester);
+        expect(repo.snapshot.blocks, hasLength(1));
+        expect(repo.snapshot.blocks.single.start, original.start);
+        expect(find.byType(TaskEditor), findsNothing);
+        expect(tester.takeException(), isNull);
+      }
     },
   );
 
