@@ -47,7 +47,7 @@ Future<void> showShortcutHelp(BuildContext context) => showDialog<void>(
                     const SizedBox(width: 16),
                     Text(
                       item.$2,
-                      style: const TextStyle(color: Palette.blue, fontSize: 11),
+                      style: TextStyle(color: c.accentColor, fontSize: 11),
                     ),
                   ],
                 ),

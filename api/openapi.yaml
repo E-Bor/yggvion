@@ -254,7 +254,7 @@ components:
         default_minutes: {type: integer, minimum: 5, maximum: 1440}
         reminders: {type: array, maxItems: 12, items: {type: integer, minimum: 0, maximum: 525600}}
         timezone: {type: string}
-        task_color: {type: integer, nullable: true, minimum: 4278190080, maximum: 4294967295, default: 4288461311, description: Opaque ARGB accent for tasks without a project. Omitted or null uses the default. Project color takes precedence.}
+        task_color: {type: integer, nullable: true, minimum: 4278190080, maximum: 4294967295, default: 4288461311, description: Unified opaque ARGB application accent for controls, highlights, accent text and tasks without a project. The legacy JSON name is retained for compatibility. Omitted or null uses the default blue. Projects keep their own colors.}
     Series:
       type: object
       required: [title, description, project_id, start, minutes, timezone, rule, reminders, all_day, exceptions]

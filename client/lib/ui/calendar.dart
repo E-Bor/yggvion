@@ -124,7 +124,7 @@ class CalendarToolbar extends StatelessWidget {
                   borderRadius: BorderRadius.circular(12),
                 ),
                 onSelected: onViewChanged,
-                itemBuilder: (_) => [
+                itemBuilder: (menuContext) => [
                   for (final value in CalendarView.values)
                     if (allowMonth || value != CalendarView.month)
                       PopupMenuItem(
@@ -134,10 +134,10 @@ class CalendarToolbar extends StatelessWidget {
                             SizedBox(
                               width: 24,
                               child: value == view
-                                  ? const Icon(
+                                  ? Icon(
                                       Icons.check_rounded,
                                       size: 17,
-                                      color: Palette.blue,
+                                      color: menuContext.accentColor,
                                     )
                                   : null,
                             ),
@@ -1058,8 +1058,11 @@ class _CalendarPaneState extends ConsumerState<CalendarPane>
         left: left + gutter - 4,
         right: 0,
         top: y,
-        child: const IgnorePointer(
-          child: SizedBox(height: 1, child: ColoredBox(color: Palette.blue)),
+        child: IgnorePointer(
+          child: SizedBox(
+            height: 1,
+            child: ColoredBox(color: context.accentColor),
+          ),
         ),
       ),
       Positioned(
@@ -1070,7 +1073,7 @@ class _CalendarPaneState extends ConsumerState<CalendarPane>
           child: Container(
             padding: const EdgeInsets.symmetric(vertical: 3),
             decoration: BoxDecoration(
-              color: Palette.blue,
+              color: context.accentColor,
               borderRadius: BorderRadius.circular(5),
             ),
             child: Text(
@@ -1099,14 +1102,14 @@ class _CalendarPaneState extends ConsumerState<CalendarPane>
           DateFormat('EEE', 'ru').format(day),
           style: TextStyle(
             fontSize: 11,
-            color: today ? Palette.blue : Palette.muted,
+            color: today ? context.accentColor : Palette.muted,
           ),
         ),
         const SizedBox(width: 8),
         Container(
           padding: const EdgeInsets.all(7),
           decoration: BoxDecoration(
-            color: today ? Palette.blue : Colors.transparent,
+            color: today ? context.accentColor : Colors.transparent,
             borderRadius: BorderRadius.circular(9),
           ),
           child: Text(
@@ -1259,7 +1262,7 @@ class _CalendarPaneState extends ConsumerState<CalendarPane>
     final color = enteringTime
         ? Palette.pink
         : task == null
-        ? Palette.blue
+        ? context.accentColor
         : Color(repo.snapshot.taskColor(task));
     return [
       for (var index = 0; index < count; index++)
@@ -1307,7 +1310,7 @@ class _CalendarPaneState extends ConsumerState<CalendarPane>
               child: Container(
                 decoration: BoxDecoration(
                   border: Border.all(
-                    color: Palette.blue.withValues(alpha: .65),
+                    color: context.accentColor.withValues(alpha: .65),
                   ),
                   borderRadius: BorderRadius.circular(8),
                 ),
@@ -1317,7 +1320,7 @@ class _CalendarPaneState extends ConsumerState<CalendarPane>
                   '${DateFormat('HH:mm').format(start)} — ${end == to ? '24:00' : DateFormat('HH:mm').format(end)} · план',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(fontSize: 10, color: Palette.blue),
+                  style: TextStyle(fontSize: 10, color: context.accentColor),
                 ),
               ),
             ),
@@ -1506,7 +1509,7 @@ class _CalendarPaneState extends ConsumerState<CalendarPane>
                   bottom: const BorderSide(color: Palette.border, width: .5),
                 ),
                 color: _midnight(day) == _midnight(_clock)
-                    ? Palette.blue.withValues(alpha: .04)
+                    ? context.accentColor.withValues(alpha: .04)
                     : null,
               ),
               padding: const EdgeInsets.all(5),

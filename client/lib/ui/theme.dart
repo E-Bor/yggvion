@@ -8,7 +8,7 @@ abstract final class Palette {
       border = Color(0xff303744),
       text = Color(0xffe8ecf2),
       muted = Color(0xff929dad),
-      blue = Color(AppSettings.defaultTaskColor),
+      blue = Color(AppSettings.defaultAccentColor),
       pink = Color(0xffdfa6ba),
       green = Color(0xff8ac9b4);
   static const projects = [
@@ -48,8 +48,12 @@ abstract final class Palette {
   )!;
 }
 
-class TaskColorPicker extends StatelessWidget {
-  const TaskColorPicker({
+extension AppColors on BuildContext {
+  Color get accentColor => Theme.of(this).colorScheme.primary;
+}
+
+class ColorPalettePicker extends StatelessWidget {
+  const ColorPalettePicker({
     super.key,
     required this.value,
     required this.onChanged,
@@ -69,7 +73,7 @@ class TaskColorPicker extends StatelessWidget {
             selected: value == Palette.projects[i].toARGB32(),
             button: true,
             child: InkWell(
-              key: ValueKey('task-color-$i'),
+              key: ValueKey('color-choice-$i'),
               borderRadius: BorderRadius.circular(12),
               onTap: () => onChanged(Palette.projects[i].toARGB32()),
               child: Container(
@@ -111,21 +115,22 @@ RelativeRect menuPosition(BuildContext context, Offset globalPosition) {
   );
 }
 
-ThemeData appTheme() {
+ThemeData appTheme({int accentColor = AppSettings.defaultAccentColor}) {
+  final accent = Color(accentColor);
   final scheme =
       ColorScheme.fromSeed(
-        seedColor: Palette.blue,
+        seedColor: accent,
         brightness: Brightness.dark,
         surface: Palette.surface,
       ).copyWith(
-        primary: Palette.blue,
+        primary: accent,
         onPrimary: Palette.background,
-        primaryContainer: Palette.taskSurface(Palette.blue, selected: true),
-        onPrimaryContainer: Palette.blue,
-        secondary: Palette.blue,
+        primaryContainer: Palette.taskSurface(accent, selected: true),
+        onPrimaryContainer: accent,
+        secondary: accent,
         onSecondary: Palette.background,
-        secondaryContainer: Palette.taskSurface(Palette.blue),
-        onSecondaryContainer: Palette.blue,
+        secondaryContainer: Palette.taskSurface(accent),
+        onSecondaryContainer: accent,
         outline: Palette.border,
       );
   return ThemeData(
@@ -134,6 +139,11 @@ ThemeData appTheme() {
     colorScheme: scheme,
     scaffoldBackgroundColor: Palette.background,
     fontFamily: 'Inter',
+    textSelectionTheme: TextSelectionThemeData(
+      cursorColor: accent,
+      selectionColor: accent.withValues(alpha: .28),
+      selectionHandleColor: accent,
+    ),
     scrollbarTheme: ScrollbarThemeData(
       thickness: const WidgetStatePropertyAll(4),
       radius: const Radius.circular(4),
@@ -181,7 +191,7 @@ ThemeData appTheme() {
       ),
       focusedBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(12),
-        borderSide: const BorderSide(color: Palette.blue),
+        borderSide: BorderSide(color: accent),
       ),
       labelStyle: const TextStyle(color: Palette.muted),
     ),
@@ -259,10 +269,10 @@ class EmptyState extends StatelessWidget {
           Container(
             padding: const EdgeInsets.all(18),
             decoration: BoxDecoration(
-              color: Palette.blue.withValues(alpha: .08),
+              color: context.accentColor.withValues(alpha: .08),
               borderRadius: BorderRadius.circular(24),
             ),
-            child: Icon(icon, size: 30, color: Palette.blue),
+            child: Icon(icon, size: 30, color: context.accentColor),
           ),
           const SizedBox(height: 20),
           Text(

@@ -160,7 +160,7 @@ class _PanelDividerState extends State<PanelDivider> {
                   width: horizontal ? 40 : 3,
                   height: horizontal ? 3 : 40,
                   decoration: BoxDecoration(
-                    color: hover ? Palette.blue : Palette.border,
+                    color: hover ? context.accentColor : Palette.border,
                     borderRadius: BorderRadius.circular(3),
                   ),
                 ),

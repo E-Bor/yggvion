@@ -257,12 +257,14 @@ class Project {
 
 class AppSettings {
   const AppSettings(this.entity);
-  static const defaultTaskColor = 0xff9cb9ff;
+  static const defaultAccentColor = 0xff9cb9ff;
   final Entity entity;
   int get defaultMinutes => entity.data['default_minutes'] as int;
   List<int> get reminders => (entity.data['reminders'] as List).cast<int>();
   String get timezone => entity.data['timezone'] as String;
-  int get taskColor => entity.data['task_color'] as int? ?? defaultTaskColor;
+  // Keep the existing wire key so saved settings and older servers still work.
+  int get accentColor =>
+      entity.data['task_color'] as int? ?? defaultAccentColor;
 }
 
 class Birthday {
@@ -404,7 +406,7 @@ class Snapshot {
   Task? task(String id) => _tasksById[id];
   Project? project(String id) => _projectsById[id];
   int taskColor(Task task) =>
-      project(task.projectId)?.color ?? settings.taskColor;
+      project(task.projectId)?.color ?? settings.accentColor;
   List<TimeBlock> taskBlocks(String id) => [...?_blocksByTask[id]];
   DateTime dayBoundary(DateTime now) {
     final local = tz.TZDateTime.from(now, tz.getLocation(settings.timezone));

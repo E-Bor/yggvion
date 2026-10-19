@@ -22,7 +22,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
   late final TextEditingController minutes, url, name, key;
   late String zone;
   late List<int> reminders;
-  late int taskColor;
+  int? pendingAccentColor;
   late int defaultMinutes;
   String? minutesError, saveError;
   int saveVersion = 0;
@@ -40,11 +40,11 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
     key = TextEditingController();
     zone = repo.snapshot.settings.timezone;
     reminders = [...repo.snapshot.settings.reminders];
-    taskColor = repo.snapshot.settings.taskColor;
     defaultMinutes = repo.snapshot.settings.defaultMinutes;
   }
 
-  Future<void> saveSettings() async {
+  Future<void> saveSettings({int? accentColor}) async {
+    if (accentColor != null) pendingAccentColor = accentColor;
     final version = ++saveVersion;
     setState(() {
       savingSettings = true;
@@ -57,8 +57,9 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
             defaultMinutes,
             [...reminders],
             zone,
-            taskColor: taskColor,
+            accentColor: pendingAccentColor,
           );
+      if (version == saveVersion) pendingAccentColor = null;
     } catch (error) {
       if (mounted && version == saveVersion) {
         setState(() => saveError = 'Не удалось сохранить настройки: $error');
@@ -90,7 +91,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
 
   Future<void> projectDialog({Project? project}) async {
     final text = TextEditingController(text: project?.title ?? '');
-    var color = project?.color ?? Palette.blue.toARGB32();
+    var color = project?.color ?? context.accentColor.toARGB32();
     await showDialog<void>(
       context: context,
       builder: (c) => StatefulBuilder(
@@ -107,7 +108,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                   decoration: const InputDecoration(labelText: 'Название'),
                 ),
                 const SizedBox(height: 16),
-                TaskColorPicker(
+                ColorPalettePicker(
                   value: color,
                   onChanged: (v) => set(() => color = v),
                 ),
@@ -320,20 +321,49 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                         },
                       ),
                       const SizedBox(height: 20),
-                      const Text('Цвет задач без проекта'),
+                      const Text('Акцентный цвет'),
                       const SizedBox(height: 10),
-                      TaskColorPicker(
-                        value: taskColor,
-                        onChanged: (v) {
-                          setState(() => taskColor = v);
-                          saveSettings();
-                        },
+                      ColorPalettePicker(
+                        key: const ValueKey('accent-color-picker'),
+                        value:
+                            pendingAccentColor ??
+                            repo.snapshot.settings.accentColor,
+                        onChanged: (v) => saveSettings(accentColor: v),
                       ),
                       const SizedBox(height: 8),
                       const Text(
-                        'У задач проекта используется цвет проекта.',
+                        'Логотип, кнопки, выделения, акцентный текст и задачи без проекта. У проектов — собственные цвета.',
                         style: TextStyle(color: Palette.muted, fontSize: 12),
                       ),
+                      if (Platform.isIOS)
+                        const Padding(
+                          padding: EdgeInsets.only(top: 6),
+                          child: Text(
+                            'Иконка приложения тоже меняет цвет. iOS покажет системное уведомление.',
+                            style: TextStyle(
+                              color: Palette.muted,
+                              fontSize: 12,
+                            ),
+                          ),
+                        ),
+                      if (ref.watch(appIconProvider)?.error case final error?)
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const SizedBox(height: 8),
+                            Text(
+                              error,
+                              style: TextStyle(
+                                color: Theme.of(context).colorScheme.error,
+                                fontSize: 12,
+                              ),
+                            ),
+                            TextButton(
+                              onPressed: ref.read(appIconProvider)?.retry,
+                              child: const Text('Повторить смену иконки'),
+                            ),
+                          ],
+                        ),
                       const SizedBox(height: 12),
                       Text(
                         saveError ??
@@ -519,7 +549,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                     children: [
                       Text(
                         repo.syncStatus,
-                        style: const TextStyle(color: Palette.blue),
+                        style: TextStyle(color: context.accentColor),
                       ),
                       if (repo.syncError != null)
                         Padding(
@@ -685,7 +715,7 @@ class ConflictsPanel extends ConsumerWidget {
       'all_day': 'На весь день',
       'default_minutes': 'Блок по умолчанию, мин',
       'reminders': 'Напоминания, мин до начала',
-      'task_color': 'Цвет задач без проекта',
+      'task_color': 'Акцентный цвет',
     };
     return labels.entries
         .where((e) => data.containsKey(e.key))
@@ -704,7 +734,7 @@ class ConflictsPanel extends ConsumerWidget {
           } else if (e.key == 'all_day') {
             value = data[e.key] == true ? 'Да' : 'Нет';
           } else if (e.key == 'task_color') {
-            final color = data[e.key] as int? ?? 0xff9cb9ff;
+            final color = data[e.key] as int? ?? AppSettings.defaultAccentColor;
             final index = Palette.projects.indexWhere(
               (c) => c.toARGB32() == color,
             );

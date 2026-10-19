@@ -667,21 +667,38 @@ END:VCALENDAR''', 'UTC');
     },
   );
   test(
-    'task color is backward compatible, roundtrips, and survives other settings edits',
+    'accent color reuses legacy settings, roundtrips, and survives other settings edits',
     () async {
-      expect(repo.snapshot.settings.taskColor, 0xff9cb9ff);
-      await repo.updateSettings(30, [15], 'UTC', taskColor: 0xffb7a6e8);
+      expect(repo.snapshot.settings.accentColor, 0xff9cb9ff);
+      expect(
+        AppSettings(
+          repo.snapshot.settings.entity.change({'task_color': null}),
+        ).accentColor,
+        AppSettings.defaultAccentColor,
+      );
+      await repo.updateSettings(30, [15], 'UTC', accentColor: 0xffb7a6e8);
       final decoded = AppSettings(
         Entity.fromJson(repo.snapshot.settings.entity.toJson()),
       );
-      expect(decoded.taskColor, 0xffb7a6e8);
+      expect(decoded.accentColor, 0xffb7a6e8);
+      expect(decoded.entity.data['task_color'], 0xffb7a6e8);
       await repo.updateSettings(45, [0], 'Europe/Moscow');
-      expect(repo.snapshot.settings.taskColor, 0xffb7a6e8);
+      expect(repo.snapshot.settings.accentColor, 0xffb7a6e8);
       await expectLater(
-        repo.updateSettings(45, [0], 'UTC', taskColor: 0x809cb9ff),
+        repo.updateSettings(45, [0], 'UTC', accentColor: 0x809cb9ff),
         throwsArgumentError,
       );
-      expect(repo.snapshot.settings.taskColor, 0xffb7a6e8);
+      expect(repo.snapshot.settings.accentColor, 0xffb7a6e8);
     },
   );
+  test('queued settings edits preserve the newly selected accent', () async {
+    await Future.wait([
+      repo.updateSettings(30, [15], 'UTC', accentColor: 0xff8ac9b4),
+      repo.updateSettings(45, [0], 'Europe/Moscow'),
+    ]);
+    await repo.reload();
+    expect(repo.snapshot.settings.accentColor, 0xff8ac9b4);
+    expect(repo.snapshot.settings.defaultMinutes, 45);
+    expect(repo.snapshot.settings.timezone, 'Europe/Moscow');
+  });
 }

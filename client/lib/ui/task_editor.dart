@@ -775,22 +775,24 @@ class _TaskEditorState extends ConsumerState<TaskEditor> {
                           fontWeight: FontWeight.w500,
                           letterSpacing: -.4,
                         ),
-                        decoration: const InputDecoration(
+                        decoration: InputDecoration(
                           hintText: 'Введите название',
                           filled: false,
-                          border: UnderlineInputBorder(
+                          border: const UnderlineInputBorder(
                             borderSide: BorderSide(color: Palette.border),
                           ),
-                          enabledBorder: UnderlineInputBorder(
+                          enabledBorder: const UnderlineInputBorder(
                             borderSide: BorderSide(color: Palette.border),
                           ),
                           focusedBorder: UnderlineInputBorder(
                             borderSide: BorderSide(
-                              color: Palette.blue,
+                              color: context.accentColor,
                               width: 2,
                             ),
                           ),
-                          contentPadding: EdgeInsets.symmetric(vertical: 12),
+                          contentPadding: const EdgeInsets.symmetric(
+                            vertical: 12,
+                          ),
                         ),
                       ),
                     ),

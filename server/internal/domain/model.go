@@ -75,7 +75,8 @@ type Settings struct {
 	DefaultMinutes int    `json:"default_minutes"`
 	Reminders      []int  `json:"reminders"`
 	Timezone       string `json:"timezone"`
-	TaskColor      *int64 `json:"task_color,omitempty"`
+	// Keep the legacy JSON key for compatibility with existing clients.
+	AccentColor *int64 `json:"task_color,omitempty"`
 }
 type Series struct {
 	BirthdayDate   string    `json:"birthday_date,omitempty"`
@@ -195,7 +196,7 @@ func Validate(r Record) error {
 			return errors.New("invalid settings")
 		}
 		valid = r.ID == "settings" && s.DefaultMinutes >= 5 && s.DefaultMinutes <= 1440 && zone(s.Timezone) && reminders(s.Reminders) && !r.Deleted
-		valid = valid && (s.TaskColor == nil || *s.TaskColor >= 0xff000000 && *s.TaskColor <= 0xffffffff)
+		valid = valid && (s.AccentColor == nil || *s.AccentColor >= 0xff000000 && *s.AccentColor <= 0xffffffff)
 	case "series":
 		var s Series
 		if err := json.Unmarshal(r.Data, &s); err != nil {

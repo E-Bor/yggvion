@@ -20,14 +20,19 @@ import 'settings.dart';
 import 'task_card.dart';
 import 'task_editor.dart';
 import 'theme.dart';
+import 'app_logo.dart';
 
-class YggvionApp extends StatelessWidget {
+class YggvionApp extends ConsumerWidget {
   const YggvionApp({super.key});
   @override
-  Widget build(BuildContext context) => MaterialApp(
+  Widget build(BuildContext context, WidgetRef ref) => MaterialApp(
     title: 'Yggvion',
     debugShowCheckedModeBanner: false,
-    theme: appTheme(),
+    theme: appTheme(
+      accentColor: ref.watch(
+        appProvider.select((repo) => repo.snapshot.settings.accentColor),
+      ),
+    ),
     locale: const Locale('ru'),
     supportedLocales: const [Locale('ru'), Locale('en')],
     localizationsDelegates: GlobalMaterialLocalizations.delegates,
@@ -69,6 +74,12 @@ class _WorkspaceState extends ConsumerState<Workspace>
     Icons.view_kanban_outlined,
     Icons.description_outlined,
     Icons.tune_rounded,
+  ];
+  static const mobilePages = [
+    PageKind.board,
+    PageKind.planner,
+    PageKind.notes,
+    PageKind.today,
   ];
   @override
   void initState() {
@@ -174,35 +185,81 @@ class _WorkspaceState extends ConsumerState<Workspace>
 
   Widget projectFilter() {
     final repo = ref.watch(appProvider);
-    return SizedBox(
-      width: 150,
-      child: DropdownButtonHideUnderline(
-        child: DropdownButton<String>(
-          value: repo.snapshot.projects.any((p) => p.id == projectId)
-              ? projectId
-              : '',
-          isDense: true,
-          isExpanded: true,
-          style: const TextStyle(
-            fontSize: 12,
-            color: Palette.muted,
-            fontFamily: 'Inter',
-          ),
-          borderRadius: BorderRadius.circular(12),
-          items: [
-            const DropdownMenuItem(value: '', child: Text('Все проекты')),
-            ...repo.snapshot.projects.map(
-              (p) => DropdownMenuItem(
-                value: p.id,
-                child: Text(
-                  p.title,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
+    final selected = repo.snapshot.projects
+        .where((project) => project.id == projectId)
+        .firstOrNull;
+    final value = selected?.id ?? '';
+    return ConstrainedBox(
+      constraints: const BoxConstraints(maxWidth: 180),
+      child: PopupMenuButton<String>(
+        key: const ValueKey('project-filter'),
+        tooltip: selected?.title ?? 'Фильтр проектов',
+        initialValue: value,
+        position: PopupMenuPosition.under,
+        offset: const Offset(0, 6),
+        borderRadius: BorderRadius.circular(8),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        constraints: const BoxConstraints(minWidth: 200, maxWidth: 320),
+        onSelected: (value) => setState(() => projectId = value),
+        itemBuilder: (menuContext) => [
+          for (final entry in [
+            (id: '', title: 'Все проекты'),
+            ...repo.snapshot.projects.map((p) => (id: p.id, title: p.title)),
+          ])
+            PopupMenuItem(
+              value: entry.id,
+              child: Row(
+                children: [
+                  SizedBox(
+                    width: 24,
+                    child: entry.id == value
+                        ? Icon(
+                            Icons.check_rounded,
+                            size: 17,
+                            color: menuContext.accentColor,
+                          )
+                        : null,
+                  ),
+                  const SizedBox(width: 8),
+                  Flexible(
+                    child: Text(
+                      entry.title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontSize: 13),
+                    ),
+                  ),
+                ],
               ),
             ),
-          ],
-          onChanged: (v) => setState(() => projectId = v ?? ''),
+        ],
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Flexible(
+                child: Text(
+                  selected?.title ?? 'Все проекты',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontFamily: 'Inter',
+                    color: Palette.text,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w500,
+                    height: 1.2,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 6),
+              const Icon(
+                Icons.expand_more_rounded,
+                size: 16,
+                color: Palette.muted,
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -350,13 +407,16 @@ class _WorkspaceState extends ConsumerState<Workspace>
               ? null
               : NavigationBar(
                   height: 68,
-                  selectedIndex: page == PageKind.settings ? 0 : page.index,
-                  onDestinationSelected: (i) => go(PageKind.values[i]),
+                  selectedIndex: mobilePages.indexOf(
+                    page == PageKind.settings ? PageKind.today : page,
+                  ),
+                  onDestinationSelected: (i) => go(mobilePages[i]),
                   destinations: [
-                    for (var i = 0; i < 4; i++)
+                    for (final destination in mobilePages)
                       NavigationDestination(
-                        icon: Icon(icons[i]),
-                        label: labels[i],
+                        key: ValueKey('mobile-nav-${destination.name}'),
+                        icon: Icon(icons[destination.index]),
+                        label: labels[destination.index],
                       ),
                   ],
                 ),
@@ -391,7 +451,7 @@ class _WorkspaceState extends ConsumerState<Workspace>
                     width: 54,
                     height: 54,
                     decoration: BoxDecoration(
-                      color: Palette.blue,
+                      color: context.accentColor,
                       borderRadius: BorderRadius.circular(18),
                       boxShadow: [
                         BoxShadow(
@@ -496,7 +556,9 @@ class _WorkspaceState extends ConsumerState<Workspace>
                     tooltip: 'Фильтр проектов',
                     icon: Icon(
                       Icons.filter_list_rounded,
-                      color: projectId.isEmpty ? Palette.muted : Palette.blue,
+                      color: projectId.isEmpty
+                          ? Palette.muted
+                          : context.accentColor,
                     ),
                     onSelected: (value) => setState(() => projectId = value),
                     itemBuilder: (_) => [
@@ -622,10 +684,10 @@ class _WorkspaceState extends ConsumerState<Workspace>
       width: 30,
       height: 30,
       decoration: BoxDecoration(
-        color: Palette.blue.withValues(alpha: .12),
+        color: context.accentColor.withValues(alpha: .12),
         borderRadius: BorderRadius.circular(10),
       ),
-      child: const Icon(Icons.spa_outlined, color: Palette.blue, size: 21),
+      child: const AppLogo(),
     );
     Widget navigation(int index) {
       final icon = Icon(icons[index], size: 20);
@@ -642,9 +704,11 @@ class _WorkspaceState extends ConsumerState<Workspace>
                 key: ValueKey('nav-${PageKind.values[index].name}'),
                 tooltip: labels[index],
                 style: IconButton.styleFrom(
-                  foregroundColor: selected ? Palette.blue : Palette.muted,
+                  foregroundColor: selected
+                      ? context.accentColor
+                      : Palette.muted,
                   backgroundColor: selected
-                      ? Palette.blue.withValues(alpha: .09)
+                      ? context.accentColor.withValues(alpha: .09)
                       : Colors.transparent,
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(10),
@@ -659,8 +723,8 @@ class _WorkspaceState extends ConsumerState<Workspace>
                 key: ValueKey('nav-${PageKind.values[index].name}'),
                 dense: true,
                 selected: selected,
-                selectedColor: Palette.blue,
-                selectedTileColor: Palette.blue.withValues(alpha: .09),
+                selectedColor: context.accentColor,
+                selectedTileColor: context.accentColor.withValues(alpha: .09),
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(10),
                 ),
@@ -716,7 +780,7 @@ class _WorkspaceState extends ConsumerState<Workspace>
                           const SizedBox(width: 8),
                           const Expanded(
                             child: Text(
-                              'yggvion',
+                              'Yggvion',
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                               style: TextStyle(
@@ -918,7 +982,7 @@ class _WorkspaceState extends ConsumerState<Workspace>
                           duration: const Duration(milliseconds: 120),
                           width: 2,
                           color: sidebarEdgeHovered || sidebarWidth != null
-                              ? Palette.blue.withValues(alpha: .65)
+                              ? context.accentColor.withValues(alpha: .65)
                               : Colors.transparent,
                         ),
                       ),
@@ -1020,14 +1084,6 @@ class _WorkspaceState extends ConsumerState<Workspace>
                   ),
                 ),
         ),
-        Padding(
-          padding: const EdgeInsets.all(12),
-          child: TextButton.icon(
-            onPressed: () => openTask(context),
-            icon: const Icon(Icons.add_rounded),
-            label: const Text('Новая задача'),
-          ),
-        ),
       ],
     );
     final calendar = Column(
@@ -1038,21 +1094,21 @@ class _WorkspaceState extends ConsumerState<Workspace>
             padding: const EdgeInsets.all(12),
             margin: const EdgeInsets.only(bottom: 10),
             decoration: BoxDecoration(
-              color: Palette.blue.withValues(alpha: .09),
+              color: context.accentColor.withValues(alpha: .09),
               borderRadius: BorderRadius.circular(10),
             ),
             child: Row(
               children: [
-                const Icon(
+                Icon(
                   Icons.touch_app_outlined,
                   size: 18,
-                  color: Palette.blue,
+                  color: context.accentColor,
                 ),
                 const SizedBox(width: 9),
                 Expanded(
                   child: Text(
                     'Выберите время: ${selected!.title}',
-                    style: const TextStyle(fontSize: 12, color: Palette.blue),
+                    style: TextStyle(fontSize: 12, color: context.accentColor),
                   ),
                 ),
                 IconButton(
@@ -1145,12 +1201,12 @@ class _WorkspaceState extends ConsumerState<Workspace>
                       return Container(
                         decoration: BoxDecoration(
                           color: candidates.isNotEmpty
-                              ? Palette.blue.withValues(alpha: .08)
+                              ? context.accentColor.withValues(alpha: .08)
                               : Palette.surface.withValues(alpha: .5),
                           borderRadius: BorderRadius.circular(14),
                           border: Border.all(
                             color: candidates.isNotEmpty
-                                ? Palette.blue
+                                ? context.accentColor
                                 : Palette.border,
                             width: .6,
                           ),
@@ -1172,7 +1228,7 @@ class _WorkspaceState extends ConsumerState<Workspace>
                                           ? Palette.pink
                                           : status == TaskStatus.waiting
                                           ? Palette.projects[2]
-                                          : Palette.blue,
+                                          : context.accentColor,
                                     ),
                                   ),
                                   const SizedBox(width: 9),
@@ -1304,7 +1360,7 @@ class _SearchDialogState extends ConsumerState<SearchDialog> {
                           e.kind == 'note'
                               ? Icons.description_outlined
                               : Icons.event_outlined,
-                          color: Palette.blue,
+                          color: context.accentColor,
                         ),
                         title: Text(
                           e.data['title'] as String? ?? '',

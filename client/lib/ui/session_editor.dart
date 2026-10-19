@@ -155,7 +155,7 @@ class _SessionEditorState extends ConsumerState<SessionEditor> {
                 child: Text(
                   mobile
                       ? 'Удерживайте и тяните, чтобы отметить время. Можно добавить несколько интервалов.'
-                      : 'Выделите один или несколько интервалов. Голубой контур — план задачи.',
+                      : 'Выделите один или несколько интервалов. Контур — план задачи.',
                   style: const TextStyle(
                     fontSize: 12,
                     color: Palette.muted,

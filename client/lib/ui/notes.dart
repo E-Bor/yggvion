@@ -80,6 +80,7 @@ class NotePanel extends ConsumerStatefulWidget {
 }
 
 class _NotePanelState extends ConsumerState<NotePanel> {
+  final editorKey = GlobalKey<LiveMarkdownEditorState>();
   bool editing = false;
   String? saveError;
   Future<void> save(Note note, String content) async {
@@ -100,7 +101,28 @@ class _NotePanelState extends ConsumerState<NotePanel> {
         .where((n) => n.id == widget.noteId)
         .firstOrNull;
     if (note == null) return const SizedBox.shrink();
-    final readOnly = note.pinned == 'reference' && !editing;
+    final mobile = MediaQuery.sizeOf(context).width < 800;
+    final readOnly = !mobile && note.pinned == 'reference' && !editing;
+    final editor = LiveMarkdownEditor(
+      key: editorKey,
+      value: note.content,
+      readOnly: readOnly,
+      editOnLongPress: mobile,
+      onEditingChanged: mobile
+          ? (value) {
+              if (mounted && editing != value) {
+                setState(() => editing = value);
+              }
+            }
+          : null,
+      toolbar: !widget.compact || editing,
+      placeholder: mobile
+          ? 'Удерживайте, чтобы начать писать…'
+          : note.pinned == 'scratchpad'
+          ? 'Черновики, конфиги, файлы — просто начните писать…'
+          : 'Идеи, ссылки и всё, что важно сохранить…',
+      onChanged: (v) => save(note, v),
+    );
     return Card(
       child: Padding(
         padding: EdgeInsets.all(
@@ -134,9 +156,18 @@ class _NotePanelState extends ConsumerState<NotePanel> {
                     ),
                   ),
                 ),
-                if (note.pinned == 'reference')
+                if (mobile && editing)
                   TextButton(
-                    onPressed: () => setState(() => editing = !editing),
+                    key: ValueKey('finish-note-${note.id}'),
+                    onPressed: () => editorKey.currentState?.finishEditing(),
+                    child: const Text('Готово'),
+                  )
+                else if (!mobile && note.pinned == 'reference')
+                  TextButton(
+                    onPressed: () {
+                      if (editing) editorKey.currentState?.finishEditing();
+                      setState(() => editing = !editing);
+                    },
                     child: Text(editing ? 'Готово' : 'Изменить'),
                   ),
                 if (note.pinned.isEmpty)
@@ -149,31 +180,9 @@ class _NotePanelState extends ConsumerState<NotePanel> {
             ),
             const SizedBox(height: 8),
             if (widget.fill)
-              Expanded(
-                child: SingleChildScrollView(
-                  child: LiveMarkdownEditor(
-                    key: ValueKey(note.id),
-                    value: note.content,
-                    readOnly: readOnly,
-                    toolbar: !widget.compact || editing,
-                    placeholder: note.pinned == 'scratchpad'
-                        ? 'Черновики, конфиги, файлы — просто начните писать…'
-                        : 'Идеи, ссылки и всё, что важно сохранить…',
-                    onChanged: (v) => save(note, v),
-                  ),
-                ),
-              )
+              Expanded(child: SingleChildScrollView(child: editor))
             else
-              LiveMarkdownEditor(
-                key: ValueKey(note.id),
-                value: note.content,
-                readOnly: readOnly,
-                toolbar: !widget.compact || editing,
-                placeholder: note.pinned == 'scratchpad'
-                    ? 'Черновики, конфиги, файлы — просто начните писать…'
-                    : 'Идеи, ссылки и всё, что важно сохранить…',
-                onChanged: (v) => save(note, v),
-              ),
+              editor,
             if (saveError != null)
               Text(
                 saveError!,
@@ -208,8 +217,16 @@ class _NotesPageState extends ConsumerState<NotesPage> {
     final mobile = MediaQuery.sizeOf(context).width < 800;
     if (mobile) {
       return ListView(
+        key: const ValueKey('mobile-notes-list'),
         padding: const EdgeInsets.all(16),
         children: [
+          const Padding(
+            padding: EdgeInsets.only(bottom: 16),
+            child: Text(
+              'Удерживайте текст заметки, чтобы редактировать',
+              style: TextStyle(color: Palette.muted, fontSize: 12),
+            ),
+          ),
           const NotePanel(noteId: 'scratchpad'),
           const SizedBox(height: 14),
           const NotePanel(noteId: 'reference'),
@@ -272,7 +289,7 @@ class _NotesPageState extends ConsumerState<NotesPage> {
                         child: ListTile(
                           dense: true,
                           selected: id == note.id,
-                          selectedTileColor: Palette.blue.withValues(
+                          selectedTileColor: context.accentColor.withValues(
                             alpha: .08,
                           ),
                           shape: RoundedRectangleBorder(

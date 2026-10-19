@@ -4,6 +4,7 @@ import 'package:flutter_timezone/flutter_timezone.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:timezone/data/latest.dart' as timezone;
 import 'data/database.dart';
+import 'data/app_icon.dart';
 import 'data/reminders.dart';
 import 'data/repository.dart';
 import 'data/sync.dart';
@@ -23,12 +24,14 @@ Future<void> main() async {
     await sync.initialize();
     final reminders = ReminderService(repo);
     await reminders.initialize();
+    final appIcons = AppIconService(repo)..start();
     runApp(
       ProviderScope(
         overrides: [
           appProvider.overrideWith((ref) => repo),
           syncProvider.overrideWithValue(sync),
           remindersProvider.overrideWithValue(reminders),
+          appIconProvider.overrideWith((ref) => appIcons),
         ],
         child: const YggvionApp(),
       ),

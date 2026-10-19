@@ -393,7 +393,7 @@ func TestLateOfflineOccurrencesRespectCancellation(t *testing.T) {
 	}
 }
 
-func TestSettingsTaskColorContract(t *testing.T) {
+func TestSettingsAccentColorContract(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
 		color string
@@ -422,10 +422,10 @@ func TestSettingsTaskColorContract(t *testing.T) {
 			if err := json.Unmarshal(result.Data, &settings); err != nil {
 				t.Fatal(err)
 			}
-			if (tc.color == "" || tc.name == "default") && settings.TaskColor != nil {
+			if (tc.color == "" || tc.name == "default") && settings.AccentColor != nil {
 				t.Fatal("legacy default unexpectedly changed")
 			}
-			if tc.name == "opaque" && (settings.TaskColor == nil || *settings.TaskColor != 4288461311) {
+			if tc.name == "opaque" && (settings.AccentColor == nil || *settings.AccentColor != 4288461311) {
 				t.Fatal("color did not roundtrip")
 			}
 		})

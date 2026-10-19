@@ -3,6 +3,10 @@ import '../data/repository.dart';
 import '../data/sync.dart';
 import '../data/reminders.dart';
 import '../data/clipboard.dart';
+import '../data/app_icon.dart';
+
+// The native shell supplies this optional service at startup.
+final appIconProvider = ChangeNotifierProvider<AppIconService?>((ref) => null);
 
 final appProvider = ChangeNotifierProvider<Repository>(
   (ref) => throw StateError('Repository must be provided at startup'),

@@ -23,13 +23,13 @@ class MarkdownPreview extends ConsumerWidget {
     selectable: selectable,
     styleSheet: MarkdownStyleSheet.fromTheme(Theme.of(context)).copyWith(
       p: const TextStyle(height: 1.65, color: Palette.text),
-      code: const TextStyle(
+      code: TextStyle(
         fontFamily: 'monospace',
         fontSize: 12,
-        color: Palette.blue,
+        color: context.accentColor,
       ),
-      blockquoteDecoration: const BoxDecoration(
-        border: Border(left: BorderSide(color: Palette.blue, width: 2)),
+      blockquoteDecoration: BoxDecoration(
+        border: Border(left: BorderSide(color: context.accentColor, width: 2)),
       ),
     ),
     onTapLink: (label, href, title) {
@@ -95,10 +95,13 @@ class LiveMarkdownEditor extends ConsumerStatefulWidget {
     this.placeholder = 'Начните писать…',
     this.toolbar = true,
     this.toolbarLabel = 'Markdown',
+    this.editOnLongPress = false,
+    this.onEditingChanged,
   });
   final String value, placeholder, toolbarLabel;
   final ValueChanged<String> onChanged;
-  final bool readOnly, toolbar;
+  final bool readOnly, toolbar, editOnLongPress;
+  final ValueChanged<bool>? onEditingChanged;
   @override
   ConsumerState<LiveMarkdownEditor> createState() => LiveMarkdownEditorState();
 }
@@ -112,6 +115,12 @@ class LiveMarkdownEditorState extends ConsumerState<LiveMarkdownEditor> {
   final _controller = TextEditingController();
   final _focus = FocusNode();
   String _last = '';
+  bool get _isEditing => _active != null || _source;
+
+  void finishEditing() {
+    _focus.unfocus(disposition: UnfocusDisposition.previouslyFocusedChild);
+    _finish();
+  }
 
   void focusEditor() {
     if (widget.readOnly || _pasting) return;
@@ -169,7 +178,8 @@ class LiveMarkdownEditorState extends ConsumerState<LiveMarkdownEditor> {
       _rememberedSelection = null;
     }
     if (widget.readOnly && !oldWidget.readOnly) {
-      _finish();
+      _focus.unfocus(disposition: UnfocusDisposition.previouslyFocusedChild);
+      _finish(notify: false);
     }
   }
 
@@ -180,15 +190,18 @@ class LiveMarkdownEditorState extends ConsumerState<LiveMarkdownEditor> {
     }
   }
 
-  void _finish() {
-    if (_active == null && !_source) return;
+  void _finish({bool notify = true}) {
+    if (!_isEditing) return;
     setState(() {
       _load(_last);
       _active = null;
+      if (widget.editOnLongPress) _source = false;
     });
+    if (notify) widget.onEditingChanged?.call(false);
   }
 
   void _edit(int index) {
+    final wasEditing = _isEditing;
     setState(() {
       _active = index;
       _controller.text = _blocks[index];
@@ -197,6 +210,12 @@ class LiveMarkdownEditorState extends ConsumerState<LiveMarkdownEditor> {
       );
     });
     _focus.requestFocus();
+    if (!wasEditing) widget.onEditingChanged?.call(true);
+  }
+
+  void _editEnd() {
+    if (_blocks.last.isNotEmpty) _blocks.add('');
+    _edit(_blocks.length - 1);
   }
 
   void _changed(String value) {
@@ -227,14 +246,23 @@ class LiveMarkdownEditorState extends ConsumerState<LiveMarkdownEditor> {
   }
 
   Future<void> _insertFrom(Future<ClipboardPaste?> Function() read) async {
-    if (_pasting || widget.readOnly) return;
+    if (_pasting ||
+        widget.readOnly ||
+        (widget.editOnLongPress && !_isEditing)) {
+      return;
+    }
     final before = _last;
     final selection = _selection;
     setState(() => _pasting = true);
     try {
       await guard(context, () async {
         final content = await read();
-        if (!mounted || widget.readOnly || content == null) return;
+        if (!mounted ||
+            widget.readOnly ||
+            content == null ||
+            (widget.editOnLongPress && !_isEditing)) {
+          return;
+        }
         _insert(content, _last == before ? selection : _selection);
       });
     } finally {
@@ -335,142 +363,166 @@ class LiveMarkdownEditorState extends ConsumerState<LiveMarkdownEditor> {
           onInvoke: (_) => _paste(),
         ),
     },
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        if (widget.toolbar && !widget.readOnly)
-          Row(
-            children: [
-              Text(
-                widget.toolbarLabel,
-                style: const TextStyle(fontSize: 12, color: Palette.muted),
-              ),
-              const Spacer(),
-              IconButton(
-                tooltip: 'Прикрепить изображение или файл',
-                onPressed: _pasting ? null : _attach,
-                icon: const Icon(Icons.attach_file_rounded, size: 19),
-              ),
-              IconButton(
-                tooltip: 'Вставить из буфера обмена',
-                onPressed: _pasting ? null : _paste,
-                icon: _pasting
-                    ? const SizedBox(
-                        width: 18,
-                        height: 18,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : const Icon(Icons.content_paste_rounded, size: 18),
-              ),
-              IconButton(
-                tooltip: _source ? 'Live Preview' : 'Исходный Markdown',
-                onPressed: _pasting
-                    ? null
-                    : () {
-                        setState(() {
-                          _source = !_source;
-                          _active = null;
-                          _controller.text = _last;
-                          _rememberedSelection = null;
-                          _load(_last);
-                        });
-                      },
-                icon: Icon(
-                  _source ? Icons.visibility_outlined : Icons.code_rounded,
-                  size: 19,
+    child: TextFieldTapRegion(
+      enabled: widget.editOnLongPress,
+      groupId: _focus,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (widget.toolbar &&
+              !widget.readOnly &&
+              (!widget.editOnLongPress || _isEditing))
+            Row(
+              children: [
+                Text(
+                  widget.toolbarLabel,
+                  style: const TextStyle(fontSize: 12, color: Palette.muted),
                 ),
+                const Spacer(),
+                IconButton(
+                  tooltip: 'Прикрепить изображение или файл',
+                  onPressed: _pasting ? null : _attach,
+                  icon: const Icon(Icons.attach_file_rounded, size: 19),
+                ),
+                IconButton(
+                  tooltip: 'Вставить из буфера обмена',
+                  onPressed: _pasting ? null : _paste,
+                  icon: _pasting
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.content_paste_rounded, size: 18),
+                ),
+                IconButton(
+                  tooltip: _source ? 'Live Preview' : 'Исходный Markdown',
+                  onPressed: _pasting
+                      ? null
+                      : () {
+                          if (widget.editOnLongPress && _source) {
+                            finishEditing();
+                            return;
+                          }
+                          setState(() {
+                            _source = !_source;
+                            _active = null;
+                            _controller.text = _last;
+                            _rememberedSelection = null;
+                            _load(_last);
+                          });
+                          if (widget.editOnLongPress) _focus.requestFocus();
+                        },
+                  icon: Icon(
+                    _source ? Icons.visibility_outlined : Icons.code_rounded,
+                    size: 19,
+                  ),
+                ),
+              ],
+            ),
+          if (widget.readOnly)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              child: MarkdownPreview(
+                text: _last.isEmpty ? 'Пока пусто' : _last,
               ),
-            ],
-          ),
-        if (widget.readOnly)
-          Padding(
-            padding: const EdgeInsets.symmetric(vertical: 8),
-            child: MarkdownPreview(text: _last.isEmpty ? 'Пока пусто' : _last),
-          )
-        else if (_source)
-          TextField(
-            controller: _controller,
-            focusNode: _focus,
-            readOnly: _pasting,
-            contextMenuBuilder: _contextMenu,
-            maxLines: null,
-            minLines: 5,
-            style: const TextStyle(
-              fontFamily: 'monospace',
-              fontSize: 13,
-              height: 1.6,
-            ),
-            decoration: InputDecoration(
-              hintText: widget.placeholder,
-              border: InputBorder.none,
-              enabledBorder: InputBorder.none,
-              focusedBorder: InputBorder.none,
-              fillColor: Colors.transparent,
-            ),
-            onChanged: _changed,
-          )
-        else
-          ...List.generate(
-            _blocks.length,
-            (index) => _active == index
-                ? TextField(
-                    controller: _controller,
-                    focusNode: _focus,
-                    readOnly: _pasting,
-                    contextMenuBuilder: _contextMenu,
-                    maxLines: null,
-                    minLines: 1,
-                    style: const TextStyle(fontSize: 14, height: 1.65),
-                    decoration: InputDecoration(
-                      hintText: widget.placeholder,
-                      filled: false,
-                      border: InputBorder.none,
-                      enabledBorder: InputBorder.none,
-                      focusedBorder: InputBorder.none,
-                      contentPadding: const EdgeInsets.symmetric(
-                        vertical: 9,
-                        horizontal: 3,
-                      ),
-                    ),
-                    onChanged: _changed,
-                  )
-                : GestureDetector(
-                    behavior: HitTestBehavior.opaque,
-                    onTap: () => _edit(index),
-                    child: MouseRegion(
-                      cursor: SystemMouseCursors.text,
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(
+            )
+          else if (_source)
+            TextField(
+              controller: _controller,
+              focusNode: _focus,
+              groupId: widget.editOnLongPress ? _focus : EditableText,
+              onTapOutside: widget.editOnLongPress
+                  ? (_) => finishEditing()
+                  : null,
+              readOnly: _pasting,
+              contextMenuBuilder: _contextMenu,
+              maxLines: null,
+              minLines: 5,
+              style: const TextStyle(
+                fontFamily: 'monospace',
+                fontSize: 13,
+                height: 1.6,
+              ),
+              decoration: InputDecoration(
+                hintText: widget.placeholder,
+                border: InputBorder.none,
+                enabledBorder: InputBorder.none,
+                focusedBorder: InputBorder.none,
+                fillColor: Colors.transparent,
+              ),
+              onChanged: _changed,
+            )
+          else
+            ...List.generate(
+              _blocks.length,
+              (index) => _active == index
+                  ? TextField(
+                      controller: _controller,
+                      focusNode: _focus,
+                      groupId: widget.editOnLongPress ? _focus : EditableText,
+                      onTapOutside: widget.editOnLongPress
+                          ? (_) => finishEditing()
+                          : null,
+                      readOnly: _pasting,
+                      contextMenuBuilder: _contextMenu,
+                      maxLines: null,
+                      minLines: 1,
+                      style: const TextStyle(fontSize: 14, height: 1.65),
+                      decoration: InputDecoration(
+                        hintText: widget.placeholder,
+                        filled: false,
+                        border: InputBorder.none,
+                        enabledBorder: InputBorder.none,
+                        focusedBorder: InputBorder.none,
+                        contentPadding: const EdgeInsets.symmetric(
                           vertical: 9,
                           horizontal: 3,
                         ),
-                        child: _blocks[index].isEmpty
-                            ? Text(
-                                widget.placeholder,
-                                style: const TextStyle(
-                                  color: Palette.muted,
-                                  height: 1.65,
+                      ),
+                      onChanged: _changed,
+                    )
+                  : GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onTap: widget.editOnLongPress
+                          ? finishEditing
+                          : () => _edit(index),
+                      onLongPress: widget.editOnLongPress
+                          ? () => _edit(index)
+                          : null,
+                      child: MouseRegion(
+                        cursor: SystemMouseCursors.text,
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(
+                            vertical: 9,
+                            horizontal: 3,
+                          ),
+                          child: _blocks[index].isEmpty
+                              ? Text(
+                                  widget.placeholder,
+                                  style: const TextStyle(
+                                    color: Palette.muted,
+                                    height: 1.65,
+                                  ),
+                                )
+                              : MarkdownPreview(
+                                  text: _blocks[index],
+                                  selectable: false,
                                 ),
-                              )
-                            : MarkdownPreview(
-                                text: _blocks[index],
-                                selectable: false,
-                              ),
+                        ),
                       ),
                     ),
-                  ),
-          ),
-        if (!widget.readOnly && !_source)
-          GestureDetector(
-            behavior: HitTestBehavior.opaque,
-            onTap: () {
-              if (_blocks.last.isNotEmpty) _blocks.add('');
-              _edit(_blocks.length - 1);
-            },
-            child: const SizedBox(height: 40),
-          ),
-      ],
+            ),
+          if (!widget.readOnly && !_source)
+            GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: widget.editOnLongPress ? finishEditing : _editEnd,
+              onLongPress: widget.editOnLongPress ? _editEnd : null,
+              child: const SizedBox(height: 40),
+            ),
+        ],
+      ),
     ),
   );
 }

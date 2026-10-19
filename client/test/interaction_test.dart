@@ -421,7 +421,7 @@ void main() {
       );
       await settle(tester);
       expect(repo.sidebarCollapsed, isTrue);
-      expect(find.text('yggvion'), findsNothing);
+      expect(find.text('Yggvion'), findsNothing);
       expect(
         tester.getSize(find.byKey(const ValueKey('workspace-sidebar'))).width,
         72,
@@ -446,7 +446,7 @@ void main() {
       );
       await settle(tester);
       expect(repo.sidebarCollapsed, isFalse);
-      expect(find.text('yggvion'), findsOneWidget);
+      expect(find.text('Yggvion'), findsOneWidget);
       tester.view.physicalSize = const Size(1000, 720);
       await tester.pumpAndSettle();
       expect(tester.takeException(), isNull);
@@ -1263,7 +1263,7 @@ void main() {
   );
 
   testInteraction(
-    'default task color persists in settings and project color wins on opaque cards',
+    'unified accent updates the theme and unassigned tasks while projects retain their colors',
     (tester) async {
       final repo = await workspace(
         tester,
@@ -1279,12 +1279,15 @@ void main() {
       );
       await command(tester, LogicalKeyboardKey.digit5);
       await tester.ensureVisible(
-        find.byKey(const ValueKey('task-color-1')).first,
+        find.byKey(const ValueKey('color-choice-1')).first,
       );
-      await tester.tap(find.byKey(const ValueKey('task-color-1')).first);
+      await tester.tap(find.byKey(const ValueKey('color-choice-1')).first);
       expect(find.text('Сохранить настройки'), findsNothing);
       await settle(tester);
-      expect(repo.snapshot.settings.taskColor, Palette.projects[1].toARGB32());
+      expect(
+        repo.snapshot.settings.accentColor,
+        Palette.projects[1].toARGB32(),
+      );
       await command(tester, LogicalKeyboardKey.digit1);
       for (final task in repo.snapshot.tasks) {
         final block = repo.snapshot.taskBlocks(task.id).single;

@@ -562,23 +562,29 @@ class Repository extends ChangeNotifier {
     int minutes,
     List<int> reminders,
     String timezone, {
-    int? taskColor,
+    int? accentColor,
   }) async {
     if (minutes < 5 || minutes > 1440) {
       throw ArgumentError('Длительность: от 5 до 1440 минут');
     }
-    if (taskColor != null &&
-        (taskColor < 0xff000000 || taskColor > 0xffffffff)) {
-      throw ArgumentError('Выберите непрозрачный цвет задачи');
+    if (accentColor != null &&
+        (accentColor < 0xff000000 || accentColor > 0xffffffff)) {
+      throw ArgumentError('Выберите непрозрачный акцентный цвет');
     }
-    await commit([
-      snapshot.settings.entity.change({
-        'default_minutes': minutes,
-        'reminders': reminders,
-        'timezone': timezone,
-        'task_color': ?taskColor,
-      }),
-    ]);
+    await commitComputed(() async {
+      final current = await db.entity('settings');
+      if (current == null || current.deleted) {
+        throw StateError('Настройки недоступны');
+      }
+      return [
+        current.change({
+          'default_minutes': minutes,
+          'reminders': reminders,
+          'timezone': timezone,
+          'task_color': ?accentColor,
+        }),
+      ];
+    });
   }
 
   static const maxAttachmentBytes = 50 * 1024 * 1024;

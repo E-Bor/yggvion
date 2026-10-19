@@ -81,7 +81,7 @@ void main() {
       // No change callback means these edits are truly local until the explicit sync below.
       a.onChange = null;
       b.onChange = null;
-      await a.updateSettings(30, [0], 'UTC', taskColor: 0xffb7a6e8);
+      await a.updateSettings(30, [0], 'UTC', accentColor: 0xffb7a6e8);
       final task = await a.createTask(
         'From desktop',
         start: DateTime.now().add(const Duration(hours: 1)),
@@ -101,7 +101,7 @@ void main() {
       expect(b.snapshot.task(task.id)!.title, 'From desktop');
       expect(b.snapshot.taskBlocks(task.id), hasLength(1));
       expect(b.snapshot.tasks, hasLength(121));
-      expect(b.snapshot.settings.taskColor, 0xffb7a6e8);
+      expect(b.snapshot.settings.accentColor, 0xffb7a6e8);
       expect(b.snapshot.taskColor(b.snapshot.task(task.id)!), 0xff80adee);
       expect(await a.db.customSelect('SELECT * FROM outbox').get(), isEmpty);
       await b.updateTask(
