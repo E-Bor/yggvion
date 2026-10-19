@@ -156,6 +156,21 @@ void main() {
       );
       expect(a.syncError, isNull);
       expect(b.syncError, isNull);
+      final disposable = await a.createNote();
+      await a.saveNote(disposable.id, disposable.title, 'Temporary note');
+      await sa.sync();
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+      await sb.sync();
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+      expect(b.snapshot.notes.any((n) => n.id == disposable.id), isTrue);
+      await b.saveNote(disposable.id, disposable.title, ' \n\t ');
+      await b.discardEmptyNotes([disposable.id]);
+      await sb.sync();
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+      await sa.sync();
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+      expect(a.snapshot.notes.any((n) => n.id == disposable.id), isFalse);
+      expect(b.snapshot.notes.any((n) => n.id == disposable.id), isFalse);
       // Make both writes before either can observe the other; optimistic versions must preserve both.
       await a.saveNote('scratchpad', 'Быстрая заметка', 'Desktop draft');
       await b.saveNote('scratchpad', 'Быстрая заметка', 'Phone draft');

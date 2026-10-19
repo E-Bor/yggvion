@@ -97,11 +97,14 @@ class LiveMarkdownEditor extends ConsumerStatefulWidget {
     this.toolbarLabel = 'Markdown',
     this.editOnLongPress = false,
     this.onEditingChanged,
+    this.toolbarLeading,
+    this.toolbarTrailing,
   });
   final String value, placeholder, toolbarLabel;
   final ValueChanged<String> onChanged;
   final bool readOnly, toolbar, editOnLongPress;
   final ValueChanged<bool>? onEditingChanged;
+  final Widget? toolbarLeading, toolbarTrailing;
   @override
   ConsumerState<LiveMarkdownEditor> createState() => LiveMarkdownEditorState();
 }
@@ -116,6 +119,10 @@ class LiveMarkdownEditorState extends ConsumerState<LiveMarkdownEditor> {
   final _focus = FocusNode();
   String _last = '';
   bool get _isEditing => _active != null || _source;
+  bool get _showToolbarActions =>
+      widget.toolbar &&
+      !widget.readOnly &&
+      (!widget.editOnLongPress || _isEditing);
 
   void finishEditing() {
     _focus.unfocus(disposition: UnfocusDisposition.previouslyFocusedChild);
@@ -370,55 +377,61 @@ class LiveMarkdownEditorState extends ConsumerState<LiveMarkdownEditor> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         mainAxisSize: MainAxisSize.min,
         children: [
-          if (widget.toolbar &&
-              !widget.readOnly &&
-              (!widget.editOnLongPress || _isEditing))
+          if (_showToolbarActions ||
+              widget.toolbarLeading != null ||
+              widget.toolbarTrailing != null)
             Row(
               children: [
-                Text(
-                  widget.toolbarLabel,
-                  style: const TextStyle(fontSize: 12, color: Palette.muted),
-                ),
-                const Spacer(),
-                IconButton(
-                  tooltip: 'Прикрепить изображение или файл',
-                  onPressed: _pasting ? null : _attach,
-                  icon: const Icon(Icons.attach_file_rounded, size: 19),
-                ),
-                IconButton(
-                  tooltip: 'Вставить из буфера обмена',
-                  onPressed: _pasting ? null : _paste,
-                  icon: _pasting
-                      ? const SizedBox(
-                          width: 18,
-                          height: 18,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : const Icon(Icons.content_paste_rounded, size: 18),
-                ),
-                IconButton(
-                  tooltip: _source ? 'Live Preview' : 'Исходный Markdown',
-                  onPressed: _pasting
-                      ? null
-                      : () {
-                          if (widget.editOnLongPress && _source) {
-                            finishEditing();
-                            return;
-                          }
-                          setState(() {
-                            _source = !_source;
-                            _active = null;
-                            _controller.text = _last;
-                            _rememberedSelection = null;
-                            _load(_last);
-                          });
-                          if (widget.editOnLongPress) _focus.requestFocus();
-                        },
-                  icon: Icon(
-                    _source ? Icons.visibility_outlined : Icons.code_rounded,
-                    size: 19,
+                if (widget.toolbarLeading != null)
+                  widget.toolbarLeading!
+                else if (widget.toolbarLabel.isNotEmpty)
+                  Text(
+                    widget.toolbarLabel,
+                    style: const TextStyle(fontSize: 12, color: Palette.muted),
                   ),
-                ),
+                const Spacer(),
+                if (_showToolbarActions) ...[
+                  IconButton(
+                    tooltip: 'Прикрепить изображение или файл',
+                    onPressed: _pasting ? null : _attach,
+                    icon: const Icon(Icons.attach_file_rounded, size: 19),
+                  ),
+                  IconButton(
+                    tooltip: 'Вставить из буфера обмена',
+                    onPressed: _pasting ? null : _paste,
+                    icon: _pasting
+                        ? const SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.content_paste_rounded, size: 18),
+                  ),
+                  IconButton(
+                    tooltip: _source ? 'Live Preview' : 'Исходный Markdown',
+                    onPressed: _pasting
+                        ? null
+                        : () {
+                            if (widget.editOnLongPress && _source) {
+                              finishEditing();
+                              return;
+                            }
+                            setState(() {
+                              _source = !_source;
+                              _active = null;
+                              _controller.text = _last;
+                              _rememberedSelection = null;
+                              _load(_last);
+                            });
+                            if (widget.editOnLongPress) _focus.requestFocus();
+                          },
+                    icon: Icon(
+                      _source ? Icons.visibility_outlined : Icons.code_rounded,
+                      size: 19,
+                    ),
+                  ),
+                ],
+                if (widget.toolbarTrailing != null) widget.toolbarTrailing!,
               ],
             ),
           if (widget.readOnly)

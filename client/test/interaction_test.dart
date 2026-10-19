@@ -17,6 +17,7 @@ import 'package:yggvion/ui/app.dart';
 import 'package:yggvion/ui/calendar.dart';
 import 'package:yggvion/ui/dashboard.dart';
 import 'package:yggvion/ui/markdown_editor.dart';
+import 'package:yggvion/ui/notes.dart';
 import 'package:yggvion/ui/providers.dart';
 import 'package:yggvion/ui/repeat_editor.dart';
 import 'package:yggvion/ui/settings.dart';
@@ -273,12 +274,15 @@ void main() {
       expect(repo.snapshot.tasks.single.title, 'Из клавиатуры');
       await command(tester, LogicalKeyboardKey.keyN, shift: true);
       expect(repo.snapshot.notes.where((n) => n.pinned.isEmpty), hasLength(1));
-      final noteTitle = find.byKey(const ValueKey('note-title'));
+      final noteContent = find.descendant(
+        of: find.byType(NotesPage),
+        matching: find.byType(TextField),
+      );
       expect(
         tester
             .widget<EditableText>(
               find.descendant(
-                of: noteTitle,
+                of: noteContent,
                 matching: find.byType(EditableText),
               ),
             )
@@ -286,12 +290,11 @@ void main() {
             .hasFocus,
         isTrue,
       );
-      await tester.enterText(noteTitle, 'Название с клавиатуры');
-      await tester.testTextInput.receiveAction(TextInputAction.done);
+      await tester.enterText(noteContent, '# Заметка с клавиатуры\n\nТекст');
       await settle(tester);
       expect(
-        repo.snapshot.notes.where((n) => n.pinned.isEmpty).single.title,
-        'Название с клавиатуры',
+        repo.snapshot.notes.where((n) => n.pinned.isEmpty).single.content,
+        '# Заметка с клавиатуры\n\nТекст',
       );
       await command(tester, LogicalKeyboardKey.keyF);
       expect(find.byType(SearchDialog), findsOneWidget);
@@ -350,46 +353,67 @@ void main() {
 
   for (final mobile in [false, true]) {
     testInteraction(
-      'new note title receives focus from all creation buttons (mobile: $mobile)',
+      'creating notes focuses Markdown directly without duplicate controls (mobile: $mobile)',
       (tester) async {
         final repo = await workspace(tester, mobile: mobile);
-        if (mobile) {
-          await tester.tap(find.byTooltip('Создать'));
-          await tester.pumpAndSettle();
-          await tester.tap(find.text('Заметка').last);
-        } else {
-          await tester.tap(find.text('Заметка').first);
+        Future<void> create() async {
+          if (mobile) {
+            await tester.tap(find.byTooltip('Создать'));
+            await tester.pumpAndSettle();
+            await tester.tap(find.text('Заметка').last);
+          } else {
+            await tester.tap(find.text('Заметка').first);
+          }
+          await settle(tester);
         }
-        await settle(tester);
-        Future<void> rename(String name) async {
-          final field = find.byKey(const ValueKey('note-title'));
+
+        Future<void> write(String content) async {
+          final field = find.descendant(
+            of: find.byType(NotesPage),
+            matching: find.byType(TextField),
+          );
           final input = tester.widget<EditableText>(
             find.descendant(of: field, matching: find.byType(EditableText)),
           );
           expect(input.focusNode.hasFocus, isTrue);
-          expect(
-            input.controller.selection.textInside(input.controller.text),
-            'Новая заметка',
-          );
-          await tester.enterText(field, name);
-          await tester.testTextInput.receiveAction(TextInputAction.done);
+          expect(input.controller.text, isEmpty);
+          expect(tester.testTextInput.isVisible, isTrue);
+          expect(find.byKey(const ValueKey('note-title')), findsNothing);
+          expect(find.text('Название заметки'), findsNothing);
+          expect(find.text('Новая заметка'), findsNothing);
+          expect(find.byTooltip('Новая заметка'), findsNothing);
+          expect(find.byTooltip('Переименовать'), findsNothing);
+          await tester.enterText(field, content);
           await settle(tester);
         }
 
-        await rename('Первая заметка');
-        final create = mobile
-            ? find.byTooltip('Новая заметка')
-            : find.text('Новая заметка');
-        await tester.ensureVisible(create);
-        await tester.tap(create);
-        await settle(tester);
-        await rename('Вторая заметка');
+        await create();
+        await write('# Первая заметка\n\nПервый текст');
+        if (mobile) {
+          await tester.tap(find.text('Готово'));
+          await settle(tester);
+        }
+        await create();
+        await write('# Вторая заметка\n\nВторой текст');
         expect(
           repo.snapshot.notes
               .where((n) => n.pinned.isEmpty)
-              .map((n) => n.title),
-          containsAll(['Первая заметка', 'Вторая заметка']),
+              .map((n) => n.content),
+          containsAll([
+            '# Первая заметка\n\nПервый текст',
+            '# Вторая заметка\n\nВторой текст',
+          ]),
         );
+        if (mobile) {
+          await tester.tap(find.text('Готово'));
+          await settle(tester);
+          await tester.tap(find.text('Вторая заметка', findRichText: true));
+          await settle(tester);
+          expect(find.byType(TextField), findsNothing);
+        } else {
+          expect(find.text('Первая заметка'), findsOneWidget);
+          expect(find.text('Вторая заметка'), findsOneWidget);
+        }
         expect(tester.takeException(), isNull);
       },
     );

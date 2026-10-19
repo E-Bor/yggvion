@@ -21,13 +21,14 @@ void main() {
   });
 
   testInteraction(
-    'long project names fit the calendar toolbar after selection and filter the planner',
+    'sidebar projects filter today and planner in expanded and compact modes',
     (tester) async {
       const title = 'Разработка личного приложения и долгосрочные планы';
+      const color = Color(0xff82b8a0);
       final repo = await workspace(
         tester,
         prepare: (repo) async {
-          await repo.saveProject(title, 0xff82b8a0);
+          await repo.saveProject(title, color.toARGB32());
           final project = repo.snapshot.projects.single;
           await repo.createTask('Личная встреча', start: repo.now());
           await repo.createTask(
@@ -39,54 +40,50 @@ void main() {
           await repo.createTask('Личная идея');
         },
       );
-      final picker = find.byKey(const ValueKey('project-filter'));
-      await tester.tap(picker);
-      await tester.pumpAndSettle();
-      await tester.tap(
-        find.descendant(
-          of: find.byType(PopupMenuItem<String>),
-          matching: find.text(title),
-        ),
-      );
+      final projectId = repo.snapshot.projects.single.id;
+      final project = find.byKey(ValueKey('sidebar-project-$projectId'));
+      expect(find.byTooltip('Фильтр проектов'), findsNothing);
+      expect(find.text('Все проекты'), findsNothing);
+      await tester.tap(project);
       await settle(tester);
-
       expect(find.text('Встреча проекта'), findsOneWidget);
       expect(find.text('Личная встреча'), findsNothing);
-      final label = find.descendant(of: picker, matching: find.text(title));
-      final paragraph = tester.renderObject<RenderParagraph>(label);
+      final paragraph = tester.renderObject<RenderParagraph>(find.text(title));
       expect(paragraph.maxLines, 1);
       expect(paragraph.didExceedMaxLines, isTrue);
-      expect(paragraph.size.height, lessThan(20));
-      final day = find.descendant(
-        of: find.byKey(const ValueKey('calendar-view-picker')),
-        matching: find.text('День'),
-      );
-      expect(tester.getCenter(label).dy, closeTo(tester.getCenter(day).dy, .5));
-      expect(find.byTooltip(title), findsOneWidget);
-      expect(tester.getSize(picker).width, lessThanOrEqualTo(150));
-      expect(tester.takeException(), isNull);
       await expectLater(
         find.byType(YggvionApp),
         matchesGoldenFile('goldens/project_filter_1440.png'),
       );
 
-      // Reopening the menu and cancelling must preserve the filter.
-      await tester.tap(picker);
-      await tester.pumpAndSettle();
-      expect(find.byIcon(Icons.check_rounded), findsOneWidget);
-      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.drag(
+        find.byKey(const ValueKey('sidebar-resize-handle')),
+        const Offset(-150, 0),
+      );
       await settle(tester);
+      expect(find.byTooltip(title), findsOneWidget);
+      expect(find.text(title), findsNothing);
+      final button = tester.widget<IconButton>(project);
+      expect((button.icon as Icon).color, color);
+      expect(tester.getSize(project).width, greaterThanOrEqualTo(44));
+      expect(tester.getSize(project).height, greaterThanOrEqualTo(44));
       expect(
         tester.widget<CalendarPane>(find.byType(CalendarPane)).projectId,
-        repo.snapshot.projects.single.id,
+        projectId,
+      );
+      await expectLater(
+        find.byType(YggvionApp),
+        matchesGoldenFile('goldens/project_filter_collapsed.png'),
       );
 
       await command(tester, LogicalKeyboardKey.digit2);
+      expect(find.byTooltip('Фильтр проектов'), findsNothing);
+      expect(find.byKey(const ValueKey('project-filter')), findsNothing);
+      expect(find.text('Все проекты'), findsNothing);
       expect(find.text('Идея проекта'), findsOneWidget);
       expect(find.text('Личная идея'), findsNothing);
-      await tester.tap(picker.last);
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('Все проекты'));
+      // The entire indicator button is clickable; tapping it again resets.
+      await tester.tapAt(tester.getTopLeft(project) + const Offset(6, 6));
       await settle(tester);
       expect(find.text('Идея проекта'), findsOneWidget);
       expect(find.text('Личная идея'), findsOneWidget);
@@ -94,7 +91,67 @@ void main() {
         tester.widget<CalendarPane>(find.byType(CalendarPane)).projectId,
         '',
       );
+      await tester.tap(project);
+      await settle(tester);
+      await tester.drag(
+        find.byKey(const ValueKey('sidebar-resize-handle')),
+        const Offset(150, 0),
+      );
+      await settle(tester);
+      expect(tester.widget<ListTile>(project).selected, isTrue);
+      expect(find.text('Личная идея'), findsNothing);
+      await tester.tap(project);
+      await settle(tester);
+      expect(find.text('Личная идея'), findsOneWidget);
+      // A remotely deleted project must not leave an invisible active filter.
+      await tester.tap(project);
+      await settle(tester);
+      await tester.runAsync(
+        () => repo.deleteProject(repo.snapshot.projects.single),
+      );
+      await settle(tester);
+      expect(project, findsNothing);
+      expect(find.text('Личная идея'), findsOneWidget);
+      expect(find.text('Идея проекта'), findsOneWidget);
+      expect(
+        tester.widget<CalendarPane>(find.byType(CalendarPane)).projectId,
+        '',
+      );
       expect(tester.takeException(), isNull);
     },
   );
+
+  testInteraction('phone planner keeps a single project filter in the header', (
+    tester,
+  ) async {
+    await workspace(
+      tester,
+      mobile: true,
+      prepare: (repo) async {
+        await repo.saveProject('Работа', 0xff82b8a0);
+        await repo.createTask(
+          'Рабочая идея',
+          projectId: repo.snapshot.projects.single.id,
+        );
+        await repo.createTask('Личная идея');
+      },
+    );
+    await tester.tap(find.byKey(const ValueKey('mobile-nav-planner')));
+    await settle(tester);
+    final filter = find.byTooltip('Фильтр проектов');
+    expect(filter, findsOneWidget);
+    expect(find.text('Все проекты'), findsNothing);
+    await tester.tap(filter);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Работа'));
+    await settle(tester);
+    expect(find.text('Рабочая идея'), findsOneWidget);
+    expect(find.text('Личная идея'), findsNothing);
+    await tester.tap(filter);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Все проекты'));
+    await settle(tester);
+    expect(find.text('Личная идея'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
 }

@@ -235,6 +235,21 @@ class Note {
   String get title => entity.data['title'] as String;
   String get content => entity.data['content'] as String? ?? '';
   String get pinned => entity.data['pinned'] as String? ?? '';
+  // Titles remain on the wire for compatibility. The UI identifies regular
+  // notes by their content, without a separate editable title.
+  String get displayLabel {
+    if (pinned.isNotEmpty) return title;
+    final firstLine = const LineSplitter()
+        .convert(content)
+        .map((line) => line.trim())
+        .where((line) => line.isNotEmpty)
+        .firstOrNull;
+    if (firstLine == null) {
+      return title == 'Новая заметка' ? 'Пустая заметка' : title;
+    }
+    return firstLine.replaceFirst(RegExp(r'^#{1,6}\s+'), '');
+  }
+
   static Entity create(
     String id,
     String title, {

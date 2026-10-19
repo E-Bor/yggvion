@@ -54,6 +54,8 @@ class _WorkspaceState extends ConsumerState<Workspace>
   String projectId = '', query = '';
   Task? selected;
   String? selectedNote;
+  String? newNoteId;
+  Future<void>? noteCleanup;
   DateTime? calendarDate, homeDate;
   Timer? ticker;
   bool mobileTasks = true;
@@ -145,9 +147,28 @@ class _WorkspaceState extends ConsumerState<Workspace>
   }
 
   void go(PageKind next) {
+    if (page == PageKind.notes && next != PageKind.notes) {
+      final repo = ref.read(appProvider);
+      final noteIds = repo.snapshot.notes
+          .where((note) => note.pinned.isEmpty)
+          .map((note) => note.id)
+          .toList();
+      if (noteIds.isNotEmpty) {
+        final cleanup = guard(context, () => repo.discardEmptyNotes(noteIds));
+        noteCleanup = cleanup;
+        unawaited(
+          cleanup.whenComplete(() {
+            if (mounted && noteCleanup == cleanup) {
+              setState(() => noteCleanup = null);
+            }
+          }),
+        );
+      }
+    }
     setState(() {
       page = next;
       selected = null;
+      newNoteId = null;
       birthdaysOpen = false;
     });
   }
@@ -162,12 +183,13 @@ class _WorkspaceState extends ConsumerState<Workspace>
       setState(() {
         page = PageKind.notes;
         selectedNote = result.id;
+        newNoteId = null;
       });
     } else if (result.kind == 'task') {
       await openTask(context, task: Task(result));
     } else if (result.kind == 'series') {
+      go(PageKind.planner);
       setState(() {
-        page = PageKind.planner;
         calendarDate = parseTime(result.data['start']).toLocal();
       });
     }
@@ -179,95 +201,21 @@ class _WorkspaceState extends ConsumerState<Workspace>
     setState(() {
       page = PageKind.notes;
       selectedNote = note.id;
+      newNoteId = note.id;
     });
-    await editNoteTitle(context, ref, note);
   });
-
-  Widget projectFilter() {
-    final repo = ref.watch(appProvider);
-    final selected = repo.snapshot.projects
-        .where((project) => project.id == projectId)
-        .firstOrNull;
-    final value = selected?.id ?? '';
-    return ConstrainedBox(
-      constraints: const BoxConstraints(maxWidth: 180),
-      child: PopupMenuButton<String>(
-        key: const ValueKey('project-filter'),
-        tooltip: selected?.title ?? 'Фильтр проектов',
-        initialValue: value,
-        position: PopupMenuPosition.under,
-        offset: const Offset(0, 6),
-        borderRadius: BorderRadius.circular(8),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        constraints: const BoxConstraints(minWidth: 200, maxWidth: 320),
-        onSelected: (value) => setState(() => projectId = value),
-        itemBuilder: (menuContext) => [
-          for (final entry in [
-            (id: '', title: 'Все проекты'),
-            ...repo.snapshot.projects.map((p) => (id: p.id, title: p.title)),
-          ])
-            PopupMenuItem(
-              value: entry.id,
-              child: Row(
-                children: [
-                  SizedBox(
-                    width: 24,
-                    child: entry.id == value
-                        ? Icon(
-                            Icons.check_rounded,
-                            size: 17,
-                            color: menuContext.accentColor,
-                          )
-                        : null,
-                  ),
-                  const SizedBox(width: 8),
-                  Flexible(
-                    child: Text(
-                      entry.title,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(fontSize: 13),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-        ],
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Flexible(
-                child: Text(
-                  selected?.title ?? 'Все проекты',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    fontFamily: 'Inter',
-                    color: Palette.text,
-                    fontSize: 13,
-                    fontWeight: FontWeight.w500,
-                    height: 1.2,
-                  ),
-                ),
-              ),
-              const SizedBox(width: 6),
-              const Icon(
-                Icons.expand_more_rounded,
-                size: 16,
-                color: Palette.muted,
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
 
   @override
   Widget build(BuildContext context) {
     final repo = ref.watch(appProvider), size = MediaQuery.sizeOf(context);
+    ref.listen(appProvider, (_, current) {
+      if (projectId.isNotEmpty &&
+          !current.snapshot.projects.any(
+            (project) => project.id == projectId,
+          )) {
+        setState(() => projectId = '');
+      }
+    });
     final desktop = size.width >= 1000;
     final conflicts =
         repo.conflictCount +
@@ -328,8 +276,11 @@ class _WorkspaceState extends ConsumerState<Workspace>
           }
         },
       },
-      child: Focus(
+      // Unfocusing an input must land inside the workspace shortcut handler,
+      // not on the Navigator's route scope above it.
+      child: FocusScope(
         autofocus: true,
+        debugLabel: 'Workspace',
         child: Scaffold(
           body: SafeArea(
             child: Row(
@@ -373,10 +324,20 @@ class _WorkspaceState extends ConsumerState<Workspace>
                           PageKind.today => _today(desktop),
                           PageKind.planner => _planner(desktop),
                           PageKind.board => _board(),
-                          PageKind.notes => NotesPage(
-                            key: ValueKey(selectedNote),
-                            initialId: selectedNote,
-                          ),
+                          // Do not reopen a stale empty draft while its queued
+                          // deletion is still being written.
+                          PageKind.notes =>
+                            noteCleanup != null
+                                ? const Center(
+                                    child: CircularProgressIndicator(
+                                      key: ValueKey('note-cleanup-progress'),
+                                    ),
+                                  )
+                                : NotesPage(
+                                    key: ValueKey(selectedNote),
+                                    initialId: selectedNote,
+                                    editId: newNoteId,
+                                  ),
                           PageKind.settings => PopScope(
                             canPop: !birthdaysOpen,
                             onPopInvokedWithResult: (didPop, _) {
@@ -545,34 +506,28 @@ class _WorkspaceState extends ConsumerState<Workspace>
                 ),
             ]
           : <Widget>[
-              if (page != PageKind.settings && page != PageKind.notes)
-                if (desktop && wide)
-                  ConstrainedBox(
-                    constraints: const BoxConstraints(maxWidth: 150),
-                    child: projectFilter(),
-                  )
-                else if (repo.snapshot.projects.isNotEmpty)
-                  PopupMenuButton<String>(
-                    tooltip: 'Фильтр проектов',
-                    icon: Icon(
-                      Icons.filter_list_rounded,
-                      color: projectId.isEmpty
-                          ? Palette.muted
-                          : context.accentColor,
-                    ),
-                    onSelected: (value) => setState(() => projectId = value),
-                    itemBuilder: (_) => [
-                      const PopupMenuItem(
-                        value: '',
-                        child: Text('Все проекты'),
-                      ),
-                      for (final project in repo.snapshot.projects)
-                        PopupMenuItem(
-                          value: project.id,
-                          child: Text(project.title),
-                        ),
-                    ],
+              if (!desktop &&
+                  page != PageKind.settings &&
+                  page != PageKind.notes &&
+                  repo.snapshot.projects.isNotEmpty)
+                PopupMenuButton<String>(
+                  tooltip: 'Фильтр проектов',
+                  icon: Icon(
+                    Icons.filter_list_rounded,
+                    color: projectId.isEmpty
+                        ? Palette.muted
+                        : context.accentColor,
                   ),
+                  onSelected: (value) => setState(() => projectId = value),
+                  itemBuilder: (_) => [
+                    const PopupMenuItem(value: '', child: Text('Все проекты')),
+                    for (final project in repo.snapshot.projects)
+                      PopupMenuItem(
+                        value: project.id,
+                        child: Text(project.title),
+                      ),
+                  ],
+                ),
               TimerControl(compact: !wide),
               IconButton(
                 tooltip: 'Поиск · ⌘F / Ctrl+F',
@@ -794,10 +749,8 @@ class _WorkspaceState extends ConsumerState<Workspace>
                       ),
                     ),
                   for (var i = 0; i < 4; i++) navigation(i),
-                  if (collapsed)
-                    const Spacer()
-                  else ...[
-                    const SizedBox(height: 30),
+                  const SizedBox(height: 30),
+                  if (!collapsed) ...[
                     const Padding(
                       padding: EdgeInsets.symmetric(horizontal: 26),
                       child: Text(
@@ -810,12 +763,52 @@ class _WorkspaceState extends ConsumerState<Workspace>
                       ),
                     ),
                     const SizedBox(height: 12),
-                    Expanded(
-                      child: ListView(
-                        padding: const EdgeInsets.symmetric(horizontal: 14),
-                        children: [
-                          for (final p in repo.snapshot.projects)
+                  ],
+                  Expanded(
+                    child: ListView(
+                      padding: const EdgeInsets.symmetric(horizontal: 14),
+                      children: [
+                        for (final p in repo.snapshot.projects)
+                          if (collapsed)
+                            Padding(
+                              padding: const EdgeInsets.only(bottom: 4),
+                              child: Semantics(
+                                selected: projectId == p.id,
+                                child: IconButton(
+                                  key: ValueKey('sidebar-project-${p.id}'),
+                                  tooltip: p.title,
+                                  style: IconButton.styleFrom(
+                                    minimumSize: const Size(44, 44),
+                                    backgroundColor: projectId == p.id
+                                        ? Color(p.color).withValues(alpha: .14)
+                                        : Colors.transparent,
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(12),
+                                      side: BorderSide(
+                                        color: projectId == p.id
+                                            ? Color(
+                                                p.color,
+                                              ).withValues(alpha: .45)
+                                            : Colors.transparent,
+                                      ),
+                                    ),
+                                  ),
+                                  onPressed: () => setState(
+                                    () => projectId = projectId == p.id
+                                        ? ''
+                                        : p.id,
+                                  ),
+                                  icon: Icon(
+                                    Icons.circle,
+                                    size: 12,
+                                    color: Color(p.color),
+                                  ),
+                                ),
+                              ),
+                            )
+                          else
                             ListTile(
+                              key: ValueKey('sidebar-project-${p.id}'),
                               dense: true,
                               leading: Icon(
                                 Icons.circle,
@@ -833,19 +826,18 @@ class _WorkspaceState extends ConsumerState<Workspace>
                                 () => projectId = projectId == p.id ? '' : p.id,
                               ),
                             ),
-                          if (repo.snapshot.projects.isEmpty)
-                            TextButton.icon(
-                              onPressed: () => go(PageKind.settings),
-                              icon: const Icon(Icons.add_rounded, size: 14),
-                              label: const Text(
-                                'Добавить проект',
-                                style: TextStyle(fontSize: 12),
-                              ),
+                        if (repo.snapshot.projects.isEmpty && !collapsed)
+                          TextButton.icon(
+                            onPressed: () => go(PageKind.settings),
+                            icon: const Icon(Icons.add_rounded, size: 14),
+                            label: const Text(
+                              'Добавить проект',
+                              style: TextStyle(fontSize: 12),
                             ),
-                        ],
-                      ),
+                          ),
+                      ],
                     ),
-                  ],
+                  ),
                   navigation(PageKind.settings.index),
                   if (collapsed) ...[
                     IconButton(
@@ -1056,8 +1048,6 @@ class _WorkspaceState extends ConsumerState<Workspace>
                   isDense: true,
                 ),
               ),
-              const SizedBox(height: 12),
-              projectFilter(),
             ],
           ),
         ),
@@ -1363,7 +1353,9 @@ class _SearchDialogState extends ConsumerState<SearchDialog> {
                           color: context.accentColor,
                         ),
                         title: Text(
-                          e.data['title'] as String? ?? '',
+                          e.kind == 'note'
+                              ? Note(e).displayLabel
+                              : e.data['title'] as String? ?? '',
                           maxLines: 2,
                           overflow: TextOverflow.ellipsis,
                         ),

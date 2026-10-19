@@ -22,6 +22,40 @@ void main() {
   tearDown(() async {
     await repo.db.close();
   });
+  test('note labels follow Markdown content and preserve legacy metadata', () {
+    final old = Note.create(
+      'note',
+      'Прежнее название',
+      content: '\n\n## План\n\nТекст',
+    );
+    expect(Note(old).displayLabel, 'План');
+    expect(Note(old).title, 'Прежнее название');
+    expect(
+      Note(
+        old.change({'content': 'config_name: true\nother: false'}),
+      ).displayLabel,
+      'config_name: true',
+    );
+    expect(
+      Note(old.change({'content': '   '})).displayLabel,
+      'Прежнее название',
+    );
+    expect(
+      Note(Note.create('empty', 'Новая заметка')).displayLabel,
+      'Пустая заметка',
+    );
+    expect(
+      Note(
+        Note.create(
+          'scratchpad',
+          'Быстрая заметка',
+          pinned: 'scratchpad',
+          content: '# Текст',
+        ),
+      ).displayLabel,
+      'Быстрая заметка',
+    );
+  });
   test(
     'new tasks have no estimate until planned; split preserves sum',
     () async {

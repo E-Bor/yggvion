@@ -481,15 +481,33 @@ class Repository extends ChangeNotifier {
     return Note(note);
   }
 
-  Future<void> saveNote(String id, String title, String content) async {
-    final entity = await db.entity(id);
-    if (entity == null || entity.deleted) return;
-    await commit([
-      entity.change({
-        'title': title.trim().isEmpty ? 'Без названия' : title.trim(),
-        'content': content,
-      }),
-    ]);
+  Future<void> saveNote(String id, String title, String content) =>
+      commitComputed(() async {
+        final entity = await db.entity(id);
+        if (entity == null || entity.deleted) return [];
+        return [
+          entity.change({
+            'title': title.trim().isEmpty ? 'Без названия' : title.trim(),
+            'content': content,
+          }),
+        ];
+      });
+
+  Future<void> discardEmptyNotes(Iterable<String> noteIds) {
+    final ids = noteIds.toSet();
+    return commitComputed(() async {
+      final changes = <Entity>[];
+      for (final id in ids) {
+        if (id == 'scratchpad' || id == 'reference') continue;
+        final entity = await db.entity(id);
+        if (entity == null || entity.deleted || entity.kind != 'note') continue;
+        final note = Note(entity);
+        if (note.pinned.isEmpty && note.content.trim().isEmpty) {
+          changes.add(entity.tombstone());
+        }
+      }
+      return changes;
+    });
   }
 
   Future<void> saveProject(String title, int color, {Project? project}) async {

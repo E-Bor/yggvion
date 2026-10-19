@@ -68,6 +68,56 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testInteraction(
+    'new phone note opens above long notes and focuses only once',
+    (tester) async {
+      final repo = await workspace(
+        tester,
+        mobile: true,
+        prepare: (repo) => repo.saveNote(
+          'scratchpad',
+          'Быстрая заметка',
+          List.generate(40, (i) => 'Строка черновика $i').join('\n\n'),
+        ),
+      );
+      await tester.tap(find.byTooltip('Создать'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Заметка').last);
+      await settle(tester);
+      final id = repo.snapshot.notes
+          .singleWhere((note) => note.pinned.isEmpty)
+          .id;
+      final field = find.byType(TextField);
+      expect(tester.widget<TextField>(field).focusNode!.hasFocus, isTrue);
+      tester.view.viewInsets = const FakeViewPadding(bottom: 280);
+      addTearDown(tester.view.resetViewInsets);
+      await tester.pumpAndSettle();
+      expect(field.hitTestable(), findsOneWidget);
+      await expectLater(
+        find.byType(YggvionApp),
+        matchesGoldenFile('goldens/note_creation_390.png'),
+      );
+      await tester.enterText(field, '# Новая идея\n\nТекст');
+      await settle(tester);
+      await tester.tap(find.byKey(ValueKey('finish-note-$id')));
+      await settle(tester);
+      tester.view.resetViewInsets();
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('mobile-nav-today')));
+      await settle(tester);
+      await tester.tap(find.byKey(const ValueKey('mobile-nav-notes')));
+      await settle(tester);
+      expect(find.byType(TextField), findsNothing);
+      expect(tester.testTextInput.isVisible, isFalse);
+      expect(find.text('Новая идея', findRichText: true), findsOneWidget);
+      expect(
+        repo.snapshot.notes.singleWhere((note) => note.id == id).content,
+        '# Новая идея\n\nТекст',
+      );
+      expect(tester.takeException(), isNull);
+    },
+  );
+
   for (final kind in ['scratchpad', 'reference', 'regular']) {
     testInteraction(
       'phone $kind note edits only on hold and saves before dismissal',
@@ -134,7 +184,14 @@ void main() {
           find.text('Второй абзац с правкой', findRichText: true),
         );
         await settle(tester);
-        await tester.tap(find.text('Тестовая заметка'));
+        await tester.tapAt(
+          tester.getTopLeft(
+                find.byWidgetPredicate(
+                  (widget) => widget is NotePanel && widget.noteId == id,
+                ),
+              ) +
+              const Offset(12, 8),
+        );
         await settle(tester);
         expect(find.byType(TextField), findsNothing);
         expect(tester.testTextInput.isVisible, isFalse);

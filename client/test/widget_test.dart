@@ -14,6 +14,7 @@ import 'package:yggvion/data/sync.dart';
 import 'package:yggvion/domain/models.dart';
 import 'package:yggvion/ui/app.dart';
 import 'package:yggvion/ui/providers.dart';
+import 'package:yggvion/ui/notes.dart';
 
 void main() {
   setUpAll(() async {
@@ -208,7 +209,7 @@ void main() {
       expect(tester.takeException(), isNull);
       await tester.tap(find.text('Заметки').last);
       await tester.pumpAndSettle();
-      expect(find.text('Быстрая заметка'), findsWidgets);
+      expect(find.byType(NotePanel), findsWidgets);
       expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox.shrink());
       sync.dispose();
