@@ -6,8 +6,9 @@ import 'providers.dart';
 import 'theme.dart';
 
 class Dashboard extends ConsumerStatefulWidget {
-  const Dashboard({super.key, required this.projectId});
+  const Dashboard({super.key, required this.projectId, this.date});
   final String projectId;
+  final DateTime? date;
   @override
   ConsumerState<Dashboard> createState() => _DashboardState();
 }
@@ -40,7 +41,11 @@ class _DashboardState extends ConsumerState<Dashboard> {
         children: [
           SizedBox(
             height: calendarHeight,
-            child: CalendarPane(projectId: widget.projectId),
+            child: CalendarPane(
+              projectId: widget.projectId,
+              initialDate: widget.date,
+              showToolbar: false,
+            ),
           ),
           PanelDivider(
             key: const ValueKey('calendar-notes-divider'),

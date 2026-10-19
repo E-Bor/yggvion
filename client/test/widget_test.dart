@@ -84,6 +84,23 @@ void main() {
         find.byType(YggvionApp),
         matchesGoldenFile('goldens/workspace_${size.width.toInt()}.png'),
       );
+      if (size.width >= 1000) {
+        await tester.tap(find.byKey(const ValueKey('sidebar-toggle')));
+        await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 80)),
+        );
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull);
+        await expectLater(
+          find.byType(YggvionApp),
+          matchesGoldenFile('goldens/workspace_collapsed.png'),
+        );
+        await tester.tap(find.byKey(const ValueKey('sidebar-toggle')));
+        await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 80)),
+        );
+        await tester.pumpAndSettle();
+      }
       await tester.tap(find.text('Спланировать неделю').first);
       await tester.pumpAndSettle();
       await expectLater(

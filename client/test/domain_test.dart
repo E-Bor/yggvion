@@ -601,6 +601,22 @@ END:VCALENDAR''', 'UTC');
     },
   );
 
+  test('sidebar preference survives restart and stays local', () async {
+    final before =
+        (await repo.db.customSelect('SELECT * FROM outbox').get()).length;
+    expect(repo.sidebarCollapsed, isFalse);
+    await repo.setSidebarCollapsed(true);
+    await repo.initialize();
+    expect(repo.sidebarCollapsed, isTrue);
+    await repo.setSidebarCollapsed(false);
+    await repo.initialize();
+    expect(repo.sidebarCollapsed, isFalse);
+    expect(
+      (await repo.db.customSelect('SELECT * FROM outbox').get()).length,
+      before,
+    );
+  });
+
   test('invalid intervals do not partially alter a calendar block', () async {
     final t = await repo.createTask('Интервал', start: now);
     final b = repo.snapshot.taskBlocks(t.id).single;

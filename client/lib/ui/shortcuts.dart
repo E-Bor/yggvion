@@ -29,7 +29,8 @@ Future<void> showShortcutHelp(BuildContext context) => showDialog<void>(
               ('Заметки', '⌘ / Ctrl + 4'),
               ('Настройки', '⌘ / Ctrl + 5 или ,'),
               ('Пауза / продолжить таймер', '⌘ / Ctrl + Shift + Space'),
-              ('Сохранить задачу', '⌘ / Ctrl + Enter'),
+              ('Сохранить задачу из названия', 'Enter'),
+              ('Перейти в описание задачи', '⌘ / Ctrl + Enter'),
               ('Закрыть окно / отменить выбор', 'Esc'),
               ('Эта справка', 'F1'),
             ])

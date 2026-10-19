@@ -34,6 +34,8 @@ class ScheduleFields extends StatelessWidget {
         minute ?? date.minute,
       );
   DateTime get visibleEnd => allDay ? civil(end, days: -1) : end;
+  String dateLabel(DateTime value) =>
+      '${value.day}.${DateFormat('MMM', 'ru').format(value).replaceAll('.', '')}.${value.year}';
 
   void changeStart(DateTime next) {
     final span = DateTime.utc(
@@ -113,17 +115,18 @@ class ScheduleFields extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            LayoutBuilder(
-              builder: (context, constraints) {
+            Builder(
+              builder: (context) {
+                final multipleDays = !DateUtils.isSameDay(start, visibleEnd);
                 final firstDate = field(
                   'schedule-start-date',
-                  DateFormat('d MMM y', 'ru').format(start),
+                  dateLabel(start),
                   'Дата начала',
                   () => date(context, true),
                 );
                 final lastDate = field(
                   'schedule-end-date',
-                  DateFormat('d MMM y', 'ru').format(visibleEnd),
+                  dateLabel(visibleEnd),
                   'Дата окончания',
                   () => date(context, false),
                 );
@@ -140,26 +143,34 @@ class ScheduleFields extends StatelessWidget {
                   () => time(context, false),
                 );
                 const dash = Text('—', style: TextStyle(color: Palette.muted));
-                if (constraints.maxWidth < 420) {
-                  return Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Wrap(
-                        crossAxisAlignment: WrapCrossAlignment.center,
-                        children: [firstDate, dash, lastDate],
-                      ),
-                      if (!allDay) Row(children: [firstTime, dash, lastTime]),
-                    ],
-                  );
-                }
                 return Wrap(
                   crossAxisAlignment: WrapCrossAlignment.center,
                   children: [
-                    firstDate,
-                    if (!allDay) firstTime,
-                    dash,
-                    if (!allDay) lastTime,
-                    lastDate,
+                    Wrap(
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      children: [firstDate, if (!allDay) firstTime],
+                    ),
+                    if (multipleDays || !allDay)
+                      Wrap(
+                        crossAxisAlignment: WrapCrossAlignment.center,
+                        children: [
+                          dash,
+                          if (multipleDays) lastDate,
+                          if (!allDay) lastTime,
+                        ],
+                      ),
+                    if (!multipleDays)
+                      IconButton(
+                        key: const ValueKey('schedule-end-date'),
+                        tooltip: 'Выбрать дату окончания',
+                        onPressed: () => date(context, false),
+                        visualDensity: VisualDensity.compact,
+                        icon: const Icon(
+                          Icons.date_range_outlined,
+                          size: 17,
+                          color: Palette.muted,
+                        ),
+                      ),
                   ],
                 );
               },

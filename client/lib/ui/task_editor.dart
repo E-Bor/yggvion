@@ -576,6 +576,7 @@ class TaskEditor extends ConsumerStatefulWidget {
 
 class _TaskEditorState extends ConsumerState<TaskEditor> {
   final title = TextEditingController();
+  final descriptionKey = GlobalKey<LiveMarkdownEditorState>();
   String description = '',
       projectId = '',
       rule = '',
@@ -591,7 +592,7 @@ class _TaskEditorState extends ConsumerState<TaskEditor> {
     super.initState();
     final repo = ref.read(appProvider);
     final task = repo.snapshot.task(widget.taskId ?? '');
-    title.text = task?.title ?? '';
+    title.text = (task?.title ?? '').replaceAll(RegExp(r'[\r\n]+'), ' ');
     description = task?.description ?? '';
     projectId = task?.projectId ?? '';
     if (task != null) {
@@ -808,10 +809,10 @@ class _TaskEditorState extends ConsumerState<TaskEditor> {
     return CallbackShortcuts(
       bindings: {
         const SingleActivator(LogicalKeyboardKey.enter, meta: true): () {
-          if (!saving) save();
+          if (!saving) descriptionKey.currentState?.focusEditor();
         },
         const SingleActivator(LogicalKeyboardKey.enter, control: true): () {
-          if (!saving) save();
+          if (!saving) descriptionKey.currentState?.focusEditor();
         },
       },
       child: Dialog(
@@ -836,7 +837,18 @@ class _TaskEditorState extends ConsumerState<TaskEditor> {
                         key: const ValueKey('task-title'),
                         controller: title,
                         autofocus: task == null,
-                        maxLines: null,
+                        maxLines: 1,
+                        textInputAction: TextInputAction.done,
+                        inputFormatters: [
+                          FilteringTextInputFormatter.deny(
+                            RegExp(r'[\r\n]+'),
+                            replacementString: ' ',
+                          ),
+                        ],
+                        onEditingComplete: () {},
+                        onSubmitted: (_) {
+                          if (!saving && title.text.trim().isNotEmpty) save();
+                        },
                         style: const TextStyle(
                           fontSize: 24,
                           fontWeight: FontWeight.w500,
@@ -1146,7 +1158,7 @@ class _TaskEditorState extends ConsumerState<TaskEditor> {
                       const SizedBox(height: 12),
                       const Divider(),
                       LiveMarkdownEditor(
-                        key: const ValueKey('task-description'),
+                        key: descriptionKey,
                         value: description,
                         onChanged: (v) => description = v,
                         toolbarLabel: 'Описание',
@@ -1177,20 +1189,28 @@ class _TaskEditorState extends ConsumerState<TaskEditor> {
                                 }
                               }),
                       ),
-                      TextButton(
-                        onPressed: saving
-                            ? null
-                            : () => guard(context, () async {
-                                await repo.status(
-                                  task,
-                                  task.done ? TaskStatus.todo : TaskStatus.done,
-                                );
-                                if (context.mounted) Navigator.pop(context);
-                              }),
-                        child: Text(task.done ? 'Вернуть' : 'Завершить'),
+                      Expanded(
+                        child: Align(
+                          alignment: Alignment.centerLeft,
+                          child: TextButton(
+                            onPressed: saving
+                                ? null
+                                : () => guard(context, () async {
+                                    await repo.status(
+                                      task,
+                                      task.done
+                                          ? TaskStatus.todo
+                                          : TaskStatus.done,
+                                    );
+                                    if (context.mounted) Navigator.pop(context);
+                                  }),
+                            child: Text(task.done ? 'Вернуть' : 'Завершить'),
+                          ),
+                        ),
                       ),
-                    ],
-                    const Spacer(),
+                    ] else
+                      const Spacer(),
+                    const SizedBox(width: 8),
                     FilledButton(
                       onPressed: saving ? null : save,
                       child: Text(saving ? 'Сохранение…' : 'Сохранить'),

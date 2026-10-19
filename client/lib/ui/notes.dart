@@ -5,6 +5,67 @@ import 'markdown_editor.dart';
 import 'providers.dart';
 import 'theme.dart';
 
+Future<void> editNoteTitle(
+  BuildContext context,
+  WidgetRef ref,
+  Note note,
+) async {
+  final name = await showDialog<String>(
+    context: context,
+    builder: (_) => _NoteTitleDialog(title: note.title),
+  );
+  if (name == null || !context.mounted) return;
+  await guard(context, () async {
+    final repo = ref.read(appProvider);
+    final current = repo.snapshot.notes
+        .where((n) => n.id == note.id)
+        .firstOrNull;
+    if (current != null) await repo.saveNote(current.id, name, current.content);
+  });
+}
+
+class _NoteTitleDialog extends StatefulWidget {
+  const _NoteTitleDialog({required this.title});
+  final String title;
+  @override
+  State<_NoteTitleDialog> createState() => _NoteTitleDialogState();
+}
+
+class _NoteTitleDialogState extends State<_NoteTitleDialog> {
+  late final controller = TextEditingController(text: widget.title)
+    ..selection = TextSelection(
+      baseOffset: 0,
+      extentOffset: widget.title.length,
+    );
+  @override
+  void dispose() {
+    controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+    title: const Text('Название заметки'),
+    content: TextField(
+      key: const ValueKey('note-title'),
+      controller: controller,
+      autofocus: true,
+      textInputAction: TextInputAction.done,
+      onSubmitted: (value) => Navigator.pop(context, value),
+    ),
+    actions: [
+      TextButton(
+        onPressed: () => Navigator.pop(context),
+        child: const Text('Отмена'),
+      ),
+      FilledButton(
+        onPressed: () => Navigator.pop(context, controller.text),
+        child: const Text('Сохранить'),
+      ),
+    ],
+  );
+}
+
 class NotePanel extends ConsumerStatefulWidget {
   const NotePanel({
     super.key,
@@ -81,41 +142,7 @@ class _NotePanelState extends ConsumerState<NotePanel> {
                 if (note.pinned.isEmpty)
                   IconButton(
                     tooltip: 'Переименовать',
-                    onPressed: () async {
-                      final controller = TextEditingController(
-                        text: note.title,
-                      );
-                      final name = await showDialog<String>(
-                        context: context,
-                        builder: (c) => AlertDialog(
-                          title: const Text('Название заметки'),
-                          content: TextField(
-                            controller: controller,
-                            autofocus: true,
-                          ),
-                          actions: [
-                            TextButton(
-                              onPressed: () => Navigator.pop(c),
-                              child: const Text('Отмена'),
-                            ),
-                            FilledButton(
-                              onPressed: () =>
-                                  Navigator.pop(c, controller.text),
-                              child: const Text('Сохранить'),
-                            ),
-                          ],
-                        ),
-                      );
-                      controller.dispose();
-                      if (name != null && context.mounted) {
-                        guard(
-                          context,
-                          () => ref
-                              .read(appProvider)
-                              .saveNote(note.id, name, note.content),
-                        );
-                      }
-                    },
+                    onPressed: () => editNoteTitle(context, ref, note),
                     icon: const Icon(Icons.more_horiz_rounded, size: 18),
                   ),
               ],
@@ -197,7 +224,8 @@ class _NotesPageState extends ConsumerState<NotesPage> {
               IconButton(
                 tooltip: 'Новая заметка',
                 onPressed: () => guard(context, () async {
-                  await repo.createNote();
+                  final note = await repo.createNote();
+                  if (context.mounted) await editNoteTitle(context, ref, note);
                 }),
                 icon: const Icon(Icons.add_rounded),
               ),
@@ -223,7 +251,9 @@ class _NotesPageState extends ConsumerState<NotesPage> {
                 child: FilledButton.tonalIcon(
                   onPressed: () => guard(context, () async {
                     final n = await repo.createNote();
+                    if (!context.mounted) return;
                     setState(() => selected = n.id);
+                    await editNoteTitle(context, ref, n);
                   }),
                   icon: const Icon(Icons.add_rounded),
                   label: const Text('Новая заметка'),

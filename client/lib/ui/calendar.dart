@@ -13,6 +13,130 @@ import 'providers.dart';
 import 'task_editor.dart';
 import 'theme.dart';
 
+class CalendarToolbar extends StatelessWidget {
+  const CalendarToolbar({
+    super.key,
+    required this.date,
+    required this.view,
+    required this.now,
+    required this.timezone,
+    required this.onDateChanged,
+    required this.onViewChanged,
+    this.showDate = true,
+  });
+  final DateTime date, now;
+  final CalendarView view;
+  final String timezone;
+  final ValueChanged<DateTime> onDateChanged;
+  final ValueChanged<CalendarView> onViewChanged;
+  final bool showDate;
+
+  static String dateLabel(DateTime date, CalendarView view) {
+    if (view == CalendarView.month) {
+      return DateFormat('LLLL y', 'ru').format(date);
+    }
+    if (view == CalendarView.day) {
+      return DateFormat('d MMMM y', 'ru').format(date);
+    }
+    final first = DateTime.utc(
+      date.year,
+      date.month,
+      date.day - (view == CalendarView.week ? date.weekday - 1 : 0),
+    );
+    final last = first.add(Duration(days: view.days - 1));
+    final pattern = first.year != last.year
+        ? 'd MMM y'
+        : first.month != last.month
+        ? 'd MMM'
+        : 'd';
+    return '${DateFormat(pattern, 'ru').format(first)} — ${DateFormat('d MMM y', 'ru').format(last)}';
+  }
+
+  void navigate(int direction) {
+    final zone = tz.getLocation(timezone);
+    onDateChanged(
+      view == CalendarView.month
+          ? tz.TZDateTime(zone, date.year, date.month + direction, 1)
+          : tz.TZDateTime(
+              zone,
+              date.year,
+              date.month,
+              date.day + view.days * direction,
+            ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) => LayoutBuilder(
+    builder: (context, constraints) {
+      final stacked = showDate && constraints.maxWidth < 460;
+      final label = Text(
+        dateLabel(date, view),
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+      );
+      return Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (stacked)
+            Padding(
+              padding: const EdgeInsets.only(left: 8, bottom: 4),
+              child: label,
+            ),
+          Row(
+            children: [
+              IconButton(
+                tooltip: 'Назад',
+                onPressed: () => navigate(-1),
+                visualDensity: VisualDensity.compact,
+                icon: const Icon(Icons.chevron_left_rounded),
+              ),
+              IconButton(
+                tooltip: 'Вперёд',
+                onPressed: () => navigate(1),
+                visualDensity: VisualDensity.compact,
+                icon: const Icon(Icons.chevron_right_rounded),
+              ),
+              TextButton(
+                onPressed: () => onDateChanged(now),
+                child: const Text('Сегодня'),
+              ),
+              const SizedBox(width: 12),
+              if (showDate && !stacked)
+                Expanded(child: label)
+              else
+                const Spacer(),
+              const SizedBox(width: 12),
+              DropdownButtonHideUnderline(
+                child: DropdownButton<CalendarView>(
+                  value: view,
+                  isDense: true,
+                  style: const TextStyle(
+                    color: Palette.muted,
+                    fontSize: 13,
+                    fontFamily: 'Inter',
+                  ),
+                  borderRadius: BorderRadius.circular(12),
+                  items: CalendarView.values
+                      .map(
+                        (v) => DropdownMenuItem(value: v, child: Text(v.label)),
+                      )
+                      .toList(),
+                  onChanged: (value) {
+                    if (value != null) onViewChanged(value);
+                  },
+                ),
+              ),
+            ],
+          ),
+        ],
+      );
+    },
+  );
+}
+
 class CalendarPane extends ConsumerStatefulWidget {
   const CalendarPane({
     super.key,
@@ -21,12 +145,14 @@ class CalendarPane extends ConsumerStatefulWidget {
     this.projectId = '',
     this.initialDate,
     this.planner = false,
+    this.showToolbar = true,
   });
   final Task? selectedTask;
   final VoidCallback? onPlaced;
   final String projectId;
   final DateTime? initialDate;
   final bool planner;
+  final bool showToolbar;
   @override
   ConsumerState<CalendarPane> createState() => _CalendarPaneState();
 }
@@ -107,17 +233,6 @@ class _CalendarPaneState extends ConsumerState<CalendarPane> {
         );
   }
 
-  void navigate(int direction) {
-    setState(() {
-      final repo = ref.read(appProvider);
-      final view = widget.planner ? repo.plannerView : repo.calendarView;
-      date = view == CalendarView.month
-          ? _date(date.year, date.month + direction, 1)
-          : _date(date.year, date.month, date.day + view.days * direction);
-    });
-    expand();
-  }
-
   @override
   void dispose() {
     scroll.dispose();
@@ -169,73 +284,27 @@ class _CalendarPaneState extends ConsumerState<CalendarPane> {
       ),
       child: Column(
         children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(12, 12, 12, 10),
-            child: Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              crossAxisAlignment: WrapCrossAlignment.center,
-              children: [
-                IconButton(
-                  tooltip: 'Назад',
-                  onPressed: () => navigate(-1),
-                  visualDensity: VisualDensity.compact,
-                  icon: const Icon(Icons.chevron_left_rounded),
-                ),
-                IconButton(
-                  tooltip: 'Вперёд',
-                  onPressed: () => navigate(1),
-                  visualDensity: VisualDensity.compact,
-                  icon: const Icon(Icons.chevron_right_rounded),
-                ),
-                TextButton(
-                  onPressed: () {
-                    setState(() => date = _midnight(_clock));
-                    expand();
-                  },
-                  child: const Text('Сегодня'),
-                ),
-                Text(
-                  DateFormat(
-                    view == CalendarView.month ? 'LLLL y' : 'd MMMM y',
-                    'ru',
-                  ).format(date),
-                  style: const TextStyle(
-                    fontSize: 15,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-                const SizedBox(width: 6),
-                DropdownButtonHideUnderline(
-                  child: DropdownButton<CalendarView>(
-                    value: view,
-                    isDense: true,
-                    style: const TextStyle(
-                      color: Palette.muted,
-                      fontSize: 13,
-                      fontFamily: 'Inter',
-                    ),
-                    borderRadius: BorderRadius.circular(12),
-                    items: CalendarView.values
-                        .map(
-                          (v) =>
-                              DropdownMenuItem(value: v, child: Text(v.label)),
-                        )
-                        .toList(),
-                    onChanged: (v) {
-                      if (v != null) {
-                        guard(
-                          context,
-                          () => repo.setView(v, planner: widget.planner),
-                        );
-                        expand();
-                      }
-                    },
-                  ),
-                ),
-              ],
+          if (widget.showToolbar)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 12, 12, 10),
+              child: CalendarToolbar(
+                date: date,
+                view: view,
+                now: _clock,
+                timezone: repo.snapshot.settings.timezone,
+                onDateChanged: (value) {
+                  setState(() => date = _midnight(value));
+                  expand();
+                },
+                onViewChanged: (value) {
+                  guard(
+                    context,
+                    () => repo.setView(value, planner: widget.planner),
+                  );
+                  expand();
+                },
+              ),
             ),
-          ),
           if (error != null)
             Padding(
               padding: const EdgeInsets.all(8),
@@ -244,7 +313,7 @@ class _CalendarPaneState extends ConsumerState<CalendarPane> {
                 style: TextStyle(color: Theme.of(context).colorScheme.error),
               ),
             ),
-          const Divider(),
+          if (widget.showToolbar || error != null) const Divider(),
           Expanded(
             child: view == CalendarView.month
                 ? _month(repo, blocks)

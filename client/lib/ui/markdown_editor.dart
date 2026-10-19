@@ -100,10 +100,10 @@ class LiveMarkdownEditor extends ConsumerStatefulWidget {
   final ValueChanged<String> onChanged;
   final bool readOnly, toolbar;
   @override
-  ConsumerState<LiveMarkdownEditor> createState() => _LiveMarkdownEditorState();
+  ConsumerState<LiveMarkdownEditor> createState() => LiveMarkdownEditorState();
 }
 
-class _LiveMarkdownEditorState extends ConsumerState<LiveMarkdownEditor> {
+class LiveMarkdownEditorState extends ConsumerState<LiveMarkdownEditor> {
   late List<String> _blocks;
   int? _active;
   bool _source = false;
@@ -112,6 +112,25 @@ class _LiveMarkdownEditorState extends ConsumerState<LiveMarkdownEditor> {
   final _controller = TextEditingController();
   final _focus = FocusNode();
   String _last = '';
+
+  void focusEditor() {
+    if (widget.readOnly || _pasting) return;
+    if (!_source && _active == null) {
+      _edit(0);
+    } else {
+      _focus.requestFocus();
+    }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        Scrollable.ensureVisible(
+          _focus.context ?? context,
+          duration: const Duration(milliseconds: 180),
+          alignment: .35,
+        );
+      }
+    });
+  }
+
   @override
   void initState() {
     super.initState();
@@ -142,14 +161,14 @@ class _LiveMarkdownEditorState extends ConsumerState<LiveMarkdownEditor> {
   }
 
   @override
-  void didUpdateWidget(covariant LiveMarkdownEditor old) {
-    super.didUpdateWidget(old);
+  void didUpdateWidget(covariant LiveMarkdownEditor oldWidget) {
+    super.didUpdateWidget(oldWidget);
     if (widget.value != _last && !_focus.hasFocus) {
       _load(widget.value);
       _active = null;
       _rememberedSelection = null;
     }
-    if (widget.readOnly && !old.readOnly) {
+    if (widget.readOnly && !oldWidget.readOnly) {
       _finish();
     }
   }

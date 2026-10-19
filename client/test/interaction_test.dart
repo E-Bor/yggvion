@@ -16,9 +16,11 @@ import 'package:yggvion/domain/recurrence.dart';
 import 'package:yggvion/ui/app.dart';
 import 'package:yggvion/ui/calendar.dart';
 import 'package:yggvion/ui/dashboard.dart';
+import 'package:yggvion/ui/markdown_editor.dart';
 import 'package:yggvion/ui/providers.dart';
 import 'package:yggvion/ui/repeat_editor.dart';
 import 'package:yggvion/ui/settings.dart';
+import 'package:yggvion/ui/schedule_fields.dart';
 import 'package:yggvion/ui/theme.dart';
 import 'package:yggvion/ui/task_card.dart';
 import 'package:yggvion/ui/task_editor.dart';
@@ -266,10 +268,31 @@ void main() {
       expect(find.byType(Dashboard), findsOneWidget);
       await command(tester, LogicalKeyboardKey.keyN);
       await tester.enterText(find.byType(TextField).first, 'Из клавиатуры');
-      await command(tester, LogicalKeyboardKey.enter);
+      await tester.testTextInput.receiveAction(TextInputAction.done);
+      await settle(tester);
       expect(repo.snapshot.tasks.single.title, 'Из клавиатуры');
       await command(tester, LogicalKeyboardKey.keyN, shift: true);
       expect(repo.snapshot.notes.where((n) => n.pinned.isEmpty), hasLength(1));
+      final noteTitle = find.byKey(const ValueKey('note-title'));
+      expect(
+        tester
+            .widget<EditableText>(
+              find.descendant(
+                of: noteTitle,
+                matching: find.byType(EditableText),
+              ),
+            )
+            .focusNode
+            .hasFocus,
+        isTrue,
+      );
+      await tester.enterText(noteTitle, 'Название с клавиатуры');
+      await tester.testTextInput.receiveAction(TextInputAction.done);
+      await settle(tester);
+      expect(
+        repo.snapshot.notes.where((n) => n.pinned.isEmpty).single.title,
+        'Название с клавиатуры',
+      );
       await command(tester, LogicalKeyboardKey.keyF);
       expect(find.byType(SearchDialog), findsOneWidget);
       await tester.sendKeyEvent(LogicalKeyboardKey.escape);
@@ -278,6 +301,215 @@ void main() {
       await tester.tap(find.text('Заметка').first);
       await settle(tester);
       expect(repo.snapshot.notes.where((n) => n.pinned.isEmpty), hasLength(2));
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testInteraction(
+    'task title submits with Enter, command Enter focuses multiline description',
+    (tester) async {
+      final repo = await workspace(tester);
+      await command(tester, LogicalKeyboardKey.keyN);
+      final title = find.byKey(const ValueKey('task-title'));
+      await tester.testTextInput.receiveAction(TextInputAction.done);
+      await settle(tester);
+      expect(repo.snapshot.tasks, isEmpty);
+      expect(find.byType(TaskEditor), findsOneWidget);
+      await tester.enterText(title, 'Одна строка\n');
+      expect(tester.widget<TextField>(title).controller!.text, 'Одна строка');
+      await command(tester, LogicalKeyboardKey.enter);
+      expect(repo.snapshot.tasks, isEmpty);
+      final editor = find.descendant(
+        of: find.byType(TaskEditor),
+        matching: find.byType(LiveMarkdownEditor),
+      );
+      final description = find.descendant(
+        of: editor,
+        matching: find.byType(TextField),
+      );
+      expect(description, findsOneWidget);
+      final input = tester.widget<EditableText>(
+        find.descendant(of: description, matching: find.byType(EditableText)),
+      );
+      expect(input.focusNode.hasFocus, isTrue);
+      await tester.enterText(description, 'Первая строка');
+      await tester.testTextInput.receiveAction(TextInputAction.newline);
+      await tester.enterText(description, 'Первая строка\nВторая строка');
+      expect(repo.snapshot.tasks, isEmpty);
+      await tester.tap(title);
+      await tester.testTextInput.receiveAction(TextInputAction.done);
+      await settle(tester);
+      expect(repo.snapshot.tasks.single.title, 'Одна строка');
+      expect(
+        repo.snapshot.tasks.single.description,
+        'Первая строка\nВторая строка',
+      );
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  for (final mobile in [false, true]) {
+    testInteraction(
+      'new note title receives focus from all creation buttons (mobile: $mobile)',
+      (tester) async {
+        final repo = await workspace(tester, mobile: mobile);
+        if (mobile) {
+          await tester.tap(find.byTooltip('Создать'));
+          await tester.pumpAndSettle();
+          await tester.tap(find.text('Заметка').last);
+        } else {
+          await tester.tap(find.text('Заметка').first);
+        }
+        await settle(tester);
+        Future<void> rename(String name) async {
+          final field = find.byKey(const ValueKey('note-title'));
+          final input = tester.widget<EditableText>(
+            find.descendant(of: field, matching: find.byType(EditableText)),
+          );
+          expect(input.focusNode.hasFocus, isTrue);
+          expect(
+            input.controller.selection.textInside(input.controller.text),
+            'Новая заметка',
+          );
+          await tester.enterText(field, name);
+          await tester.testTextInput.receiveAction(TextInputAction.done);
+          await settle(tester);
+        }
+
+        await rename('Первая заметка');
+        final create = mobile
+            ? find.byTooltip('Новая заметка')
+            : find.text('Новая заметка');
+        await tester.ensureVisible(create);
+        await tester.tap(create);
+        await settle(tester);
+        await rename('Вторая заметка');
+        expect(
+          repo.snapshot.notes
+              .where((n) => n.pinned.isEmpty)
+              .map((n) => n.title),
+          containsAll(['Первая заметка', 'Вторая заметка']),
+        );
+        expect(tester.takeException(), isNull);
+      },
+    );
+  }
+
+  testInteraction(
+    'compact sidebar keeps all sections and calendar has a single navigation toolbar',
+    (tester) async {
+      final repo = await workspace(
+        tester,
+        prepare: (repo) async {
+          await repo.saveProject(
+            'Проект с очень длинным названием для проверки узкого окна',
+            0xff80adee,
+          );
+        },
+      );
+      expect(find.byType(CalendarToolbar), findsOneWidget);
+      final header = find.byKey(const ValueKey('workspace-header'));
+      expect(
+        find.descendant(of: header, matching: find.byType(CalendarToolbar)),
+        findsOneWidget,
+      );
+      final grid = find.byKey(const ValueKey('calendar-grid-gestures'));
+      final width = tester.getSize(grid).width;
+      await tester.tap(find.byKey(const ValueKey('sidebar-toggle')));
+      await settle(tester);
+      expect(repo.sidebarCollapsed, isTrue);
+      expect(find.text('yggvion'), findsNothing);
+      expect(
+        tester.getSize(find.byKey(const ValueKey('workspace-sidebar'))).width,
+        72,
+      );
+      expect(tester.getSize(grid).width, greaterThan(width));
+      for (final section in PageKind.values) {
+        await tester.tap(find.byKey(ValueKey('nav-${section.name}')));
+        await settle(tester);
+        expect(tester.takeException(), isNull);
+      }
+      await tester.tap(find.byKey(const ValueKey('nav-today')));
+      await settle(tester);
+      await tester.tap(find.byTooltip('Вперёд'));
+      await settle(tester);
+      expect(find.text('20 октября 2026'), findsOneWidget);
+      await tester.tap(find.text('Сегодня'));
+      await settle(tester);
+      expect(find.text('19 октября 2026'), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('sidebar-toggle')));
+      await settle(tester);
+      expect(repo.sidebarCollapsed, isFalse);
+      expect(find.text('yggvion'), findsOneWidget);
+      tester.view.physicalSize = const Size(1000, 720);
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+      await tester.tap(find.byKey(const ValueKey('sidebar-toggle')));
+      await settle(tester);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testInteraction(
+    'end date appears only across days and can be changed when hidden',
+    (tester) async {
+      await workspace(
+        tester,
+        mobile: true,
+        prepare: (repo) async {
+          await repo.createTask(
+            'Даты',
+            start: repo.now(),
+            end: repo.now().add(const Duration(minutes: 20)),
+          );
+        },
+      );
+      await tester.tap(find.text('Даты'));
+      await settle(tester);
+      expect(tester.takeException(), isNull);
+      final schedule = find.byType(ScheduleFields);
+      expect(
+        find.descendant(of: schedule, matching: find.text('19.окт.2026')),
+        findsOneWidget,
+      );
+      final endDate = find.byKey(const ValueKey('schedule-end-date'));
+      expect(tester.widget(endDate), isA<IconButton>());
+      await tester.tap(endDate);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('20').last);
+      final ok = MaterialLocalizations.of(
+        tester.element(find.byType(DatePickerDialog)),
+      ).okButtonLabel;
+      await tester.tap(find.text(ok));
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+      expect(
+        find.descendant(of: schedule, matching: find.text('20.окт.2026')),
+        findsOneWidget,
+      );
+      expect(tester.widget(endDate), isA<TextButton>());
+      final datePosition = tester.getTopLeft(endDate);
+      final timePosition = tester.getTopLeft(
+        find.byKey(const ValueKey('schedule-end-time')),
+      );
+      expect(
+        datePosition.dy < timePosition.dy || datePosition.dx < timePosition.dx,
+        isTrue,
+      );
+      await tester.tap(find.byKey(const ValueKey('schedule-all-day')));
+      await tester.pumpAndSettle();
+      expect(find.text('20.окт.2026'), findsOneWidget);
+      expect(find.byKey(const ValueKey('schedule-end-time')), findsNothing);
+      await tester.tap(endDate);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('19').last);
+      await tester.tap(find.text(ok));
+      await tester.pumpAndSettle();
+      expect(
+        find.descendant(of: schedule, matching: find.text('19.окт.2026')),
+        findsOneWidget,
+      );
+      expect(tester.widget(endDate), isA<IconButton>());
       expect(tester.takeException(), isNull);
     },
   );

@@ -23,6 +23,7 @@ class Repository extends ChangeNotifier {
   String? syncError;
   CalendarView calendarView = CalendarView.day;
   CalendarView plannerView = CalendarView.day;
+  bool sidebarCollapsed = false;
   double calendarFraction = .64, scratchpadFraction = .62;
   String? lastCalendarTaskId;
   int conflictCount = 0;
@@ -54,6 +55,7 @@ class Repository extends ChangeNotifier {
     if (planner != plannerView.name) {
       await db.setMeta('planner_view', plannerView.name);
     }
+    sidebarCollapsed = await db.meta('sidebar_collapsed') == 'true';
     calendarFraction =
         double.tryParse(await db.meta('home_calendar_fraction') ?? '') ?? .64;
     scratchpadFraction =
@@ -151,6 +153,12 @@ class Repository extends ChangeNotifier {
       await db.setMeta('home_scratchpad_fraction', '$scratchpadFraction');
     });
     notifyListeners();
+  }
+
+  Future<void> setSidebarCollapsed(bool value) async {
+    sidebarCollapsed = value;
+    notifyListeners();
+    await serial(() => db.setMeta('sidebar_collapsed', '$value'));
   }
 
   Task? get lastCalendarTask => snapshot.task(lastCalendarTaskId ?? '');
