@@ -794,6 +794,7 @@ class _WorkspaceState extends ConsumerState<Workspace>
             projectId: projectId,
             initialDate: calendarDate,
             selectedTask: selected,
+            planner: true,
             onPlaced: () => setState(() => selected = null),
           ),
         ),

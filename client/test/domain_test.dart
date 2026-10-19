@@ -577,6 +577,30 @@ END:VCALENDAR''', 'UTC');
     },
   );
 
+  test(
+    'home and planner views persist independently, migrating the previous choice',
+    () async {
+      await repo.db.customStatement(
+        "DELETE FROM metadata WHERE key='planner_view'",
+      );
+      await repo.db.setMeta('calendar_view', 'week');
+      await repo.initialize();
+      expect(repo.calendarView, CalendarView.week);
+      expect(repo.plannerView, CalendarView.week);
+      await repo.setView(CalendarView.day);
+      await repo.initialize();
+      expect(repo.calendarView, CalendarView.day);
+      expect(repo.plannerView, CalendarView.week);
+      await repo.setView(CalendarView.threeDays, planner: true);
+      await repo.initialize();
+      expect(repo.calendarView, CalendarView.day);
+      expect(repo.plannerView, CalendarView.threeDays);
+      await repo.db.setMeta('planner_view', 'invalid');
+      await repo.initialize();
+      expect(repo.plannerView, CalendarView.day);
+    },
+  );
+
   test('invalid intervals do not partially alter a calendar block', () async {
     final t = await repo.createTask('Интервал', start: now);
     final b = repo.snapshot.taskBlocks(t.id).single;

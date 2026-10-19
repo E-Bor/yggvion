@@ -107,6 +107,91 @@ void main() {
     await initializeDateFormatting('ru');
   });
 
+  for (final mobile in [false, true]) {
+    testInteraction('home and planner keep their own view (mobile: $mobile)', (
+      tester,
+    ) async {
+      final repo = await workspace(tester, mobile: mobile);
+      final dropdown = find.byWidgetPredicate(
+        (w) => w is DropdownButton<CalendarView>,
+      );
+      expect(
+        tester.widget<DropdownButton<CalendarView>>(dropdown).value,
+        CalendarView.day,
+      );
+      await tester.tap(find.text('Планировщик').last);
+      await settle(tester);
+      if (mobile) {
+        await tester.tap(find.text('Календарь').last);
+        await settle(tester);
+      }
+      await tester.tap(dropdown);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text(CalendarView.week.label).last);
+      await settle(tester);
+      expect(repo.plannerView, CalendarView.week);
+      expect(repo.calendarView, CalendarView.day);
+      if (mobile) {
+        await tester.tap(find.text('Сегодня').last);
+      } else {
+        await command(tester, LogicalKeyboardKey.digit1);
+      }
+      await settle(tester);
+      expect(
+        tester.widget<DropdownButton<CalendarView>>(dropdown).value,
+        CalendarView.day,
+      );
+      await tester.runAsync(() => repo.initialize());
+      await tester.tap(find.text('Планировщик').last);
+      await settle(tester);
+      if (mobile && dropdown.evaluate().isEmpty) {
+        await tester.tap(find.text('Календарь').last);
+        await settle(tester);
+      }
+      expect(
+        tester.widget<DropdownButton<CalendarView>>(dropdown).value,
+        CalendarView.week,
+      );
+    });
+  }
+
+  testInteraction(
+    'settings autosave valid changes and retain previous duration for invalid input',
+    (tester) async {
+      final repo = await workspace(tester);
+      await command(tester, LogicalKeyboardKey.digit5);
+      final duration = find.byKey(const ValueKey('default-minutes'));
+      await tester.enterText(duration, '45');
+      await settle(tester);
+      expect(repo.snapshot.settings.defaultMinutes, 45);
+      await tester.enterText(duration, '0');
+      await settle(tester);
+      expect(find.text('Введите от 5 до 1440 минут'), findsOneWidget);
+      expect(repo.snapshot.settings.defaultMinutes, 45);
+      await tester.tap(find.byKey(const ValueKey('reminder-choice-0')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('За 15 мин').last);
+      await settle(tester);
+      expect(repo.snapshot.settings.reminders, [15]);
+      final zone = find.byWidgetPredicate(
+        (w) => w is TextField && w.decoration?.labelText == 'Часовой пояс IANA',
+      );
+      await tester.enterText(zone, 'Europe/Moscow');
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Europe/Moscow').last);
+      await settle(tester);
+      expect(repo.snapshot.settings.timezone, 'Europe/Moscow');
+      await tester.tap(find.text('Сегодня').first);
+      await settle(tester);
+      await tester.tap(find.text('Настройки').last);
+      await settle(tester);
+      expect(tester.widget<TextField>(duration).controller!.text, '45');
+      expect(find.text('Сохранить настройки'), findsNothing);
+      expect(repo.snapshot.settings.reminders, [15]);
+      expect(repo.snapshot.settings.timezone, 'Europe/Moscow');
+    },
+  );
+
   testInteraction(
     'desktop board drags immediately and excludes recurring instances',
     (tester) async {
@@ -660,8 +745,7 @@ void main() {
         find.byKey(const ValueKey('task-color-1')).first,
       );
       await tester.tap(find.byKey(const ValueKey('task-color-1')).first);
-      await tester.ensureVisible(find.text('Сохранить настройки'));
-      await tester.tap(find.text('Сохранить настройки'));
+      expect(find.text('Сохранить настройки'), findsNothing);
       await settle(tester);
       expect(repo.snapshot.settings.taskColor, Palette.projects[1].toARGB32());
       await command(tester, LogicalKeyboardKey.digit1);

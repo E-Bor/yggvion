@@ -21,6 +21,10 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
   late String zone;
   late List<int> reminders;
   late int taskColor;
+  late int defaultMinutes;
+  String? minutesError, saveError;
+  int saveVersion = 0;
+  bool savingSettings = false;
   bool connecting = false;
   @override
   void initState() {
@@ -35,6 +39,43 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
     zone = repo.snapshot.settings.timezone;
     reminders = [...repo.snapshot.settings.reminders];
     taskColor = repo.snapshot.settings.taskColor;
+    defaultMinutes = repo.snapshot.settings.defaultMinutes;
+  }
+
+  Future<void> saveSettings() async {
+    final version = ++saveVersion;
+    setState(() {
+      savingSettings = true;
+      saveError = null;
+    });
+    try {
+      await ref
+          .read(appProvider)
+          .updateSettings(
+            defaultMinutes,
+            [...reminders],
+            zone,
+            taskColor: taskColor,
+          );
+    } catch (error) {
+      if (mounted && version == saveVersion) {
+        setState(() => saveError = 'Не удалось сохранить настройки: $error');
+      }
+    } finally {
+      if (mounted && version == saveVersion) {
+        setState(() => savingSettings = false);
+      }
+    }
+  }
+
+  void changeMinutes(String value) {
+    final parsed = int.tryParse(value);
+    final valid = parsed != null && parsed >= 5 && parsed <= 1440;
+    setState(() => minutesError = valid ? null : 'Введите от 5 до 1440 минут');
+    if (valid) {
+      defaultMinutes = parsed;
+      saveSettings();
+    }
   }
 
   @override
@@ -250,54 +291,68 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
                       TextField(
+                        key: const ValueKey('default-minutes'),
                         controller: minutes,
                         keyboardType: TextInputType.number,
-                        decoration: const InputDecoration(
+                        onChanged: changeMinutes,
+                        decoration: InputDecoration(
                           labelText: 'Длительность нового блока',
                           suffixText: 'минут',
+                          errorText: minutesError,
                         ),
                       ),
                       const SizedBox(height: 16),
-                      TimezoneField(value: zone, onChanged: (v) => zone = v),
+                      TimezoneField(
+                        value: zone,
+                        onChanged: (v) {
+                          setState(() => zone = v);
+                          saveSettings();
+                        },
+                      ),
                       const SizedBox(height: 18),
                       ReminderPicker(
                         values: reminders,
-                        onChanged: (v) => setState(() => reminders = v),
+                        onChanged: (v) {
+                          setState(() => reminders = v);
+                          saveSettings();
+                        },
                       ),
                       const SizedBox(height: 20),
                       const Text('Цвет задач без проекта'),
                       const SizedBox(height: 10),
                       TaskColorPicker(
                         value: taskColor,
-                        onChanged: (v) => setState(() => taskColor = v),
+                        onChanged: (v) {
+                          setState(() => taskColor = v);
+                          saveSettings();
+                        },
                       ),
                       const SizedBox(height: 8),
                       const Text(
                         'У задач проекта используется цвет проекта.',
                         style: TextStyle(color: Palette.muted, fontSize: 12),
                       ),
-                      const SizedBox(height: 20),
-                      Align(
-                        alignment: Alignment.centerLeft,
-                        child: FilledButton(
-                          onPressed: () => guard(context, () async {
-                            await repo.updateSettings(
-                              int.tryParse(minutes.text) ?? 0,
-                              reminders,
-                              zone,
-                              taskColor: taskColor,
-                            );
-                            if (context.mounted) {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(
-                                  content: Text('Настройки сохранены'),
-                                ),
-                              );
-                            }
-                          }),
-                          child: const Text('Сохранить настройки'),
+                      const SizedBox(height: 12),
+                      Text(
+                        saveError ??
+                            (savingSettings
+                                ? 'Сохраняется…'
+                                : 'Изменения сохраняются автоматически'),
+                        style: TextStyle(
+                          color: saveError == null
+                              ? Palette.muted
+                              : Theme.of(context).colorScheme.error,
+                          fontSize: 12,
                         ),
                       ),
+                      if (saveError != null)
+                        Align(
+                          alignment: Alignment.centerLeft,
+                          child: TextButton(
+                            onPressed: saveSettings,
+                            child: const Text('Повторить'),
+                          ),
+                        ),
                     ],
                   ),
                 ),

@@ -3,6 +3,8 @@ package httpapi
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -234,6 +236,27 @@ func TestAttachmentValidation(t *testing.T) {
 	}
 	if w = request(t, h, "GET", "/api/v1/attachments/not-a-hash", token, nil); w.Code != 400 {
 		t.Fatal(w.Code)
+	}
+}
+
+func TestClipboardAttachmentRoundTrip(t *testing.T) {
+	_, h, token := setup(t)
+	for _, content := range [][]byte{[]byte("config: true\n"), {0, 255, 4, 128, 0}, {}} {
+		hash := sha256.Sum256(content)
+		path := "/api/v1/attachments/" + hex.EncodeToString(hash[:])
+		r := httptest.NewRequest("PUT", path, bytes.NewReader(content))
+		r.Header.Set("Authorization", "Bearer "+token)
+		r.Header.Set("Content-Type", "application/octet-stream")
+		r.Header.Set("X-File-Name", "clipboard.custom")
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		if w.Code != http.StatusCreated {
+			t.Fatalf("upload: %d %s", w.Code, w.Body.String())
+		}
+		w = request(t, h, "GET", path, token, nil)
+		if w.Code != http.StatusOK || !bytes.Equal(w.Body.Bytes(), content) {
+			t.Fatalf("download: %d %x", w.Code, w.Body.Bytes())
+		}
 	}
 }
 

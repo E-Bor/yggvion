@@ -20,11 +20,13 @@ class CalendarPane extends ConsumerStatefulWidget {
     this.onPlaced,
     this.projectId = '',
     this.initialDate,
+    this.planner = false,
   });
   final Task? selectedTask;
   final VoidCallback? onPlaced;
   final String projectId;
   final DateTime? initialDate;
+  final bool planner;
   @override
   ConsumerState<CalendarPane> createState() => _CalendarPaneState();
 }
@@ -107,7 +109,8 @@ class _CalendarPaneState extends ConsumerState<CalendarPane> {
 
   void navigate(int direction) {
     setState(() {
-      final view = ref.read(appProvider).calendarView;
+      final repo = ref.read(appProvider);
+      final view = widget.planner ? repo.plannerView : repo.calendarView;
       date = view == CalendarView.month
           ? _date(date.year, date.month + direction, 1)
           : _date(date.year, date.month, date.day + view.days * direction);
@@ -151,7 +154,7 @@ class _CalendarPaneState extends ConsumerState<CalendarPane> {
   @override
   Widget build(BuildContext context) {
     final repo = ref.watch(appProvider),
-        view = repo.calendarView,
+        view = widget.planner ? repo.plannerView : repo.calendarView,
         first = firstDay(view);
     final blocks = repo.snapshot.blocks.where((b) {
       final t = repo.snapshot.task(b.taskId);
@@ -221,7 +224,10 @@ class _CalendarPaneState extends ConsumerState<CalendarPane> {
                         .toList(),
                     onChanged: (v) {
                       if (v != null) {
-                        repo.setView(v);
+                        guard(
+                          context,
+                          () => repo.setView(v, planner: widget.planner),
+                        );
                         expand();
                       }
                     },

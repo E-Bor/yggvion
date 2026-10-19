@@ -974,18 +974,6 @@ class _TaskEditorState extends ConsumerState<TaskEditor> {
                           ),
                         ],
                       ),
-                      disclosure(
-                        'task-description',
-                        'Описание и вложения',
-                        Icons.notes_rounded,
-                        [
-                          LiveMarkdownEditor(
-                            value: description,
-                            onChanged: (v) => description = v,
-                            placeholder: 'Описание, ссылки, заметки по задаче…',
-                          ),
-                        ],
-                      ),
                       if (task != null) ...[
                         disclosure(
                           'task-blocks',
@@ -1155,6 +1143,15 @@ class _TaskEditorState extends ConsumerState<TaskEditor> {
                           ),
                         ),
                       ],
+                      const SizedBox(height: 12),
+                      const Divider(),
+                      LiveMarkdownEditor(
+                        key: const ValueKey('task-description'),
+                        value: description,
+                        onChanged: (v) => description = v,
+                        toolbarLabel: 'Описание',
+                        placeholder: 'Описание, ссылки, заметки по задаче…',
+                      ),
                     ],
                   ),
                 ),

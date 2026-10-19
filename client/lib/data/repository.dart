@@ -22,6 +22,7 @@ class Repository extends ChangeNotifier {
   String syncStatus = 'Локально';
   String? syncError;
   CalendarView calendarView = CalendarView.day;
+  CalendarView plannerView = CalendarView.day;
   double calendarFraction = .64, scratchpadFraction = .62;
   String? lastCalendarTaskId;
   int conflictCount = 0;
@@ -46,6 +47,13 @@ class Repository extends ChangeNotifier {
     calendarView =
         CalendarView.values.where((v) => v.name == view).firstOrNull ??
         CalendarView.day;
+    final planner = await db.meta('planner_view');
+    plannerView =
+        CalendarView.values.where((v) => v.name == planner).firstOrNull ??
+        calendarView;
+    if (planner != plannerView.name) {
+      await db.setMeta('planner_view', plannerView.name);
+    }
     calendarFraction =
         double.tryParse(await db.meta('home_calendar_fraction') ?? '') ?? .64;
     scratchpadFraction =
@@ -123,10 +131,16 @@ class Repository extends ChangeNotifier {
     await reload();
     if (onChange != null) unawaited(onChange!());
   });
-  Future<void> setView(CalendarView view) async {
-    calendarView = view;
+  Future<void> setView(CalendarView view, {bool planner = false}) async {
+    if (planner) {
+      plannerView = view;
+    } else {
+      calendarView = view;
+    }
     notifyListeners();
-    await db.setMeta('calendar_view', view.name);
+    await serial(
+      () => db.setMeta(planner ? 'planner_view' : 'calendar_view', view.name),
+    );
   }
 
   Future<void> saveHomeLayout(double calendar, double scratchpad) async {
@@ -516,9 +530,42 @@ class Repository extends ChangeNotifier {
     ]);
   }
 
+  static const maxAttachmentBytes = 50 * 1024 * 1024;
+
+  /// Materialize native clipboard streams without retaining the whole file in RAM.
+  Future<String> attachStream(Stream<List<int>> stream, String name) async {
+    final directory = await Directory.systemTemp.createTemp('yggvion-paste-');
+    final basename = p
+        .basename(name.replaceAll('\\', '/'))
+        .replaceAll(RegExp(r'[<>:"/\\|?*\x00-\x1f]'), '_')
+        .trim();
+    final safeName = basename.isEmpty || basename == '.' || basename == '..'
+        ? 'Вложение'
+        : basename;
+    final file = File(p.join(directory.path, safeName));
+    try {
+      final sink = await file.open(mode: FileMode.write);
+      var size = 0;
+      try {
+        await for (final chunk in stream) {
+          size += chunk.length;
+          if (size > maxAttachmentBytes) {
+            throw ArgumentError('Размер файла не должен превышать 50 МБ');
+          }
+          await sink.writeFrom(chunk);
+        }
+      } finally {
+        await sink.close();
+      }
+      return await attachFile(file.path);
+    } finally {
+      await directory.delete(recursive: true);
+    }
+  }
+
   Future<String> attachFile(String sourcePath) async {
     final source = File(sourcePath);
-    if (await source.length() > 50 * 1024 * 1024) {
+    if (await source.length() > maxAttachmentBytes) {
       throw ArgumentError('Размер файла не должен превышать 50 МБ');
     }
     final digest = await sha256.bind(source.openRead()).first;

@@ -60,6 +60,30 @@ class RepeatPicker extends StatelessWidget {
   Widget build(BuildContext context) => DropdownButtonFormField<String>(
     key: ValueKey(value),
     isExpanded: true,
+    style: compact
+        ? const TextStyle(
+            fontFamily: 'Inter',
+            fontSize: 12,
+            color: Palette.text,
+          )
+        : null,
+    icon: const Icon(Icons.expand_more_rounded, size: 18, color: Palette.muted),
+    selectedItemBuilder: compact
+        ? (context) => [
+            for (final label in [...repeatPresets.values, repeatLabel(value)])
+              Align(
+                alignment: Alignment.centerRight,
+                child: Padding(
+                  padding: const EdgeInsets.only(right: 6),
+                  child: Text(
+                    label,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ),
+          ]
+        : null,
     initialValue: repeatPresets.containsKey(value) ? value : 'custom',
     decoration: compact
         ? const InputDecoration(
