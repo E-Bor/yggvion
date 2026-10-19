@@ -31,23 +31,26 @@ type Result struct {
 }
 
 type Task struct {
-	Title       string `json:"title"`
-	Description string `json:"description"`
-	ProjectID   string `json:"project_id"`
-	Status      string `json:"status"`
-	ParentID    string `json:"parent_id"`
-	SeriesID    string `json:"series_id"`
-	Occurrence  string `json:"occurrence"`
+	BirthdayDate string `json:"birthday_date,omitempty"`
+	BirthdayYear int    `json:"birthday_year,omitempty"`
+	Title        string `json:"title"`
+	Description  string `json:"description"`
+	ProjectID    string `json:"project_id"`
+	Status       string `json:"status"`
+	ParentID     string `json:"parent_id"`
+	SeriesID     string `json:"series_id"`
+	Occurrence   string `json:"occurrence"`
 }
 
 type Block struct {
-	TaskID     string    `json:"task_id"`
-	Start      time.Time `json:"start"`
-	End        time.Time `json:"end"`
-	Timezone   string    `json:"timezone"`
-	AllDay     bool      `json:"all_day"`
-	Historical bool      `json:"historical"`
-	Reminders  []int     `json:"reminders"`
+	ReminderAt []time.Time `json:"reminder_at,omitempty"`
+	TaskID     string      `json:"task_id"`
+	Start      time.Time   `json:"start"`
+	End        time.Time   `json:"end"`
+	Timezone   string      `json:"timezone"`
+	AllDay     bool        `json:"all_day"`
+	Historical bool        `json:"historical"`
+	Reminders  []int       `json:"reminders"`
 }
 
 type Session struct {
@@ -75,6 +78,7 @@ type Settings struct {
 	TaskColor      *int64 `json:"task_color,omitempty"`
 }
 type Series struct {
+	BirthdayDate   string    `json:"birthday_date,omitempty"`
 	CancelledFrom  string    `json:"cancelled_from,omitempty"`
 	Title          string    `json:"title"`
 	Description    string    `json:"description"`
@@ -120,6 +124,26 @@ func reminders(values []int) bool {
 	return true
 }
 
+func birthdayDate(value string) bool {
+	if value == "" {
+		return true
+	}
+	date, err := time.Parse(time.DateOnly, value)
+	return err == nil && date.Year() >= 1800
+}
+
+func reminderTimes(values []time.Time) bool {
+	if len(values) > 12 {
+		return false
+	}
+	for _, at := range values {
+		if at.IsZero() {
+			return false
+		}
+	}
+	return true
+}
+
 func Validate(r Record) error {
 	if !ValidID(r.ID) || r.Version < 0 || len(r.Data) > 2*1024*1024 {
 		return errors.New("invalid record")
@@ -132,12 +156,18 @@ func Validate(r Record) error {
 			return errors.New("invalid task")
 		}
 		valid = title(t.Title) && (t.Status == "todo" || t.Status == "in_progress" || t.Status == "waiting" || t.Status == "done") && (t.ProjectID == "" || ValidID(t.ProjectID)) && (t.ParentID == "" || ValidID(t.ParentID)) && (t.SeriesID == "" || ValidID(t.SeriesID))
+		valid = valid && birthdayDate(t.BirthdayDate)
+		if t.BirthdayDate != "" {
+			birth, _ := time.Parse(time.DateOnly, t.BirthdayDate)
+			valid = valid && t.SeriesID != "" && t.ProjectID == "" && t.BirthdayYear >= birth.Year() && t.BirthdayYear <= 9999 && t.Occurrence != "" && optionalInstant(t.Occurrence)
+		}
 	case "block":
 		var b Block
 		if err := json.Unmarshal(r.Data, &b); err != nil {
 			return errors.New("invalid block")
 		}
 		valid = ValidID(b.TaskID) && !b.Start.IsZero() && b.End.After(b.Start) && b.End.Sub(b.Start) <= 366*24*time.Hour && zone(b.Timezone) && reminders(b.Reminders)
+		valid = valid && reminderTimes(b.ReminderAt)
 	case "session":
 		var s Session
 		if err := json.Unmarshal(r.Data, &s); err != nil {
@@ -172,6 +202,10 @@ func Validate(r Record) error {
 			return errors.New("invalid series")
 		}
 		valid = optionalInstant(s.CancelledFrom) && title(s.Title) && !s.Start.IsZero() && s.Minutes >= 1 && s.Minutes <= 527040 && zone(s.Timezone) && (s.AnchorTimezone == "" || zone(s.AnchorTimezone)) && s.DaySpan >= 0 && s.DaySpan <= 366 && strings.Contains(s.Rule, "FREQ=") && len(s.Rule) <= 2000 && reminders(s.Reminders)
+		valid = valid && birthdayDate(s.BirthdayDate)
+		if s.BirthdayDate != "" {
+			valid = valid && s.AllDay && s.ProjectID == "" && strings.Contains(s.Rule, "FREQ=YEARLY")
+		}
 	case "snooze":
 		var s Snooze
 		if err := json.Unmarshal(r.Data, &s); err != nil {

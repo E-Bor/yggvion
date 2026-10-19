@@ -1,5 +1,7 @@
 import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/gestures.dart';
+import 'package:yggvion/ui/task_editor.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -137,8 +139,25 @@ void main() {
       );
       await tester.tap(find.byKey(const ValueKey('add-work-session')));
       await tester.pumpAndSettle();
-      expect(find.text('Добавить потраченное время'), findsOneWidget);
-      await tester.tap(find.text('Сохранить').last);
+      expect(find.byType(SessionEditor), findsOneWidget);
+      final grid = find.descendant(
+        of: find.byType(SessionEditor),
+        matching: find.byKey(const ValueKey('calendar-grid-gestures')),
+      );
+      final gesture = await tester.startGesture(
+        tester.getTopLeft(grid) + const Offset(100, 9.5 * 72),
+        kind: PointerDeviceKind.mouse,
+      );
+      await gesture.moveBy(const Offset(0, 36));
+      await tester.pump();
+      await gesture.up();
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+      await expectLater(
+        find.byType(YggvionApp),
+        matchesGoldenFile('goldens/time_entry_${size.width.toInt()}.png'),
+      );
+      await tester.tap(find.byKey(const ValueKey('save-time-entries')));
       await tester.runAsync(
         () => Future<void>.delayed(const Duration(milliseconds: 100)),
       );

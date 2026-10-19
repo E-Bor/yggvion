@@ -8,8 +8,15 @@ import '../domain/models.dart';
 import 'repository.dart';
 
 class PlannedReminder {
-  const PlannedReminder(this.key, this.taskId, this.title, this.at);
+  const PlannedReminder(
+    this.key,
+    this.taskId,
+    this.title,
+    this.at, {
+    this.body = 'Пора начать · Yggvion',
+  });
   final String key, taskId, title;
+  final String body;
   final DateTime at;
   String get deliveryKey => 'notified:$key:${at.millisecondsSinceEpoch}';
   int get id => int.parse(
@@ -23,6 +30,32 @@ List<PlannedReminder> remindersFor(Snapshot snapshot, DateTime now) {
   for (final block in snapshot.blocks) {
     final task = snapshot.task(block.taskId);
     if (task == null || task.done || block.historical) continue;
+    if (block.reminderAt.isNotEmpty) {
+      for (var index = 0; index < block.reminderAt.length; index++) {
+        final at = block.reminderAt[index];
+        // Older clients stored month/week reminders as well. Never schedule
+        // those, even before the birthday series has been refreshed locally.
+        if (task.isBirthday &&
+            (at.isBefore(block.start) || !at.isBefore(block.end))) {
+          continue;
+        }
+        if (at.isAfter(now)) {
+          result.add(
+            PlannedReminder(
+              // Keep the original day-of-birthday delivery key across updates.
+              '${block.id}:at:${task.isBirthday ? 2 : index}',
+              task.id,
+              task.title,
+              at,
+              body: task.isBirthday
+                  ? 'Сегодня день рождения. Не забудьте поздравить!'
+                  : 'Пора начать · Yggvion',
+            ),
+          );
+        }
+      }
+      continue;
+    }
     for (final offset in block.reminders) {
       final at = block.start.subtract(Duration(minutes: offset));
       if (at.isAfter(now)) {
@@ -36,7 +69,17 @@ List<PlannedReminder> remindersFor(Snapshot snapshot, DateTime now) {
     final task = snapshot.task(e.data['task_id'] as String),
         at = parseTime(e.data['at']);
     if (task != null && !task.done && at.isAfter(now)) {
-      result.add(PlannedReminder(e.id, task.id, task.title, at));
+      result.add(
+        PlannedReminder(
+          e.id,
+          task.id,
+          task.title,
+          at,
+          body: task.isBirthday
+              ? 'Напоминание о дне рождения'
+              : 'Пора начать · Yggvion',
+        ),
+      );
     }
   }
   return result..sort((a, b) => a.at.compareTo(b.at));
@@ -284,7 +327,7 @@ class ReminderService {
     try {
       final pending = remindersFor(repo.snapshot, repo.now()).take(60).toList();
       final signature = pending
-          .map((r) => '${r.key}:${r.title}:${r.at.toIso8601String()}')
+          .map((r) => '${r.key}:${r.title}:${r.body}:${r.at.toIso8601String()}')
           .join('|');
       if (signature == _signature) return;
       if ((platform == TargetPlatform.linux)) {
@@ -307,7 +350,7 @@ class ReminderService {
         await plugin.zonedSchedule(
           reminder.id,
           reminder.title,
-          'Пора начать · Yggvion',
+          reminder.body,
           tz.TZDateTime.from(reminder.at, tz.UTC),
           details,
           androidScheduleMode: exact
@@ -348,7 +391,7 @@ class ReminderService {
           await plugin.show(
             reminder.id,
             reminder.title,
-            'Пора начать · Yggvion',
+            reminder.body,
             details,
             payload: reminder.taskId,
           );

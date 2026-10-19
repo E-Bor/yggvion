@@ -207,6 +207,8 @@ components:
         parent_id: {type: string}
         series_id: {type: string}
         occurrence: {type: string, description: Original occurrence in UTC; empty for nonrecurring task}
+        birthday_date: {type: string, format: date, description: Optional birth date YYYY-MM-DD. Marks a birthday occurrence; excluded from planner and kanban. Managed through its annual series.}
+        birthday_year: {type: integer, minimum: 1800, maximum: 9999, description: Calendar year of this birthday; completion is independent for each year.}
     Block:
       type: object
       required: [task_id, start, end, timezone, all_day, historical, reminders]
@@ -217,6 +219,11 @@ components:
         timezone: {type: string, description: IANA timezone}
         all_day: {type: boolean}
         historical: {type: boolean, description: Retained in history and excluded from current estimate}
+        reminder_at:
+          type: array
+          maxItems: 12
+          items: {type: string, format: date-time}
+          description: Optional absolute UTC reminder times. A nonempty array takes precedence over reminders. Birthdays have one notice at 09:00 in the application timezone on the birthday; legacy notices before that day are ignored by clients.
         reminders: {type: array, maxItems: 12, items: {type: integer, minimum: 0, maximum: 525600}}
     Session:
       type: object
@@ -252,6 +259,7 @@ components:
       type: object
       required: [title, description, project_id, start, minutes, timezone, rule, reminders, all_day, exceptions]
       properties:
+        birthday_date: {type: string, format: date, description: Optional birth date; title is the person's name. Annual birthday tasks use deterministic IDs by series and year, compute age, and fall back to February 28 for leap-day birthdays in common years. Changing birth date preserves yearly completion.}
         title: {type: string}
         description: {type: string}
         project_id: {type: string}

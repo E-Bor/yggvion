@@ -10,6 +10,7 @@ import '../data/repository.dart';
 import '../domain/models.dart';
 import '../domain/recurrence.dart';
 import 'calendar.dart';
+import 'birthdays.dart';
 import 'dashboard.dart';
 import 'shortcuts.dart';
 import 'timer_control.dart';
@@ -51,6 +52,7 @@ class _WorkspaceState extends ConsumerState<Workspace>
   DateTime? calendarDate, homeDate;
   Timer? ticker;
   bool mobileTasks = true;
+  bool birthdaysOpen = false;
   double? sidebarWidth, sidebarDragOrigin, sidebarDragWidth;
   bool sidebarEdgeHovered = false;
   String? runtimeError;
@@ -135,6 +137,7 @@ class _WorkspaceState extends ConsumerState<Workspace>
     setState(() {
       page = next;
       selected = null;
+      birthdaysOpen = false;
     });
   }
 
@@ -261,7 +264,11 @@ class _WorkspaceState extends ConsumerState<Workspace>
         const SingleActivator(LogicalKeyboardKey.f1): () =>
             showShortcutHelp(context),
         const SingleActivator(LogicalKeyboardKey.escape): () {
-          if (selected != null) setState(() => selected = null);
+          if (birthdaysOpen) {
+            setState(() => birthdaysOpen = false);
+          } else if (selected != null) {
+            setState(() => selected = null);
+          }
         },
       },
       child: Focus(
@@ -313,7 +320,24 @@ class _WorkspaceState extends ConsumerState<Workspace>
                             key: ValueKey(selectedNote),
                             initialId: selectedNote,
                           ),
-                          PageKind.settings => const SettingsPage(),
+                          PageKind.settings => PopScope(
+                            canPop: !birthdaysOpen,
+                            onPopInvokedWithResult: (didPop, _) {
+                              if (!didPop) {
+                                setState(() => birthdaysOpen = false);
+                              }
+                            },
+                            child: IndexedStack(
+                              index: birthdaysOpen ? 1 : 0,
+                              children: [
+                                SettingsPage(
+                                  onOpenBirthdays: () =>
+                                      setState(() => birthdaysOpen = true),
+                                ),
+                                if (birthdaysOpen) const BirthdayPage(),
+                              ],
+                            ),
+                          ),
                         },
                       ),
                     ],
@@ -391,6 +415,7 @@ class _WorkspaceState extends ConsumerState<Workspace>
   Widget _header(Repository repo, bool desktop) => LayoutBuilder(
     builder: (context, constraints) {
       final home = page == PageKind.today;
+      final birthdays = page == PageKind.settings && birthdaysOpen;
       final zone = tz.getLocation(repo.snapshot.settings.timezone);
       final now = tz.TZDateTime.from(repo.now(), zone);
       final date = tz.TZDateTime.from(homeDate ?? now, zone);
@@ -420,7 +445,7 @@ class _WorkspaceState extends ConsumerState<Workspace>
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  labels[page.index],
+                  birthdays ? 'Дни рождения' : labels[page.index],
                   style: TextStyle(
                     fontSize: desktop ? 26 : 22,
                     fontWeight: FontWeight.w600,
@@ -429,7 +454,9 @@ class _WorkspaceState extends ConsumerState<Workspace>
                 ),
                 if (desktop)
                   Text(
-                    page == PageKind.planner
+                    birthdays
+                        ? 'Настройки · Близкие люди и важные даты'
+                        : page == PageKind.planner
                         ? 'Найдите время для важного'
                         : page == PageKind.board
                         ? 'От идеи до завершения'
@@ -440,68 +467,91 @@ class _WorkspaceState extends ConsumerState<Workspace>
                   ),
               ],
             );
-      final actions = <Widget>[
-        if (page != PageKind.settings && page != PageKind.notes)
-          if (desktop && wide)
-            ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 150),
-              child: projectFilter(),
-            )
-          else if (repo.snapshot.projects.isNotEmpty)
-            PopupMenuButton<String>(
-              tooltip: 'Фильтр проектов',
-              icon: Icon(
-                Icons.filter_list_rounded,
-                color: projectId.isEmpty ? Palette.muted : Palette.blue,
+      final actions = birthdays
+          ? <Widget>[
+              if (desktop)
+                FilledButton.icon(
+                  key: const ValueKey('add-birthday'),
+                  onPressed: () => editBirthday(context),
+                  icon: const Icon(Icons.add_rounded, size: 18),
+                  label: const Text('Добавить день рождения'),
+                )
+              else
+                IconButton.filledTonal(
+                  key: const ValueKey('add-birthday'),
+                  tooltip: 'Добавить день рождения',
+                  onPressed: () => editBirthday(context),
+                  icon: const Icon(Icons.add_rounded, size: 22),
+                ),
+            ]
+          : <Widget>[
+              if (page != PageKind.settings && page != PageKind.notes)
+                if (desktop && wide)
+                  ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 150),
+                    child: projectFilter(),
+                  )
+                else if (repo.snapshot.projects.isNotEmpty)
+                  PopupMenuButton<String>(
+                    tooltip: 'Фильтр проектов',
+                    icon: Icon(
+                      Icons.filter_list_rounded,
+                      color: projectId.isEmpty ? Palette.muted : Palette.blue,
+                    ),
+                    onSelected: (value) => setState(() => projectId = value),
+                    itemBuilder: (_) => [
+                      const PopupMenuItem(
+                        value: '',
+                        child: Text('Все проекты'),
+                      ),
+                      for (final project in repo.snapshot.projects)
+                        PopupMenuItem(
+                          value: project.id,
+                          child: Text(project.title),
+                        ),
+                    ],
+                  ),
+              TimerControl(compact: !wide),
+              IconButton(
+                tooltip: 'Поиск · ⌘F / Ctrl+F',
+                onPressed: search,
+                icon: const Icon(Icons.search_rounded),
               ),
-              onSelected: (value) => setState(() => projectId = value),
-              itemBuilder: (_) => [
-                const PopupMenuItem(value: '', child: Text('Все проекты')),
-                for (final project in repo.snapshot.projects)
-                  PopupMenuItem(value: project.id, child: Text(project.title)),
+              if (!desktop)
+                IconButton(
+                  tooltip: 'Настройки',
+                  onPressed: () => go(PageKind.settings),
+                  icon: const Icon(Icons.tune_rounded),
+                ),
+              if (desktop && page != PageKind.settings) ...[
+                const SizedBox(width: 8),
+                if (wide)
+                  OutlinedButton.icon(
+                    onPressed: createNote,
+                    icon: const Icon(Icons.note_add_outlined, size: 17),
+                    label: const Text('Заметка'),
+                  )
+                else
+                  IconButton(
+                    tooltip: 'Создать заметку',
+                    onPressed: createNote,
+                    icon: const Icon(Icons.note_add_outlined, size: 20),
+                  ),
+                const SizedBox(width: 8),
+                if (wide)
+                  FilledButton.icon(
+                    onPressed: () => openTask(context),
+                    icon: const Icon(Icons.add_rounded, size: 18),
+                    label: const Text('Задача'),
+                  )
+                else
+                  IconButton.filled(
+                    tooltip: 'Создать задачу',
+                    onPressed: () => openTask(context),
+                    icon: const Icon(Icons.add_rounded, size: 20),
+                  ),
               ],
-            ),
-        TimerControl(compact: !wide),
-        IconButton(
-          tooltip: 'Поиск · ⌘F / Ctrl+F',
-          onPressed: search,
-          icon: const Icon(Icons.search_rounded),
-        ),
-        if (!desktop)
-          IconButton(
-            tooltip: 'Настройки',
-            onPressed: () => go(PageKind.settings),
-            icon: const Icon(Icons.tune_rounded),
-          ),
-        if (desktop && page != PageKind.settings) ...[
-          const SizedBox(width: 8),
-          if (wide)
-            OutlinedButton.icon(
-              onPressed: createNote,
-              icon: const Icon(Icons.note_add_outlined, size: 17),
-              label: const Text('Заметка'),
-            )
-          else
-            IconButton(
-              tooltip: 'Создать заметку',
-              onPressed: createNote,
-              icon: const Icon(Icons.note_add_outlined, size: 20),
-            ),
-          const SizedBox(width: 8),
-          if (wide)
-            FilledButton.icon(
-              onPressed: () => openTask(context),
-              icon: const Icon(Icons.add_rounded, size: 18),
-              label: const Text('Задача'),
-            )
-          else
-            IconButton.filled(
-              tooltip: 'Создать задачу',
-              onPressed: () => openTask(context),
-              icon: const Icon(Icons.add_rounded, size: 20),
-            ),
-        ],
-      ];
+            ];
       return Container(
         key: const ValueKey('workspace-header'),
         height: home && !desktop
@@ -515,9 +565,15 @@ class _WorkspaceState extends ConsumerState<Workspace>
             Expanded(
               child: Row(
                 children: [
-                  if (!desktop && page == PageKind.settings)
+                  if (birthdays || (!desktop && page == PageKind.settings))
                     IconButton(
-                      onPressed: () => go(PageKind.today),
+                      key: birthdays
+                          ? const ValueKey('back-from-birthdays')
+                          : null,
+                      tooltip: birthdays ? 'К настройкам' : 'К календарю',
+                      onPressed: birthdays
+                          ? () => setState(() => birthdaysOpen = false)
+                          : () => go(PageKind.today),
                       icon: const Icon(Icons.arrow_back_rounded),
                     ),
                   Expanded(child: home && desktop ? toolbar : title),
@@ -885,6 +941,7 @@ class _WorkspaceState extends ConsumerState<Workspace>
           projectId: projectId,
           initialDate: homeDate,
           showToolbar: false,
+          onDateChanged: (value) => setState(() => homeDate = value),
         ),
       );
     }
@@ -1010,6 +1067,7 @@ class _WorkspaceState extends ConsumerState<Workspace>
           child: CalendarPane(
             projectId: projectId,
             initialDate: calendarDate,
+            onDateChanged: (value) => setState(() => calendarDate = value),
             selectedTask: selected,
             planner: true,
             onPlaced: () => setState(() => selected = null),

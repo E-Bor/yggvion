@@ -23,8 +23,8 @@ import (
 )
 
 type reminder struct {
-	key, taskID, title string
-	at                 time.Time
+	key, taskID, title, body string
+	at                       time.Time
 }
 
 func (r reminder) deliveryKey() string { return fmt.Sprintf("notified:%s:%d", r.key, r.at.UnixMilli()) }
@@ -126,8 +126,25 @@ func tick(ctx context.Context, db *sql.DB, now time.Time, send func(context.Cont
 			if b.Historical {
 				continue
 			}
-			for _, offset := range b.Reminders {
-				list = append(list, reminder{key: fmt.Sprintf("%s:%d", r.ID, offset), taskID: b.TaskID, at: b.Start.Add(-time.Duration(offset) * time.Minute)})
+			if len(b.ReminderAt) > 0 {
+				for index, at := range b.ReminderAt {
+					body := ""
+					if tasks[b.TaskID].BirthdayDate != "" {
+						// Ignore legacy month/week reminders, including records
+						// not yet refreshed by the Flutter client.
+						if at.Before(b.Start) || !at.Before(b.End) {
+							continue
+						}
+						// Preserve the original day-of-birthday delivery key.
+						index = 2
+						body = "Сегодня день рождения. Не забудьте поздравить!"
+					}
+					list = append(list, reminder{key: fmt.Sprintf("%s:at:%d", r.ID, index), taskID: b.TaskID, at: at, body: body})
+				}
+			} else {
+				for _, offset := range b.Reminders {
+					list = append(list, reminder{key: fmt.Sprintf("%s:%d", r.ID, offset), taskID: b.TaskID, at: b.Start.Add(-time.Duration(offset) * time.Minute)})
+				}
 			}
 		}
 		if r.Kind == "snooze" {
@@ -143,6 +160,9 @@ func tick(ctx context.Context, db *sql.DB, now time.Time, send func(context.Cont
 				continue
 			}
 			rem.title = strings.ReplaceAll(task.Title, "\x00", "")
+			if rem.body == "" && task.BirthdayDate != "" {
+				rem.body = "Напоминание о дне рождения"
+			}
 			result, e := db.ExecContext(ctx, "INSERT OR IGNORE INTO metadata(key,value) VALUES(?,?)", rem.deliveryKey(), now.UTC().Format(time.RFC3339Nano))
 			if e != nil {
 				return e
@@ -169,7 +189,11 @@ func tick(ctx context.Context, db *sql.DB, now time.Time, send func(context.Cont
 func deliver(ctx context.Context, db *sql.DB, r reminder) error {
 	commandCtx, cancel := context.WithTimeout(ctx, 15*time.Minute)
 	defer cancel()
-	out, err := exec.CommandContext(commandCtx, "notify-send", "--app-name=Yggvion", "--icon=appointment-soon", "--wait", "--action=snooze=Через 10 минут", "--", r.title, "Пора начать").Output()
+	body := r.body
+	if body == "" {
+		body = "Пора начать"
+	}
+	out, err := exec.CommandContext(commandCtx, "notify-send", "--app-name=Yggvion", "--icon=appointment-soon", "--wait", "--action=snooze=Через 10 минут", "--", r.title, body).Output()
 	// A notification remaining in the notification center is not a failed delivery.
 	if commandCtx.Err() != nil {
 		return nil

@@ -9,9 +9,11 @@ import '../domain/recurrence.dart';
 import 'providers.dart';
 import 'task_editor.dart';
 import 'theme.dart';
+import 'birthdays.dart';
 
 class SettingsPage extends ConsumerStatefulWidget {
-  const SettingsPage({super.key});
+  const SettingsPage({super.key, required this.onOpenBirthdays});
+  final VoidCallback onOpenBirthdays;
   @override
   ConsumerState<SettingsPage> createState() => _SettingsPageState();
 }
@@ -354,6 +356,40 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                           ),
                         ),
                     ],
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 24),
+                  child: Card(
+                    child: ListTile(
+                      key: const ValueKey('open-birthdays'),
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 24,
+                        vertical: 12,
+                      ),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                      leading: const Icon(
+                        Icons.cake_outlined,
+                        color: birthdayColor,
+                      ),
+                      title: const Text('Дни рождения'),
+                      subtitle: Text(
+                        repo.snapshot.birthdays.isEmpty
+                            ? 'Имена, даты и ежегодные напоминания'
+                            : 'Людей в списке: ${repo.snapshot.birthdays.length}',
+                        style: const TextStyle(
+                          color: Palette.muted,
+                          fontSize: 12,
+                        ),
+                      ),
+                      trailing: const Icon(
+                        Icons.chevron_right_rounded,
+                        size: 20,
+                      ),
+                      onTap: widget.onOpenBirthdays,
+                    ),
                   ),
                 ),
                 section(

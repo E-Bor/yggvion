@@ -13,6 +13,7 @@ import '../domain/recurrence.dart';
 import 'providers.dart';
 import 'task_editor.dart';
 import 'theme.dart';
+import 'birthdays.dart';
 
 class CalendarToolbar extends StatelessWidget {
   const CalendarToolbar({
@@ -24,6 +25,7 @@ class CalendarToolbar extends StatelessWidget {
     required this.onDateChanged,
     required this.onViewChanged,
     this.showDate = true,
+    this.allowMonth = true,
   });
   final DateTime date, now;
   final CalendarView view;
@@ -31,6 +33,7 @@ class CalendarToolbar extends StatelessWidget {
   final ValueChanged<DateTime> onDateChanged;
   final ValueChanged<CalendarView> onViewChanged;
   final bool showDate;
+  final bool allowMonth;
 
   static String dateLabel(DateTime date, CalendarView view) {
     if (view == CalendarView.month) {
@@ -123,28 +126,29 @@ class CalendarToolbar extends StatelessWidget {
                 onSelected: onViewChanged,
                 itemBuilder: (_) => [
                   for (final value in CalendarView.values)
-                    PopupMenuItem(
-                      value: value,
-                      child: Row(
-                        children: [
-                          SizedBox(
-                            width: 24,
-                            child: value == view
-                                ? const Icon(
-                                    Icons.check_rounded,
-                                    size: 17,
-                                    color: Palette.blue,
-                                  )
-                                : null,
-                          ),
-                          const SizedBox(width: 8),
-                          Text(
-                            value.label,
-                            style: const TextStyle(fontSize: 13),
-                          ),
-                        ],
+                    if (allowMonth || value != CalendarView.month)
+                      PopupMenuItem(
+                        value: value,
+                        child: Row(
+                          children: [
+                            SizedBox(
+                              width: 24,
+                              child: value == view
+                                  ? const Icon(
+                                      Icons.check_rounded,
+                                      size: 17,
+                                      color: Palette.blue,
+                                    )
+                                  : null,
+                            ),
+                            const SizedBox(width: 8),
+                            Text(
+                              value.label,
+                              style: const TextStyle(fontSize: 13),
+                            ),
+                          ],
+                        ),
                       ),
-                    ),
                 ],
                 child: Padding(
                   padding: const EdgeInsets.symmetric(
@@ -191,6 +195,11 @@ class CalendarPane extends ConsumerStatefulWidget {
     this.initialDate,
     this.planner = false,
     this.showToolbar = true,
+    this.onDateChanged,
+    this.timeEntryTask,
+    this.entries = const [],
+    this.onEntriesChanged,
+    this.initialTime,
   });
   final Task? selectedTask;
   final VoidCallback? onPlaced;
@@ -198,6 +207,11 @@ class CalendarPane extends ConsumerStatefulWidget {
   final DateTime? initialDate;
   final bool planner;
   final bool showToolbar;
+  final ValueChanged<DateTime>? onDateChanged;
+  final Task? timeEntryTask;
+  final List<TimeBlock> entries;
+  final ValueChanged<List<TimeBlock>>? onEntriesChanged;
+  final DateTime? initialTime;
   @override
   ConsumerState<CalendarPane> createState() => _CalendarPaneState();
 }
@@ -230,6 +244,12 @@ class _CalendarPaneState extends ConsumerState<CalendarPane>
   DateTime? selectionStart, selectionEnd, selectionAnchor;
   String? error;
   int expansion = 0;
+  double swipeDistance = 0, overscrollDistance = 0;
+  CalendarView entryView = CalendarView.day;
+  bool get enteringTime => widget.onEntriesChanged != null;
+  bool get mobile =>
+      defaultTargetPlatform == TargetPlatform.iOS ||
+      defaultTargetPlatform == TargetPlatform.android;
   tz.Location get _zone =>
       tz.getLocation(ref.read(appProvider).snapshot.settings.timezone);
   DateTime get _clock => _display(ref.read(appProvider).now());
@@ -262,7 +282,10 @@ class _CalendarPaneState extends ConsumerState<CalendarPane>
         scroll.jumpTo(
           math.min(
             scroll.position.maxScrollExtent,
-            math.max(0, (_clock.hour - 1) * hourHeight),
+            math.max(
+              0,
+              (_display(widget.initialTime ?? _clock).hour - 1) * hourHeight,
+            ),
           ),
         );
       }
@@ -277,9 +300,24 @@ class _CalendarPaneState extends ConsumerState<CalendarPane>
       date = _midnight(widget.initialDate!);
       expand();
     }
+    if (enteringTime &&
+        widget.initialTime != null &&
+        widget.initialTime != old.initialTime) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && scroll.hasClients) {
+          scroll.jumpTo(
+            ((_display(widget.initialTime!).hour - 1) * hourHeight).clamp(
+              0,
+              scroll.position.maxScrollExtent,
+            ),
+          );
+        }
+      });
+    }
   }
 
   void expand() {
+    if (enteringTime) return;
     final generation = ++expansion;
     RecurrenceService(ref.read(appProvider))
         .expand(
@@ -298,6 +336,36 @@ class _CalendarPaneState extends ConsumerState<CalendarPane>
             }
           },
         );
+  }
+
+  void changeDate(DateTime value) {
+    cancelInteraction();
+    setState(() => date = _midnight(value));
+    widget.onDateChanged?.call(date);
+    expand();
+  }
+
+  void swipePage(CalendarView view, double distance, [double velocity = 0]) {
+    if (drag != null || selectionAnchor != null) return;
+    if (distance.abs() < 60 && !(distance.abs() > 20 && velocity.abs() > 500)) {
+      return;
+    }
+    final direction = distance < 0 ? 1 : -1;
+    HapticFeedback.selectionClick();
+    changeDate(
+      view == CalendarView.month
+          ? _date(date.year, date.month + direction, 1)
+          : _date(date.year, date.month, date.day + view.days * direction),
+    );
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && horizontal.hasClients) {
+        horizontal.jumpTo(
+          direction > 0
+              ? horizontal.position.minScrollExtent
+              : horizontal.position.maxScrollExtent,
+        );
+      }
+    });
   }
 
   @override
@@ -502,6 +570,21 @@ class _CalendarPaneState extends ConsumerState<CalendarPane>
             active.end == active.block.end)) {
       return;
     }
+    if (enteringTime) {
+      widget.onEntriesChanged!([
+        for (final block in widget.entries)
+          if (block.id == active.block.id)
+            TimeBlock(
+              block.entity.change({
+                'start': wireTime(active.start),
+                'end': wireTime(active.end),
+              }),
+            )
+          else
+            block,
+      ]);
+      return;
+    }
     guard(
       context,
       () => moveCalendarBlock(
@@ -515,6 +598,22 @@ class _CalendarPaneState extends ConsumerState<CalendarPane>
   }
 
   Future<void> place(DateTime start, DateTime end) async {
+    if (enteringTime) {
+      widget.onEntriesChanged!([
+        ...widget.entries,
+        TimeBlock(
+          TimeBlock.create(
+            ref.read(appProvider).newId(),
+            widget.timeEntryTask!.id,
+            start,
+            end,
+            timezone: _zone.name,
+            reminders: const [],
+          ),
+        ),
+      ]);
+      return;
+    }
     if (widget.selectedTask != null) {
       await guard(context, () async {
         await ref.read(appProvider).schedule(widget.selectedTask!, start, end);
@@ -528,319 +627,467 @@ class _CalendarPaneState extends ConsumerState<CalendarPane>
   @override
   Widget build(BuildContext context) {
     final repo = ref.watch(appProvider),
-        view = widget.planner ? repo.plannerView : repo.calendarView,
+        view = enteringTime
+            ? entryView
+            : widget.planner
+            ? repo.plannerView
+            : repo.calendarView,
         first = firstDay(view);
-    final blocks = repo.snapshot.blocks.where((b) {
-      final t = repo.snapshot.task(b.taskId);
-      return t != null &&
-          (widget.projectId.isEmpty || t.projectId == widget.projectId);
-    }).toList();
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: Palette.surface,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Palette.border, width: .6),
-      ),
-      child: Column(
-        children: [
-          if (widget.showToolbar)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(12, 12, 12, 10),
-              child: CalendarToolbar(
-                date: date,
-                view: view,
-                now: _clock,
-                timezone: repo.snapshot.settings.timezone,
-                onDateChanged: (value) {
-                  setState(() => date = _midnight(value));
-                  expand();
-                },
-                onViewChanged: (value) {
-                  guard(
-                    context,
-                    () => repo.setView(value, planner: widget.planner),
-                  );
-                  expand();
-                },
-              ),
-            ),
-          if (error != null)
-            Padding(
-              padding: const EdgeInsets.all(8),
-              child: Text(
-                error!,
-                style: TextStyle(color: Theme.of(context).colorScheme.error),
-              ),
-            ),
-          if (widget.showToolbar || error != null) const Divider(),
-          Expanded(
-            child: view == CalendarView.month
-                ? _month(repo, blocks)
-                : LayoutBuilder(
-                    builder: (context, constraints) {
-                      final count = view.days;
-                      final width = math.max(
-                        view == CalendarView.day ? 0.0 : 105.0,
-                        (constraints.maxWidth - gutter) / count,
+    final blocks = enteringTime
+        ? widget.entries
+        : repo.snapshot.blocks.where((b) {
+            final t = repo.snapshot.task(b.taskId);
+            return t != null &&
+                !(t.isBirthday && t.done) &&
+                (!widget.planner || !t.isBirthday) &&
+                (t.isBirthday ||
+                    widget.projectId.isEmpty ||
+                    t.projectId == widget.projectId);
+          }).toList();
+    return GestureDetector(
+      key: const ValueKey('calendar-swipe'),
+      supportedDevices: const {
+        PointerDeviceKind.touch,
+        PointerDeviceKind.stylus,
+      },
+      onHorizontalDragStart: !mobile ? null : (_) => swipeDistance = 0,
+      onHorizontalDragUpdate: !mobile
+          ? null
+          : (d) => swipeDistance += d.delta.dx,
+      onHorizontalDragEnd: !mobile
+          ? null
+          : (d) => swipePage(view, swipeDistance, d.primaryVelocity ?? 0),
+      child: NotificationListener<ScrollNotification>(
+        onNotification: (notification) {
+          if (!mobile ||
+              notification.metrics.axis != Axis.horizontal ||
+              drag != null ||
+              selectionAnchor != null) {
+            return false;
+          }
+          if (notification is ScrollStartNotification) overscrollDistance = 0;
+          if (notification is OverscrollNotification &&
+              notification.dragDetails != null) {
+            overscrollDistance -= notification.overscroll;
+          }
+          if (notification is ScrollEndNotification &&
+              overscrollDistance != 0) {
+            final distance = overscrollDistance;
+            overscrollDistance = 0;
+            // Notifications arrive during layout; page changes wait for its end.
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (mounted) swipePage(view, distance);
+            });
+          }
+          return false;
+        },
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            color: Palette.surface,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: Palette.border, width: .6),
+          ),
+          child: Column(
+            children: [
+              if (widget.showToolbar)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 12, 12, 10),
+                  child: CalendarToolbar(
+                    date: date,
+                    view: view,
+                    now: _clock,
+                    timezone: repo.snapshot.settings.timezone,
+                    allowMonth: !enteringTime,
+                    onDateChanged: changeDate,
+                    onViewChanged: (value) {
+                      if (enteringTime) {
+                        setState(() => entryView = value);
+                        return;
+                      }
+                      guard(
+                        context,
+                        () => repo.setView(value, planner: widget.planner),
                       );
-                      final fullWidth = gutter + count * width;
-                      return Scrollbar(
-                        controller: horizontal,
-                        child: SingleChildScrollView(
-                          controller: horizontal,
-                          scrollDirection: Axis.horizontal,
-                          child: SizedBox(
-                            width: fullWidth,
-                            child: Column(
-                              children: [
-                                SizedBox(
-                                  height: 59,
-                                  child: Row(
-                                    children: [
-                                      const SizedBox(width: gutter),
-                                      for (var i = 0; i < count; i++)
-                                        SizedBox(
-                                          width: width,
-                                          child: _dayHeader(
+                      expand();
+                    },
+                  ),
+                ),
+              if (error != null)
+                Padding(
+                  padding: const EdgeInsets.all(8),
+                  child: Text(
+                    error!,
+                    style: TextStyle(
+                      color: Theme.of(context).colorScheme.error,
+                    ),
+                  ),
+                ),
+              if (widget.showToolbar || error != null) const Divider(),
+              Expanded(
+                child: view == CalendarView.month
+                    ? _month(repo, blocks)
+                    : LayoutBuilder(
+                        builder: (context, constraints) {
+                          final count = view.days;
+                          final width = math.max(
+                            view == CalendarView.day ? 0.0 : 105.0,
+                            (constraints.maxWidth - gutter) / count,
+                          );
+                          final fullWidth = gutter + count * width;
+                          return Scrollbar(
+                            controller: horizontal,
+                            child: SingleChildScrollView(
+                              controller: horizontal,
+                              physics: const ClampingScrollPhysics(),
+                              scrollDirection: Axis.horizontal,
+                              child: SizedBox(
+                                width: fullWidth,
+                                child: Column(
+                                  children: [
+                                    SizedBox(
+                                      height: 59,
+                                      child: Row(
+                                        children: [
+                                          const SizedBox(width: gutter),
+                                          for (var i = 0; i < count; i++)
+                                            SizedBox(
+                                              width: width,
+                                              child: _dayHeader(
+                                                _date(
+                                                  first.year,
+                                                  first.month,
+                                                  first.day + i,
+                                                ),
+                                              ),
+                                            ),
+                                        ],
+                                      ),
+                                    ),
+                                    if (blocks.any(
+                                      (b) =>
+                                          repo.snapshot
+                                                  .task(b.taskId)
+                                                  ?.isBirthday ==
+                                              true &&
+                                          b.start.isBefore(
                                             _date(
                                               first.year,
                                               first.month,
-                                              first.day + i,
+                                              first.day + count,
                                             ),
-                                          ),
-                                        ),
-                                    ],
-                                  ),
-                                ),
-                                const Divider(),
-                                Expanded(
-                                  child: SizedBox(
-                                    key: viewportKey,
-                                    child: Scrollbar(
-                                      controller: scroll,
-                                      child: SingleChildScrollView(
-                                        key: const ValueKey('calendar-scroll'),
-                                        controller: scroll,
-                                        child: SizedBox(
-                                          height: 24 * hourHeight,
-                                          width: fullWidth,
-                                          child: CalendarGestureSurface(
+                                          ) &&
+                                          b.end.isAfter(first),
+                                    ))
+                                      birthdayRow(
+                                        repo,
+                                        blocks,
+                                        first,
+                                        width,
+                                        count,
+                                      ),
+                                    const Divider(),
+                                    Expanded(
+                                      child: SizedBox(
+                                        key: viewportKey,
+                                        child: Scrollbar(
+                                          controller: scroll,
+                                          child: SingleChildScrollView(
                                             key: const ValueKey(
-                                              'calendar-grid-gestures',
+                                              'calendar-scroll',
                                             ),
-                                            onTap: (global) {
-                                              final position = contentPosition(
-                                                global,
-                                              );
-                                              if (position.dx < gutter) {
-                                                return;
-                                              }
-                                              final start = at(
-                                                position,
-                                                width,
-                                                count,
-                                                first,
-                                              );
-                                              place(
-                                                start,
-                                                start.add(
-                                                  Duration(
-                                                    minutes: repo
-                                                        .snapshot
-                                                        .settings
-                                                        .defaultMinutes,
-                                                  ),
+                                            controller: scroll,
+                                            child: SizedBox(
+                                              height: 24 * hourHeight,
+                                              width: fullWidth,
+                                              child: CalendarGestureSurface(
+                                                key: const ValueKey(
+                                                  'calendar-grid-gestures',
                                                 ),
-                                              );
-                                            },
-                                            onStart: (global) {
-                                              final position = contentPosition(
-                                                global,
-                                              );
-                                              if (position.dx < gutter) return;
-                                              beginInteraction(
-                                                global,
-                                                width,
-                                                count,
-                                                first,
-                                              );
-                                              setState(() {
-                                                selectionAnchor = at(
-                                                  position,
-                                                  width,
-                                                  count,
-                                                  first,
-                                                );
-                                                selectionStart =
-                                                    selectionAnchor;
-                                                selectionEnd = selectionStart!
-                                                    .add(
+                                                onTap: (global) {
+                                                  final position =
+                                                      contentPosition(global);
+                                                  if (position.dx < gutter) {
+                                                    return;
+                                                  }
+                                                  final start = at(
+                                                    position,
+                                                    width,
+                                                    count,
+                                                    first,
+                                                  );
+                                                  place(
+                                                    start,
+                                                    start.add(
                                                       Duration(
                                                         minutes: repo
                                                             .snapshot
                                                             .settings
                                                             .defaultMinutes,
                                                       ),
-                                                    );
-                                              });
-                                            },
-                                            onUpdate: updateInteraction,
-                                            onCancel: () {
-                                              if (drag == null) {
-                                                cancelInteraction();
-                                              }
-                                            },
-                                            onEnd: () {
-                                              final start = selectionStart,
-                                                  end = selectionEnd;
-                                              cancelInteraction();
-                                              if (start != null &&
-                                                  end != null) {
-                                                place(start, end);
-                                              }
-                                            },
-                                            child: Stack(
-                                              clipBehavior: Clip.hardEdge,
-                                              children: [
-                                                Positioned.fill(
-                                                  child: CustomPaint(
-                                                    painter: _GridPainter(
-                                                      count: count,
-                                                      columnWidth: width,
-                                                      hourHeight: hourHeight,
-                                                      gutter: gutter,
                                                     ),
-                                                  ),
-                                                ),
-                                                for (var h = 0; h < 24; h++)
-                                                  Positioned(
-                                                    left: 8,
-                                                    top: h * hourHeight + 5,
-                                                    child: Text(
-                                                      '${h.toString().padLeft(2, '0')}:00',
-                                                      style: const TextStyle(
-                                                        fontSize: 10,
-                                                        color: Palette.muted,
-                                                      ),
-                                                    ),
-                                                  ),
-                                                for (
-                                                  var day = 0;
-                                                  day < count;
-                                                  day++
-                                                )
-                                                  ..._dayBlocks(
-                                                    repo,
-                                                    blocks,
-                                                    _date(
-                                                      first.year,
-                                                      first.month,
-                                                      first.day + day,
-                                                    ),
-                                                    gutter + width * day,
+                                                  );
+                                                },
+                                                onStart: (global) {
+                                                  final position =
+                                                      contentPosition(global);
+                                                  if (position.dx < gutter) {
+                                                    return;
+                                                  }
+                                                  beginInteraction(
+                                                    global,
                                                     width,
-                                                    first,
                                                     count,
-                                                  ),
-                                                for (
-                                                  var day = 0;
-                                                  day < count;
-                                                  day++
-                                                )
-                                                  ..._tracks(
-                                                    repo,
-                                                    _date(
-                                                      first.year,
-                                                      first.month,
-                                                      first.day + day,
-                                                    ),
-                                                    gutter + width * day,
-                                                  ),
-                                                if (!_clock.isBefore(first) &&
-                                                    _clock.isBefore(
-                                                      _date(
-                                                        first.year,
-                                                        first.month,
-                                                        first.day + count,
+                                                    first,
+                                                  );
+                                                  setState(() {
+                                                    selectionAnchor = at(
+                                                      position,
+                                                      width,
+                                                      count,
+                                                      first,
+                                                    );
+                                                    selectionStart =
+                                                        selectionAnchor;
+                                                    selectionEnd =
+                                                        selectionStart!.add(
+                                                          Duration(
+                                                            minutes: repo
+                                                                .snapshot
+                                                                .settings
+                                                                .defaultMinutes,
+                                                          ),
+                                                        );
+                                                  });
+                                                },
+                                                onUpdate: updateInteraction,
+                                                onCancel: () {
+                                                  if (drag == null) {
+                                                    cancelInteraction();
+                                                  }
+                                                },
+                                                onEnd: () {
+                                                  final start = selectionStart,
+                                                      end = selectionEnd;
+                                                  cancelInteraction();
+                                                  if (start != null &&
+                                                      end != null) {
+                                                    place(start, end);
+                                                  }
+                                                },
+                                                child: Stack(
+                                                  clipBehavior: Clip.hardEdge,
+                                                  children: [
+                                                    Positioned.fill(
+                                                      child: CustomPaint(
+                                                        painter: _GridPainter(
+                                                          count: count,
+                                                          columnWidth: width,
+                                                          hourHeight:
+                                                              hourHeight,
+                                                          gutter: gutter,
+                                                        ),
                                                       ),
-                                                    ))
-                                                  Positioned(
-                                                    left:
-                                                        gutter +
-                                                        _dayIndex(
-                                                              _clock,
-                                                              first,
-                                                            ) *
-                                                            width,
-                                                    top:
-                                                        (_clock.hour +
-                                                            _clock.minute /
-                                                                60) *
-                                                        hourHeight,
-                                                    right:
-                                                        fullWidth -
-                                                        gutter -
-                                                        (_dayIndex(
+                                                    ),
+                                                    for (var h = 0; h < 24; h++)
+                                                      Positioned(
+                                                        left: 8,
+                                                        top: h * hourHeight + 5,
+                                                        child: Text(
+                                                          '${h.toString().padLeft(2, '0')}:00',
+                                                          style:
+                                                              const TextStyle(
+                                                                fontSize: 10,
+                                                                color: Palette
+                                                                    .muted,
+                                                              ),
+                                                        ),
+                                                      ),
+                                                    if (enteringTime)
+                                                      ...planGuides(
+                                                        repo,
+                                                        first,
+                                                        width,
+                                                        count,
+                                                      ),
+                                                    for (
+                                                      var day = 0;
+                                                      day < count;
+                                                      day++
+                                                    )
+                                                      ..._dayBlocks(
+                                                        repo,
+                                                        blocks,
+                                                        _date(
+                                                          first.year,
+                                                          first.month,
+                                                          first.day + day,
+                                                        ),
+                                                        gutter + width * day,
+                                                        width,
+                                                        first,
+                                                        count,
+                                                      ),
+                                                    if (!enteringTime)
+                                                      for (
+                                                        var day = 0;
+                                                        day < count;
+                                                        day++
+                                                      )
+                                                        ..._tracks(
+                                                          repo,
+                                                          _date(
+                                                            first.year,
+                                                            first.month,
+                                                            first.day + day,
+                                                          ),
+                                                          gutter + width * day,
+                                                        ),
+                                                    if (!_clock.isBefore(
+                                                          first,
+                                                        ) &&
+                                                        _clock.isBefore(
+                                                          _date(
+                                                            first.year,
+                                                            first.month,
+                                                            first.day + count,
+                                                          ),
+                                                        ))
+                                                      Positioned(
+                                                        left:
+                                                            gutter +
+                                                            _dayIndex(
                                                                   _clock,
                                                                   first,
-                                                                ) +
-                                                                1) *
-                                                            width,
-                                                    child: IgnorePointer(
-                                                      child: Row(
-                                                        children: [
-                                                          Container(
-                                                            width: 6,
-                                                            height: 6,
-                                                            decoration:
-                                                                const BoxDecoration(
+                                                                ) *
+                                                                width,
+                                                        top:
+                                                            (_clock.hour +
+                                                                _clock.minute /
+                                                                    60) *
+                                                            hourHeight,
+                                                        right:
+                                                            fullWidth -
+                                                            gutter -
+                                                            (_dayIndex(
+                                                                      _clock,
+                                                                      first,
+                                                                    ) +
+                                                                    1) *
+                                                                width,
+                                                        child: IgnorePointer(
+                                                          child: Row(
+                                                            children: [
+                                                              Container(
+                                                                width: 6,
+                                                                height: 6,
+                                                                decoration: const BoxDecoration(
                                                                   color: Palette
                                                                       .pink,
                                                                   shape: BoxShape
                                                                       .circle,
                                                                 ),
+                                                              ),
+                                                              Expanded(
+                                                                child: Container(
+                                                                  height: 1,
+                                                                  color: Palette
+                                                                      .pink
+                                                                      .withValues(
+                                                                        alpha:
+                                                                            .7,
+                                                                      ),
+                                                                ),
+                                                              ),
+                                                            ],
                                                           ),
-                                                          Expanded(
-                                                            child: Container(
-                                                              height: 1,
-                                                              color: Palette
-                                                                  .pink
-                                                                  .withValues(
-                                                                    alpha: .7,
-                                                                  ),
-                                                            ),
-                                                          ),
-                                                        ],
+                                                        ),
                                                       ),
-                                                    ),
-                                                  ),
-                                                if (drag != null ||
-                                                    selectionStart != null)
-                                                  ...previewSegments(
-                                                    repo,
-                                                    first,
-                                                    width,
-                                                    count,
-                                                  ),
-                                              ],
+                                                    if (drag != null ||
+                                                        selectionStart != null)
+                                                      ...previewSegments(
+                                                        repo,
+                                                        first,
+                                                        width,
+                                                        count,
+                                                      ),
+                                                    if (drag != null ||
+                                                        selectionStart != null)
+                                                      ...timeGuide(),
+                                                  ],
+                                                ),
+                                              ),
                                             ),
                                           ),
                                         ),
                                       ),
                                     ),
-                                  ),
+                                  ],
                                 ),
-                              ],
+                              ),
                             ),
-                          ),
-                        ),
-                      );
-                    },
-                  ),
+                          );
+                        },
+                      ),
+              ),
+            ],
           ),
-        ],
+        ),
       ),
     );
+  }
+
+  List<Widget> timeGuide() {
+    final active = drag;
+    final value = _display(
+      active == null
+          ? at(
+              contentPosition(pointer!),
+              interactionWidth,
+              interactionCount,
+              interactionFirst,
+            )
+          : active.kind == CalendarDragKind.end
+          ? active.end
+          : active.start,
+    );
+    final y = (value.hour + value.minute / 60) * hourHeight;
+    final left = horizontal.hasClients ? horizontal.offset : 0.0;
+    return [
+      Positioned(
+        key: const ValueKey('calendar-time-guide'),
+        left: left + gutter - 4,
+        right: 0,
+        top: y,
+        child: const IgnorePointer(
+          child: SizedBox(height: 1, child: ColoredBox(color: Palette.blue)),
+        ),
+      ),
+      Positioned(
+        left: left + 2,
+        top: (y - 10).clamp(0, 24 * hourHeight - 22),
+        width: gutter - 6,
+        child: IgnorePointer(
+          child: Container(
+            padding: const EdgeInsets.symmetric(vertical: 3),
+            decoration: BoxDecoration(
+              color: Palette.blue,
+              borderRadius: BorderRadius.circular(5),
+            ),
+            child: Text(
+              DateFormat('HH:mm').format(value),
+              key: const ValueKey('calendar-time-label'),
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                fontSize: 10,
+                height: 1.3,
+                fontWeight: FontWeight.w600,
+                color: Palette.background,
+              ),
+            ),
+          ),
+        ),
+      ),
+    ];
   }
 
   Widget _dayHeader(DateTime day) {
@@ -875,6 +1122,60 @@ class _CalendarPaneState extends ConsumerState<CalendarPane>
     );
   }
 
+  Widget birthdayRow(
+    Repository repo,
+    List<TimeBlock> blocks,
+    DateTime first,
+    double width,
+    int count,
+  ) {
+    final days = [
+      for (var i = 0; i < count; i++)
+        blocks
+            .where(
+              (b) =>
+                  repo.snapshot.task(b.taskId)?.isBirthday == true &&
+                  _midnight(b.start) ==
+                      _date(first.year, first.month, first.day + i),
+            )
+            .toList(),
+    ];
+    final rows = days.fold(
+      0,
+      (value, blocks) => math.max(value, blocks.length),
+    );
+    return SizedBox(
+      key: const ValueKey('birthday-calendar-row'),
+      height: math.min(3, rows) * 39.0 + 6,
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const SizedBox(
+            width: gutter,
+            height: 34,
+            child: Icon(Icons.cake_outlined, size: 17, color: birthdayColor),
+          ),
+          for (final items in days)
+            SizedBox(
+              width: width,
+              child: ListView(
+                padding: const EdgeInsets.fromLTRB(4, 0, 4, 6),
+                children: [
+                  for (final block in items)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 5),
+                      child: BirthdayChip(
+                        task: repo.snapshot.task(block.taskId)!,
+                      ),
+                    ),
+                ],
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
   List<Widget> _dayBlocks(
     Repository repo,
     List<TimeBlock> blocks,
@@ -887,7 +1188,12 @@ class _CalendarPaneState extends ConsumerState<CalendarPane>
     final end = _date(day.year, day.month, day.day + 1);
     final list =
         blocks
-            .where((b) => b.start.isBefore(end) && b.end.isAfter(day))
+            .where(
+              (b) =>
+                  repo.snapshot.task(b.taskId)?.isBirthday != true &&
+                  b.start.isBefore(end) &&
+                  b.end.isAfter(day),
+            )
             .toList()
           ..sort((a, b) => a.start.compareTo(b.start));
     final laneEnds = <DateTime>[], lanes = <String, int>{};
@@ -928,6 +1234,11 @@ class _CalendarPaneState extends ConsumerState<CalendarPane>
             onDragUpdate: updateInteraction,
             onDragEnd: finishDrag,
             onDragCancel: cancelInteraction,
+            onDelete: enteringTime
+                ? () => widget.onEntriesChanged!(
+                    widget.entries.where((entry) => entry.id != b.id).toList(),
+                  )
+                : null,
           ),
         ),
       );
@@ -943,9 +1254,11 @@ class _CalendarPaneState extends ConsumerState<CalendarPane>
     final start = drag?.start ?? selectionStart!;
     final end = drag?.end ?? selectionEnd!;
     final task = drag == null
-        ? widget.selectedTask
+        ? widget.timeEntryTask ?? widget.selectedTask
         : repo.snapshot.task(drag!.block.taskId);
-    final color = task == null
+    final color = enteringTime
+        ? Palette.pink
+        : task == null
         ? Palette.blue
         : Color(repo.snapshot.taskColor(task));
     return [
@@ -964,6 +1277,55 @@ class _CalendarPaneState extends ConsumerState<CalendarPane>
             color,
           ),
     ];
+  }
+
+  List<Widget> planGuides(
+    Repository repo,
+    DateTime first,
+    double width,
+    int count,
+  ) {
+    final result = <Widget>[];
+    for (var day = 0; day < count; day++) {
+      final from = _date(first.year, first.month, first.day + day);
+      final to = _date(first.year, first.month, first.day + day + 1);
+      for (final block in repo.snapshot.taskBlocks(widget.timeEntryTask!.id)) {
+        if (!block.start.isBefore(to) || !block.end.isAfter(from)) continue;
+        final start = block.start.isBefore(from) ? from : _display(block.start);
+        final end = block.end.isAfter(to) ? to : _display(block.end);
+        result.add(
+          Positioned(
+            key: ValueKey('time-plan-${block.id}-${dayKey(from)}'),
+            left: gutter + day * width + 8,
+            width: width - 14,
+            top: (start.hour + start.minute / 60) * hourHeight,
+            height: math.max(
+              22,
+              end.difference(start).inMinutes * hourHeight / 60,
+            ),
+            child: IgnorePointer(
+              child: Container(
+                decoration: BoxDecoration(
+                  border: Border.all(
+                    color: Palette.blue.withValues(alpha: .65),
+                  ),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                alignment: Alignment.topRight,
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                child: Text(
+                  '${DateFormat('HH:mm').format(start)} — ${end == to ? '24:00' : DateFormat('HH:mm').format(end)} · план',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontSize: 10, color: Palette.blue),
+                ),
+              ),
+            ),
+          ),
+        );
+      }
+    }
+    return result;
   }
 
   Widget previewSegment(
@@ -1115,7 +1477,18 @@ class _CalendarPaneState extends ConsumerState<CalendarPane>
               blocks
                   .where((b) => b.start.isBefore(end) && b.end.isAfter(day))
                   .toList()
-                ..sort((a, b) => a.start.compareTo(b.start));
+                ..sort((a, b) {
+                  final aBirthday = repo.snapshot.task(a.taskId)!.isBirthday;
+                  final bBirthday = repo.snapshot.task(b.taskId)!.isBirthday;
+                  return aBirthday == bBirthday
+                      ? a.start.compareTo(b.start)
+                      : aBirthday
+                      ? -1
+                      : 1;
+                });
+          final capacity = ((math.max(105, c.maxHeight / 6) - 38) / 30)
+              .floor()
+              .clamp(1, 3);
           return InkWell(
             onTap: () => place(
               day.add(const Duration(hours: 9)),
@@ -1150,10 +1523,16 @@ class _CalendarPaneState extends ConsumerState<CalendarPane>
                     ),
                   ),
                   const SizedBox(height: 5),
-                  for (final b in items.take(3))
+                  for (final b in items.take(capacity))
                     Builder(
                       builder: (_) {
                         final task = repo.snapshot.task(b.taskId)!;
+                        if (task.isBirthday) {
+                          return Padding(
+                            padding: const EdgeInsets.only(bottom: 3),
+                            child: BirthdayChip(task: task, compact: true),
+                          );
+                        }
                         return GestureDetector(
                           onTap: () =>
                               openTask(context, task: task, blockId: b.id),
@@ -1196,9 +1575,9 @@ class _CalendarPaneState extends ConsumerState<CalendarPane>
                         );
                       },
                     ),
-                  if (items.length > 3)
+                  if (items.length > capacity)
                     Text(
-                      '+${items.length - 3}',
+                      '+${items.length - capacity}',
                       style: const TextStyle(
                         fontSize: 10,
                         color: Palette.muted,
@@ -1344,12 +1723,14 @@ class CalendarBlock extends ConsumerStatefulWidget {
     required this.onDragUpdate,
     required this.onDragEnd,
     required this.onDragCancel,
+    this.onDelete,
   });
   final TimeBlock block;
   final DateTime day;
   final void Function(CalendarDragKind, Offset) onDragStart;
   final ValueChanged<Offset> onDragUpdate;
   final VoidCallback onDragEnd, onDragCancel;
+  final VoidCallback? onDelete;
   @override
   ConsumerState<CalendarBlock> createState() => _CalendarBlockState();
 }
@@ -1383,12 +1764,17 @@ class _CalendarBlockState extends ConsumerState<CalendarBlock> {
   Future<void> menu(Offset position) =>
       showCalendarBlockMenu(context, ref, widget.block, position);
 
-  Widget handle(bool beginning, Color color) => Positioned(
+  Widget handle(
+    bool beginning,
+    Color color,
+    double height,
+    double controls,
+  ) => Positioned(
     left: 0,
-    right: 0,
+    right: controls,
     top: beginning ? 0 : null,
     bottom: beginning ? null : 0,
-    height: mobile ? 20 : 9,
+    height: math.min(mobile ? 20 : 9, height / 2),
     child: MouseRegion(
       cursor: SystemMouseCursors.resizeUpDown,
       child: RawGestureDetector(
@@ -1472,7 +1858,9 @@ class _CalendarBlockState extends ConsumerState<CalendarBlock> {
     final repo = ref.watch(appProvider),
         task = repo.snapshot.task(widget.block.taskId);
     if (task == null) return const SizedBox.shrink();
-    final color = Color(repo.snapshot.taskColor(task));
+    final color = widget.onDelete != null
+        ? Palette.pink
+        : Color(repo.snapshot.taskColor(task));
     final running = repo.snapshot.sessions.any(
       (s) => s.taskId == task.id && s.running,
     );
@@ -1505,9 +1893,16 @@ class _CalendarBlockState extends ConsumerState<CalendarBlock> {
                 PointerDeviceKind.touch,
                 PointerDeviceKind.stylus,
               },
-              onTap: () =>
-                  openTask(context, task: task, blockId: widget.block.id),
-              onSecondaryTapDown: (d) => menu(d.globalPosition),
+              onTap: () {
+                if (widget.onDelete == null) {
+                  openTask(context, task: task, blockId: widget.block.id);
+                } else {
+                  setState(() => editing = true);
+                }
+              },
+              onSecondaryTapDown: widget.onDelete == null
+                  ? (d) => menu(d.globalPosition)
+                  : null,
               dragStartBehavior: DragStartBehavior.down,
               onLongPressStart: (details) {
                 HapticFeedback.mediumImpact();
@@ -1590,7 +1985,9 @@ class _CalendarBlockState extends ConsumerState<CalendarBlock> {
                                 children: [
                                   Expanded(
                                     child: Text(
-                                      task.title,
+                                      widget.onDelete == null
+                                          ? task.title
+                                          : '${DateFormat('HH:mm').format(tz.TZDateTime.from(begin, zone))} — ${DateFormat('HH:mm').format(tz.TZDateTime.from(finish, zone))}',
                                       maxLines: small ? 1 : 2,
                                       overflow: TextOverflow.ellipsis,
                                       style: TextStyle(
@@ -1605,11 +2002,33 @@ class _CalendarBlockState extends ConsumerState<CalendarBlock> {
                                       ),
                                     ),
                                   ),
-                                  if (c.maxWidth > 100) ...[
+                                  if (widget.onDelete != null)
                                     SizedBox(
                                       width: 25,
                                       height: math.min(24, c.maxHeight),
                                       child: IconButton(
+                                        key: ValueKey(
+                                          'remove-time-${widget.block.id}',
+                                        ),
+                                        padding: EdgeInsets.zero,
+                                        tooltip: 'Убрать интервал',
+                                        onPressed: widget.onDelete,
+                                        icon: const Icon(
+                                          Icons.close_rounded,
+                                          size: 15,
+                                          color: Palette.pink,
+                                        ),
+                                      ),
+                                    ),
+                                  if (widget.onDelete == null &&
+                                      c.maxWidth >= 60) ...[
+                                    SizedBox(
+                                      width: 25,
+                                      height: math.min(24, c.maxHeight),
+                                      child: IconButton(
+                                        key: ValueKey(
+                                          'calendar-complete-${widget.block.id}',
+                                        ),
                                         padding: EdgeInsets.zero,
                                         tooltip: task.done
                                             ? 'Вернуть в работу'
@@ -1678,9 +2097,27 @@ class _CalendarBlockState extends ConsumerState<CalendarBlock> {
                         ),
                         if (!mobile || editing) ...[
                           if (!widget.block.start.isBefore(widget.day))
-                            handle(true, color),
+                            handle(
+                              true,
+                              color,
+                              height,
+                              widget.onDelete != null
+                                  ? 29
+                                  : c.maxWidth >= 60
+                                  ? (task.done ? 29 : 54)
+                                  : 0,
+                            ),
                           if (!widget.block.end.isAfter(dayEnd))
-                            handle(false, color),
+                            handle(
+                              false,
+                              color,
+                              height,
+                              widget.onDelete != null
+                                  ? 29
+                                  : c.maxWidth >= 60
+                                  ? (task.done ? 29 : 54)
+                                  : 0,
+                            ),
                         ],
                       ],
                     );

@@ -11,6 +11,9 @@ import 'markdown_editor.dart';
 import 'providers.dart';
 import 'schedule_fields.dart';
 import 'theme.dart';
+import 'birthdays.dart';
+import 'session_editor.dart';
+export 'session_editor.dart' show SessionEditor;
 
 Future<void> openTask(
   BuildContext context, {
@@ -18,11 +21,17 @@ Future<void> openTask(
   DateTime? start,
   DateTime? end,
   String? blockId,
-}) => showDialog<void>(
-  context: context,
-  builder: (_) =>
-      TaskEditor(taskId: task?.id, start: start, end: end, blockId: blockId),
-);
+}) => task?.isBirthday == true
+    ? showBirthday(context, task!)
+    : showDialog<void>(
+        context: context,
+        builder: (_) => TaskEditor(
+          taskId: task?.id,
+          start: start,
+          end: end,
+          blockId: blockId,
+        ),
+      );
 Future<DateTime?> pickDateTime(
   BuildContext context,
   DateTime initial, {
@@ -77,94 +86,6 @@ Future<void> editSession(
   context: context,
   builder: (_) => SessionEditor(task: task, session: session),
 );
-
-class SessionEditor extends ConsumerStatefulWidget {
-  const SessionEditor({super.key, required this.task, this.session});
-  final Task task;
-  final WorkSession? session;
-  @override
-  ConsumerState<SessionEditor> createState() => _SessionEditorState();
-}
-
-class _SessionEditorState extends ConsumerState<SessionEditor> {
-  late DateTime start, end;
-  late tz.Location zone;
-  bool saving = false;
-  @override
-  void initState() {
-    super.initState();
-    final repo = ref.read(appProvider);
-    zone = tz.getLocation(repo.snapshot.settings.timezone);
-    end = tz.TZDateTime.from(widget.session?.end ?? repo.now(), zone);
-    start = tz.TZDateTime.from(
-      widget.session?.start ?? end.subtract(const Duration(minutes: 30)),
-      zone,
-    );
-  }
-
-  DateTime inZone(DateTime d) =>
-      tz.TZDateTime(zone, d.year, d.month, d.day, d.hour, d.minute);
-
-  @override
-  Widget build(BuildContext context) => AlertDialog(
-    title: Text(
-      widget.session == null
-          ? 'Добавить потраченное время'
-          : 'Изменить потраченное время',
-    ),
-    content: SizedBox(
-      width: 440,
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(widget.task.title, style: const TextStyle(color: Palette.muted)),
-          const SizedBox(height: 20),
-          DateTimeButton(
-            label: 'С',
-            value: start,
-            onChanged: (v) => setState(() => start = inZone(v)),
-          ),
-          const SizedBox(height: 12),
-          DateTimeButton(
-            label: 'До',
-            value: end,
-            onChanged: (v) => setState(() => end = inZone(v)),
-          ),
-          const SizedBox(height: 20),
-          Text('Длительность: ${formatDuration(end.difference(start))}'),
-        ],
-      ),
-    ),
-    actions: [
-      TextButton(
-        onPressed: saving ? null : () => Navigator.pop(context),
-        child: const Text('Отмена'),
-      ),
-      FilledButton(
-        onPressed: saving
-            ? null
-            : () => guard(context, () async {
-                setState(() => saving = true);
-                try {
-                  await ref
-                      .read(appProvider)
-                      .saveSession(
-                        widget.task.id,
-                        start,
-                        end,
-                        session: widget.session,
-                      );
-                  if (context.mounted) Navigator.pop(context);
-                } finally {
-                  if (mounted) setState(() => saving = false);
-                }
-              }),
-        child: const Text('Сохранить'),
-      ),
-    ],
-  );
-}
 
 Future<void> editBlock(BuildContext context, TimeBlock block) =>
     showDialog<void>(

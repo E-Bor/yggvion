@@ -7,6 +7,8 @@ import 'package:timezone/data/latest.dart' as tz;
 import 'package:yggvion/data/database.dart';
 import 'package:yggvion/data/reminders.dart';
 import 'package:yggvion/data/repository.dart';
+import 'package:yggvion/domain/birthdays.dart';
+import 'package:yggvion/domain/models.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -107,6 +109,62 @@ void main() {
       await repo.unschedule(block);
       await service.refresh();
       expect(pending, isEmpty);
+    },
+  );
+
+  test(
+    'birthday refresh cancels legacy month and week notifications on the device',
+    () async {
+      final date = repo.now().add(const Duration(days: 50));
+      await BirthdayService(
+        repo,
+      ).save('Аня', DateTime(1990, date.month, date.day));
+      await repo.commit([
+        for (final block in repo.snapshot.blocks)
+          block.entity.change({
+            'reminder_at': [
+              wireTime(
+                block.reminderAt.single.subtract(const Duration(days: 30)),
+              ),
+              wireTime(
+                block.reminderAt.single.subtract(const Duration(days: 7)),
+              ),
+              wireTime(block.reminderAt.single),
+            ],
+          }),
+      ]);
+      for (final block in repo.snapshot.blocks) {
+        for (var index = 0; index < 3; index++) {
+          final reminder = PlannedReminder(
+            '${block.id}:at:$index',
+            block.taskId,
+            'Аня',
+            block.reminderAt[index],
+          );
+          pending[reminder.id] = {
+            'id': reminder.id,
+            'title': reminder.title,
+            'body': '',
+            'payload': reminder.taskId,
+          };
+        }
+      }
+      await service.refresh();
+      expect(service.error, isNull);
+      final expected = remindersFor(repo.snapshot, repo.now());
+      expect(pending.keys.toSet(), expected.map((r) => r.id).toSet());
+      expect(
+        pending.values.every(
+          (r) => r['body'] == 'Сегодня день рождения. Не забудьте поздравить!',
+        ),
+        isTrue,
+      );
+      await repo.status(
+        repo.snapshot.task(expected.first.taskId)!,
+        TaskStatus.done,
+      );
+      await service.refresh();
+      expect(pending.containsKey(expected.first.id), isFalse);
     },
   );
 

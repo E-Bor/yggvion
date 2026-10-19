@@ -337,6 +337,7 @@ class Repository extends ChangeNotifier {
         .where(
           (b) =>
               !b.historical &&
+              snapshot.task(b.taskId)?.isBirthday != true &&
               !b.end.isAfter(boundary) &&
               snapshot.task(b.taskId)?.done == false,
         )
@@ -394,6 +395,48 @@ class Repository extends ChangeNotifier {
               'end': wireTime(end),
             }),
     ]);
+  }
+
+  /// Persist a calendar selection atomically; cancellation never writes drafts.
+  Future<void> saveSessionRanges(
+    String taskId,
+    List<TimeRange> ranges, {
+    WorkSession? replacing,
+  }) async {
+    if (ranges.isEmpty) throw ArgumentError('Выделите хотя бы один интервал');
+    for (final range in ranges) {
+      validateInterval(range.start, range.end);
+      if (range.end.isAfter(now().add(const Duration(seconds: 2)))) {
+        throw ArgumentError('Потраченное время не может находиться в будущем');
+      }
+    }
+    await commitComputed(() async {
+      final task = await db.entity(taskId);
+      if (task == null || task.deleted) throw StateError('Задача уже удалена');
+      Entity? current;
+      if (replacing != null) {
+        current = await db.entity(replacing.id);
+        if (current == null ||
+            current.deleted ||
+            current.data['discarded'] == true ||
+            current.data['task_id'] != taskId) {
+          throw StateError('Запись времени уже удалена');
+        }
+        if (current.encoded != replacing.entity.encoded) {
+          throw StateError('Запись времени изменилась. Откройте её заново');
+        }
+      }
+      return [
+        if (current != null)
+          current.change({
+            'discarded': true,
+            if (current.data['end'] == null)
+              'end': wireTime(_safeEnd(WorkSession(current), now())),
+          }),
+        for (final range in ranges)
+          WorkSession.create(newId(), taskId, deviceId, range.start, range.end),
+      ];
+    });
   }
 
   Future<void> discardSession(WorkSession session) => commit([

@@ -3,6 +3,7 @@ import 'package:timezone/timezone.dart' as tz;
 import 'package:uuid/uuid.dart';
 import '../data/repository.dart';
 import 'models.dart';
+import 'birthdays.dart';
 
 enum RepeatScope { instance, following, series }
 
@@ -215,6 +216,7 @@ class RecurrenceService {
     if (_expanding) return;
     _expanding = true;
     try {
+      await BirthdayService(repo).expand(from, to);
       final all = await repo.db.entities(includeDeleted: true);
       final known = all.map((e) => e.id).toSet();
       final changes = <Entity>[];
@@ -223,7 +225,9 @@ class RecurrenceService {
           e.id: e.encoded,
       };
       for (final series in repo.snapshot.entities.where(
-        (e) => e.kind == 'series',
+        (e) =>
+            e.kind == 'series' &&
+            (e.data['birthday_date'] as String? ?? '').isEmpty,
       )) {
         final d = series.data,
             location = tz.getLocation(

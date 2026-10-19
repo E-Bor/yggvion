@@ -135,6 +135,8 @@ class Task {
   String get parentId => entity.data['parent_id'] as String? ?? '';
   TaskStatus get status => TaskStatus.parse(entity.data['status'] as String);
   bool get done => status == TaskStatus.done;
+  bool get isBirthday =>
+      (entity.data['birthday_date'] as String? ?? '').isNotEmpty;
   static Entity create(
     String id,
     String title, {
@@ -170,6 +172,8 @@ class TimeBlock {
   bool get historical => entity.data['historical'] as bool? ?? false;
   List<int> get reminders =>
       (entity.data['reminders'] as List? ?? []).cast<int>();
+  List<DateTime> get reminderAt =>
+      (entity.data['reminder_at'] as List? ?? []).map(parseTime).toList();
   Duration get duration => end.difference(start);
   static Entity create(
     String id,
@@ -253,11 +257,20 @@ class Project {
 
 class AppSettings {
   const AppSettings(this.entity);
+  static const defaultTaskColor = 0xff9cb9ff;
   final Entity entity;
   int get defaultMinutes => entity.data['default_minutes'] as int;
   List<int> get reminders => (entity.data['reminders'] as List).cast<int>();
   String get timezone => entity.data['timezone'] as String;
-  int get taskColor => entity.data['task_color'] as int? ?? 0xff9cb9ff;
+  int get taskColor => entity.data['task_color'] as int? ?? defaultTaskColor;
+}
+
+class Birthday {
+  const Birthday(this.entity);
+  final Entity entity;
+  String get id => entity.id;
+  String get name => entity.data['title'] as String;
+  DateTime get date => DateTime.parse(entity.data['birthday_date'] as String);
 }
 
 class TimeRange {
@@ -265,6 +278,19 @@ class TimeRange {
   final DateTime start, end;
   Duration get duration => end.difference(start);
 }
+
+/// Only elapsed parts of the plan are available for recording actual work.
+List<TimeRange> availablePlannedTime(
+  Iterable<TimeBlock> blocks,
+  DateTime now,
+) => blocks
+    .where((block) => block.start.isBefore(now))
+    .map(
+      (block) =>
+          TimeRange(block.start, block.end.isAfter(now) ? now : block.end),
+    )
+    .where((range) => range.end.isAfter(range.start))
+    .toList();
 
 /// Union preserves gaps and counts overlap only once; adjacent intervals coalesce.
 List<TimeRange> unionRanges(Iterable<TimeRange> source) {
@@ -340,6 +366,15 @@ class Snapshot {
       .where((e) => e.kind == 'project')
       .map(Project.new)
       .toList();
+  late final birthdays = entities
+      .where(
+        (e) =>
+            e.kind == 'series' &&
+            e.data['birthday_date'] is String &&
+            (e.data['birthday_date'] as String).isNotEmpty,
+      )
+      .map(Birthday.new)
+      .toList();
   late final settings = AppSettings(
     entities.firstWhere((e) => e.kind == 'settings'),
   );
@@ -377,6 +412,7 @@ class Snapshot {
   }
 
   bool unscheduled(Task t, DateTime now) =>
+      !t.isBirthday &&
       !t.done &&
       !(_blocksByTask[t.id] ?? const <TimeBlock>[]).any(
         (b) => !b.historical && b.end.isAfter(dayBoundary(now)),

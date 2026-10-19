@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../domain/models.dart';
 
 abstract final class Palette {
   static const background = Color(0xff111419),
@@ -7,7 +8,7 @@ abstract final class Palette {
       border = Color(0xff303744),
       text = Color(0xffe8ecf2),
       muted = Color(0xff929dad),
-      blue = Color(0xff9cb9ff),
+      blue = Color(AppSettings.defaultTaskColor),
       pink = Color(0xffdfa6ba),
       green = Color(0xff8ac9b4);
   static const projects = [
@@ -43,7 +44,7 @@ abstract final class Palette {
         ? .08
         : selected
         ? .33
-        : .23,
+        : .26,
   )!;
 }
 
@@ -118,7 +119,13 @@ ThemeData appTheme() {
         surface: Palette.surface,
       ).copyWith(
         primary: Palette.blue,
-        secondary: Palette.pink,
+        onPrimary: Palette.background,
+        primaryContainer: Palette.taskSurface(Palette.blue, selected: true),
+        onPrimaryContainer: Palette.blue,
+        secondary: Palette.blue,
+        onSecondary: Palette.background,
+        secondaryContainer: Palette.taskSurface(Palette.blue),
+        onSecondaryContainer: Palette.blue,
         outline: Palette.border,
       );
   return ThemeData(

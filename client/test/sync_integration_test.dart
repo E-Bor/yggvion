@@ -9,6 +9,7 @@ import 'package:yggvion/data/database.dart';
 import 'package:yggvion/data/repository.dart';
 import 'package:yggvion/data/sync.dart';
 import 'package:yggvion/domain/models.dart';
+import 'package:yggvion/domain/birthdays.dart';
 import 'package:yggvion/domain/recurrence.dart';
 
 // Run with YGGVION_TEST_SERVER pointing at the compiled Go server.
@@ -186,6 +187,30 @@ void main() {
       await Future<void>.delayed(const Duration(milliseconds: 100));
       expect(b.snapshot.task(task.id), isNull);
       expect(b.snapshot.taskBlocks(task.id), isEmpty);
+      await BirthdayService(a).save('Анна', DateTime(1990, 10, 19));
+      await sa.sync();
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+      await sb.sync();
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+      expect(b.snapshot.birthdays.single.name, 'Анна');
+      final birthday = b.snapshot.tasks.firstWhere((t) => t.isBirthday);
+      expect(
+        b.snapshot.taskBlocks(birthday.id).single.reminderAt,
+        hasLength(1),
+      );
+      await b.status(birthday, TaskStatus.done);
+      await sb.sync();
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+      await sa.sync();
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+      expect(a.snapshot.task(birthday.id)!.done, isTrue);
+      await BirthdayService(a).delete(a.snapshot.birthdays.single);
+      await sa.sync();
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+      await sb.sync();
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+      expect(b.snapshot.birthdays, isEmpty);
+      expect(b.snapshot.tasks.where((t) => t.isBirthday), isEmpty);
     },
     skip: binary == null
         ? 'Set YGGVION_TEST_SERVER to run against the real Go server'

@@ -90,6 +90,51 @@ func TestDeliveryClaimAndRetry(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestBirthdayAbsoluteRemindersOverrideOffsetsAndRespectCompletion(t *testing.T) {
+	db := localDB(t)
+	ctx := context.Background()
+	start := time.Date(2026, 3, 31, 0, 0, 0, 0, time.UTC)
+	putLocal(t, db, "birthday", "task", domain.Task{Title: "Анна — день рождения", Status: "todo", BirthdayDate: "1990-03-31"})
+	// Previously persisted month/week notices must not fire after updating.
+	month := time.Date(2026, 2, 28, 9, 0, 0, 0, time.UTC)
+	week := start.Add(-7*24*time.Hour + 9*time.Hour)
+	block := domain.Block{TaskID: "birthday", Start: start, End: start.Add(24 * time.Hour), Timezone: "UTC", Reminders: []int{0}, ReminderAt: []time.Time{month, week, start.Add(9 * time.Hour)}}
+	putLocal(t, db, "birthday_block", "block", block)
+	calls := 0
+	send := func(_ context.Context, r reminder) error {
+		calls++
+		if r.key != "birthday_block:at:2" || !r.at.Equal(start.Add(9*time.Hour)) || r.body != "Сегодня день рождения. Не забудьте поздравить!" {
+			t.Fatal(r)
+		}
+		return nil
+	}
+	for _, at := range []time.Time{month, week, start, start.Add(9 * time.Hour), start.Add(9 * time.Hour)} {
+		if err := tick(ctx, db, at, send); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if calls != 1 {
+		t.Fatal(calls)
+	}
+	block.ReminderAt = []time.Time{start.Add(9 * time.Hour)}
+	putLocal(t, db, "birthday_block", "block", block)
+	if err := tick(ctx, db, block.ReminderAt[0], send); err != nil {
+		t.Fatal(err)
+	}
+	if calls != 1 {
+		t.Fatal("refreshing old reminders duplicated delivery", calls)
+	}
+	putLocal(t, db, "birthday", "task", domain.Task{Title: "Анна — день рождения", Status: "done", BirthdayDate: "1990-03-31"})
+	block.ReminderAt = []time.Time{start.Add(10 * time.Hour)}
+	putLocal(t, db, "birthday_block", "block", block)
+	if err := tick(ctx, db, block.ReminderAt[0], send); err != nil {
+		t.Fatal(err)
+	}
+	if calls != 1 {
+		t.Fatal("completed birthday notified", calls)
+	}
+}
 func TestSnoozePersistsOfflineAndQueuesSync(t *testing.T) {
 	db := localDB(t)
 	at := time.Date(2026, 10, 19, 10, 0, 0, 0, time.UTC)

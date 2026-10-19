@@ -822,9 +822,10 @@ void main() {
         await tester.pumpAndSettle();
         if (mobile) {
           final hold = await tester.startGesture(
-            tester.getCenter(
-              find.byKey(ValueKey('calendar-block-${original.id}')),
-            ),
+            tester.getTopLeft(
+                  find.byKey(ValueKey('calendar-block-${original.id}')),
+                ) +
+                const Offset(12, 34),
           );
           await tester.pump(const Duration(milliseconds: 600));
           await hold.up();
@@ -894,9 +895,10 @@ void main() {
             findsNothing,
           );
           final hold = await tester.startGesture(
-            tester.getCenter(
-              find.byKey(ValueKey('calendar-block-${original.id}')).last,
-            ),
+            tester.getTopLeft(
+                  find.byKey(ValueKey('calendar-block-${original.id}')).last,
+                ) +
+                const Offset(12, 34),
           );
           await tester.pump(const Duration(milliseconds: 600));
           await hold.up();
