@@ -145,7 +145,8 @@ paths:
         required: true
         schema: {type: string, pattern: '^[a-f0-9]{64}$'}
     put:
-      summary: Upload at most 50 MiB, ID must equal SHA-256 of the body
+      summary: Upload at most 300 MiB, ID must equal SHA-256 of the body
+      description: Maximum body size is 314572800 bytes, inclusive. Larger uploads return 413, including streamed requests without Content-Length.
       requestBody:
         required: true
         content:

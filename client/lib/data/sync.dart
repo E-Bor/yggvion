@@ -267,6 +267,7 @@ class SyncService {
         '$_url/api/v1/attachments/${row.read<String>('id')}',
         data: file.openRead(),
         options: Options(
+          sendTimeout: const Duration(minutes: 15),
           headers: {
             'Authorization': 'Bearer $_token',
             'Content-Type': 'application/octet-stream',

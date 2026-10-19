@@ -217,10 +217,22 @@ func attachmentID(id string) bool {
 	_, e := hex.DecodeString(id)
 	return e == nil && strings.ToLower(id) == id
 }
+
+const maxAttachmentBytes = 300 << 20
+
 func (a *API) upload(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	if !attachmentID(id) {
 		fail(w, 400, "invalid_hash")
+		return
+	}
+	if r.ContentLength > maxAttachmentBytes {
+		fail(w, 413, "file_too_large_or_incomplete")
+		return
+	}
+	// Large uploads need more time than ordinary API requests, while remaining bounded.
+	if e := http.NewResponseController(w).SetReadDeadline(time.Now().Add(15 * time.Minute)); e != nil && !errors.Is(e, http.ErrNotSupported) {
+		fail(w, 500, "storage_error")
 		return
 	}
 	if e := os.MkdirAll(a.Files, 0700); e != nil {
@@ -235,7 +247,7 @@ func (a *API) upload(w http.ResponseWriter, r *http.Request) {
 	defer os.Remove(f.Name())
 	defer f.Close()
 	h := sha256.New()
-	r.Body = http.MaxBytesReader(w, r.Body, 50<<20)
+	r.Body = http.MaxBytesReader(w, r.Body, maxAttachmentBytes)
 	n, e := io.Copy(io.MultiWriter(f, h), r.Body)
 	if e != nil {
 		fail(w, 413, "file_too_large_or_incomplete")

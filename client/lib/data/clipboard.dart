@@ -179,7 +179,7 @@ class AttachmentClipboard {
         try {
           if (file.fileSize != null &&
               file.fileSize! > Repository.maxAttachmentBytes) {
-            throw ArgumentError('Размер файла не должен превышать 50 МБ');
+            throw ArgumentError(Repository.attachmentSizeError);
           }
           var filename =
               file.fileName ??

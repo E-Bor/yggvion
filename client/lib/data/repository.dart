@@ -605,7 +605,10 @@ class Repository extends ChangeNotifier {
     });
   }
 
-  static const maxAttachmentBytes = 50 * 1024 * 1024;
+  static const maxAttachmentMiB = 300;
+  static const maxAttachmentBytes = maxAttachmentMiB * 1024 * 1024;
+  static const attachmentSizeError =
+      'Размер файла не должен превышать $maxAttachmentMiB МБ';
 
   /// Materialize native clipboard streams without retaining the whole file in RAM.
   Future<String> attachStream(Stream<List<int>> stream, String name) async {
@@ -625,7 +628,7 @@ class Repository extends ChangeNotifier {
         await for (final chunk in stream) {
           size += chunk.length;
           if (size > maxAttachmentBytes) {
-            throw ArgumentError('Размер файла не должен превышать 50 МБ');
+            throw ArgumentError(attachmentSizeError);
           }
           await sink.writeFrom(chunk);
         }
@@ -641,7 +644,7 @@ class Repository extends ChangeNotifier {
   Future<String> attachFile(String sourcePath) async {
     final source = File(sourcePath);
     if (await source.length() > maxAttachmentBytes) {
-      throw ArgumentError('Размер файла не должен превышать 50 МБ');
+      throw ArgumentError(attachmentSizeError);
     }
     final digest = await sha256.bind(source.openRead()).first;
     final id = digest.toString();

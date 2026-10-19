@@ -197,30 +197,80 @@ void main() {
   );
 
   test(
+    'a 300 MiB native clipboard file is stored intact at the size limit',
+    () async {
+      const size = 300 * 1024 * 1024;
+      final chunk = Uint8List(1024 * 1024);
+      chunk[0] = 7;
+      chunk[chunk.length - 1] = 9;
+      final file = TestClipboardFile(
+        List.filled(300, chunk),
+        fileName: 'large.pdf',
+        fileSize: size,
+      );
+      final result = await clipboard([
+        TestClipboardItem(files: {Formats.pdf: file}),
+      ]).read();
+      expect(result!.text, startsWith('[large.pdf](attachment:'));
+      expect(file.closed, isTrue);
+      final row = await repo.db.customSelect('SELECT * FROM files').getSingle();
+      final stored = File(row.read<String>('path'));
+      expect(await stored.length(), size);
+      final reader = await stored.open();
+      try {
+        expect(await reader.readByte(), 7);
+        await reader.setPosition(size - 1);
+        expect(await reader.readByte(), 9);
+      } finally {
+        await reader.close();
+      }
+      expect(row.read<int>('uploaded'), 0);
+    },
+    timeout: const Timeout(Duration(minutes: 2)),
+  );
+
+  test(
     'known and streamed oversized attachments fail without stored files',
     () async {
-      final known = TestClipboardFile(
-        [],
-        fileSize: Repository.maxAttachmentBytes + 1,
+      const size = 300 * 1024 * 1024 + 1;
+      final tooLarge = throwsA(
+        isA<ArgumentError>().having(
+          (error) => error.message,
+          'message',
+          contains('300 МБ'),
+        ),
       );
+      final known = TestClipboardFile([], fileSize: size);
       await expectLater(
         clipboard([
           TestClipboardItem(files: {Formats.pdf: known}),
         ]).read(),
-        throwsArgumentError,
+        tooLarge,
       );
       expect(known.closed, isTrue);
       final chunk = Uint8List(1024 * 1024);
-      final unknown = TestClipboardFile(List.filled(51, chunk));
+      final unknown = TestClipboardFile([
+        ...List.filled(300, chunk),
+        Uint8List(1),
+      ]);
       await expectLater(
         clipboard([
           TestClipboardItem(files: {Formats.pdf: unknown}),
         ]).read(),
-        throwsArgumentError,
+        tooLarge,
       );
       expect(unknown.closed, isTrue);
+      final oversized = File('${directory.path}/oversized.bin');
+      final writer = await oversized.open(mode: FileMode.write);
+      try {
+        await writer.truncate(size);
+      } finally {
+        await writer.close();
+      }
+      await expectLater(repo.attachFile(oversized.path), tooLarge);
       expect(await repo.db.customSelect('SELECT * FROM files').get(), isEmpty);
     },
+    timeout: const Timeout(Duration(minutes: 2)),
   );
 
   test(
