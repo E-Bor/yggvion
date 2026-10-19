@@ -1,13 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import 'package:timezone/timezone.dart' as tz;
 import '../domain/models.dart';
 import '../domain/recurrence.dart';
+import '../data/repository.dart';
 import 'markdown_editor.dart';
 import 'providers.dart';
-import 'repeat_editor.dart';
+import 'schedule_fields.dart';
 import 'theme.dart';
 
 Future<void> openTask(
@@ -15,9 +17,11 @@ Future<void> openTask(
   Task? task,
   DateTime? start,
   DateTime? end,
+  String? blockId,
 }) => showDialog<void>(
   context: context,
-  builder: (_) => TaskEditor(taskId: task?.id, start: start, end: end),
+  builder: (_) =>
+      TaskEditor(taskId: task?.id, start: start, end: end, blockId: blockId),
 );
 Future<DateTime?> pickDateTime(
   BuildContext context,
@@ -272,14 +276,6 @@ class _BlockEditorState extends ConsumerState<BlockEditor> {
     reminders = [...widget.block.reminders];
   }
 
-  DateTime inZone(DateTime d) => tz.TZDateTime(
-    tz.getLocation(zone),
-    d.year,
-    d.month,
-    d.day,
-    d.hour,
-    d.minute,
-  );
   @override
   Widget build(BuildContext context) => AlertDialog(
     title: const Text('Календарный блок'),
@@ -290,43 +286,18 @@ class _BlockEditorState extends ConsumerState<BlockEditor> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            DateTimeButton(
-              label: 'Начало',
-              value: start,
-              dateOnly: allDay,
-              onChanged: (v) => setState(() => start = inZone(v)),
-            ),
-            const SizedBox(height: 12),
-            DateTimeButton(
-              label: 'Конец',
-              value: end,
-              dateOnly: allDay,
-              onChanged: (v) => setState(() => end = inZone(v)),
-            ),
-            SwitchListTile(
-              contentPadding: EdgeInsets.zero,
-              title: const Text('На весь день'),
-              subtitle: const Text('Конец — начало следующего дня'),
-              value: allDay,
-              onChanged: (v) => setState(() {
-                allDay = v;
-                if (v) {
-                  start = tz.TZDateTime(
-                    tz.getLocation(zone),
-                    start.year,
-                    start.month,
-                    start.day,
-                  );
-                  end = tz.TZDateTime(
-                    tz.getLocation(zone),
-                    start.year,
-                    start.month,
-                    start.day + 1,
-                  );
-                }
+            ScheduleFields(
+              start: start,
+              end: end,
+              allDay: allDay,
+              timezone: zone,
+              onChanged: (s, e, day) => setState(() {
+                start = s;
+                end = e;
+                allDay = day;
               }),
             ),
-            const SizedBox(height: 18),
+            const SizedBox(height: 8),
             ReminderPicker(
               values: reminders,
               onChanged: (v) => setState(() => reminders = v),
@@ -467,6 +438,16 @@ class _ReminderOffsetEditorState extends State<ReminderOffsetEditor> {
   );
 }
 
+String reminderLabel(int minutes) => minutes == 0
+    ? 'В начале события'
+    : minutes >= 10080 && minutes % 10080 == 0
+    ? 'За ${minutes ~/ 10080} нед.'
+    : minutes >= 1440 && minutes % 1440 == 0
+    ? 'За ${minutes ~/ 1440} дн.'
+    : minutes >= 60 && minutes % 60 == 0
+    ? 'За ${minutes ~/ 60} ч'
+    : 'За $minutes мин';
+
 class ReminderPicker extends StatelessWidget {
   const ReminderPicker({
     super.key,
@@ -475,63 +456,119 @@ class ReminderPicker extends StatelessWidget {
   });
   final List<int> values;
   final ValueChanged<List<int>> onChanged;
-  Future<void> custom(BuildContext context) async {
-    final result = await showDialog<int>(
-      context: context,
-      builder: (_) => const ReminderOffsetEditor(),
-    );
-    if (result != null) onChanged({...values, result}.toList()..sort());
+
+  Future<void> select(BuildContext context, int index, int value) async {
+    if (value == -2) {
+      final custom = await showDialog<int>(
+        context: context,
+        builder: (_) => const ReminderOffsetEditor(),
+      );
+      if (custom == null || !context.mounted) return;
+      value = custom;
+    }
+    final next = [...values];
+    if (index < next.length) next.removeAt(index);
+    if (value >= 0) next.insert(index.clamp(0, next.length), value);
+    onChanged(next.toSet().toList());
   }
 
   @override
-  Widget build(BuildContext context) => Column(
+  Widget build(BuildContext context) => Row(
     crossAxisAlignment: CrossAxisAlignment.start,
     children: [
-      const Text(
-        'Напомнить',
-        style: TextStyle(color: Palette.muted, fontSize: 12),
+      const Padding(
+        padding: EdgeInsets.only(top: 12, right: 16),
+        child: Icon(
+          Icons.notifications_none_rounded,
+          size: 20,
+          color: Palette.muted,
+        ),
       ),
-      const SizedBox(height: 8),
-      Wrap(
-        spacing: 6,
-        runSpacing: 6,
-        children: [
-          for (final minutes in {0, 5, 10, 15, 30, 60, 1440, ...values})
-            FilterChip(
-              label: Text(
-                minutes == 0
-                    ? 'В начале'
-                    : minutes >= 10080 && minutes % 10080 == 0
-                    ? 'За ${minutes ~/ 10080} нед'
-                    : minutes >= 1440 && minutes % 1440 == 0
-                    ? 'За ${minutes ~/ 1440} д'
-                    : minutes >= 60 && minutes % 60 == 0
-                    ? 'За ${minutes ~/ 60} ч'
-                    : 'За $minutes мин',
-              ),
-              selected: values.contains(minutes),
-              onSelected: !values.contains(minutes) && values.length >= 12
-                  ? null
-                  : (v) => onChanged(
-                      v
-                          ? [...values, minutes]
-                          : values.where((m) => m != minutes).toList(),
+      Expanded(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            for (var i = 0; i < (values.isEmpty ? 1 : values.length); i++)
+              Row(
+                children: [
+                  Expanded(
+                    child: DropdownButtonHideUnderline(
+                      child: DropdownButton<int>(
+                        key: ValueKey('reminder-choice-$i'),
+                        isExpanded: true,
+                        value: values.isEmpty ? -1 : values[i],
+                        style: const TextStyle(
+                          fontFamily: 'Inter',
+                          color: Palette.text,
+                          fontSize: 13,
+                        ),
+                        items: [
+                          const DropdownMenuItem(
+                            value: -1,
+                            child: Text('Без напоминания'),
+                          ),
+                          for (final v in {
+                            0,
+                            5,
+                            10,
+                            15,
+                            30,
+                            60,
+                            1440,
+                            10080,
+                            ...values,
+                          })
+                            DropdownMenuItem(
+                              value: v,
+                              child: Text(reminderLabel(v)),
+                            ),
+                          const DropdownMenuItem(
+                            value: -2,
+                            child: Text('Другое…'),
+                          ),
+                        ],
+                        onChanged: (value) {
+                          if (value != null) select(context, i, value);
+                        },
+                      ),
                     ),
-            ),
-          if (values.length < 12)
-            ActionChip(
-              label: const Text('Другое…'),
-              onPressed: () => custom(context),
-            ),
-        ],
+                  ),
+                  if (values.length > 1)
+                    IconButton(
+                      tooltip: 'Удалить напоминание',
+                      icon: const Icon(Icons.close_rounded, size: 18),
+                      onPressed: () => onChanged([...values]..removeAt(i)),
+                    ),
+                ],
+              ),
+            if (values.isNotEmpty && values.length < 12)
+              TextButton(
+                onPressed: () => select(context, values.length, -2),
+                style: TextButton.styleFrom(
+                  padding: EdgeInsets.zero,
+                  minimumSize: const Size(0, 32),
+                ),
+                child: const Text(
+                  'Добавить напоминание',
+                  style: TextStyle(fontSize: 12),
+                ),
+              ),
+          ],
+        ),
       ),
     ],
   );
 }
 
 class TaskEditor extends ConsumerStatefulWidget {
-  const TaskEditor({super.key, this.taskId, this.start, this.end});
-  final String? taskId;
+  const TaskEditor({
+    super.key,
+    this.taskId,
+    this.start,
+    this.end,
+    this.blockId,
+  });
+  final String? taskId, blockId;
   final DateTime? start, end;
   @override
   ConsumerState<TaskEditor> createState() => _TaskEditorState();
@@ -545,8 +582,10 @@ class _TaskEditorState extends ConsumerState<TaskEditor> {
       initialRule = '',
       zone = 'UTC';
   DateTime? start, end;
+  TimeBlock? originalBlock;
   bool allDay = false, saving = false;
   List<int> reminders = [];
+
   @override
   void initState() {
     super.initState();
@@ -555,7 +594,12 @@ class _TaskEditorState extends ConsumerState<TaskEditor> {
     title.text = task?.title ?? '';
     description = task?.description ?? '';
     projectId = task?.projectId ?? '';
-    if (task != null && task.seriesId.isNotEmpty) {
+    if (task != null) {
+      final blocks = repo.snapshot.taskBlocks(task.id);
+      originalBlock =
+          blocks.where((b) => b.id == widget.blockId).firstOrNull ??
+          blocks.where((b) => !b.historical).firstOrNull ??
+          blocks.firstOrNull;
       initialRule =
           repo.snapshot.entities
                   .where((e) => e.id == task.seriesId)
@@ -565,14 +609,18 @@ class _TaskEditorState extends ConsumerState<TaskEditor> {
           '';
       rule = initialRule;
     }
-    start = widget.start;
+    zone = repo.snapshot.settings.timezone;
+    start = originalBlock?.start ?? widget.start;
     end =
+        originalBlock?.end ??
         widget.end ??
         start?.add(Duration(minutes: repo.snapshot.settings.defaultMinutes));
-    zone = repo.snapshot.settings.timezone;
     if (start != null) start = tz.TZDateTime.from(start!, tz.getLocation(zone));
     if (end != null) end = tz.TZDateTime.from(end!, tz.getLocation(zone));
-    reminders = [...repo.snapshot.settings.reminders];
+    allDay = originalBlock?.allDay ?? false;
+    reminders = [
+      ...originalBlock?.reminders ?? repo.snapshot.settings.reminders,
+    ];
   }
 
   @override
@@ -581,74 +629,167 @@ class _TaskEditorState extends ConsumerState<TaskEditor> {
     super.dispose();
   }
 
-  Future<void> save() async {
-    await guard(context, () async {
-      if (title.text.trim().isEmpty) throw ArgumentError('Введите название');
-      if (rule.isNotEmpty) RecurrenceService.parse(rule);
-      setState(() => saving = true);
-      try {
-        final repo = ref.read(appProvider);
-        final task = repo.snapshot.task(widget.taskId ?? '');
-        if (task == null) {
-          final created = await repo.createTask(
-            title.text,
-            description: description,
-            projectId: projectId,
-            start: start,
-            end: end,
-            allDay: allDay,
-            reminders: reminders,
-            timezone: zone,
+  bool get timingChanged => originalBlock == null
+      ? start != null
+      : !originalBlock!.start.isAtSameMomentAs(start!) ||
+            !originalBlock!.end.isAtSameMomentAs(end!) ||
+            originalBlock!.allDay != allDay ||
+            !listEquals(originalBlock!.reminders, reminders);
+
+  Future<void> save() => guard(context, () async {
+    if (title.text.trim().isEmpty) throw ArgumentError('Введите название');
+    if (start != null) Repository.validateInterval(start!, end!);
+    if (rule.isNotEmpty) RecurrenceService.parse(rule);
+    setState(() => saving = true);
+    try {
+      final repo = ref.read(appProvider);
+      var task = repo.snapshot.task(widget.taskId ?? '');
+      if (widget.taskId != null && task == null) {
+        throw StateError('Задача уже удалена');
+      }
+      final recurrence = RecurrenceService(repo);
+      if (task == null) {
+        task = await repo.createTask(
+          title.text,
+          description: description,
+          projectId: projectId,
+          start: start,
+          end: end,
+          allDay: allDay,
+          reminders: reminders,
+          timezone: zone,
+        );
+        if (rule.isNotEmpty && start != null) {
+          await recurrence.create(
+            task,
+            repo.snapshot.taskBlocks(task.id).first,
+            rule,
           );
-          if (rule.isNotEmpty && start != null) {
-            await RecurrenceService(
-              repo,
-            ).create(created, repo.snapshot.taskBlocks(created.id).first, rule);
-          }
-        } else {
-          RepeatScope scope = RepeatScope.instance;
-          if (task.seriesId.isNotEmpty && rule == initialRule && mounted) {
-            final selected = await showDialog<RepeatScope>(
-              context: context,
-              builder: (c) => SimpleDialog(
-                title: const Text('Изменить повторение'),
-                children: [
-                  for (final s in RepeatScope.values)
-                    SimpleDialogOption(
-                      onPressed: () => Navigator.pop(c, s),
-                      child: Text(
-                        s == RepeatScope.instance
-                            ? 'Только эту задачу'
-                            : s == RepeatScope.following
-                            ? 'Эту и последующие'
-                            : 'Всю серию',
-                      ),
-                    ),
-                ],
-              ),
-            );
-            if (selected == null) return;
-            scope = selected;
-          }
-          await RecurrenceService(repo).edit(
+        }
+      } else {
+        final metadataChanged =
+            title.text.trim() != task.title ||
+            description != task.description ||
+            projectId != task.projectId;
+        final ruleChanged = rule != initialRule;
+        var scope = RepeatScope.instance;
+        if (task.seriesId.isNotEmpty &&
+            !ruleChanged &&
+            (metadataChanged || timingChanged)) {
+          final selected = await chooseScope(context);
+          if (selected == null || !mounted) return;
+          scope = selected;
+        }
+        if (metadataChanged) {
+          await recurrence.edit(
             task,
             scope,
             title: title.text.trim(),
             description: description,
             projectId: projectId,
           );
-          if (rule != initialRule) {
-            await RecurrenceService(
-              repo,
-            ).changeRuleFrom(repo.snapshot.task(task.id)!, rule);
+        }
+        task = repo.snapshot.task(task.id)!;
+        if (timingChanged && start != null) {
+          if (originalBlock == null) {
+            await repo.schedule(
+              task,
+              start!,
+              end!,
+              allDay: allDay,
+              reminders: reminders,
+              timezone: zone,
+            );
+          } else {
+            final current = repo.snapshot.blocks
+                .where((b) => b.id == originalBlock!.id)
+                .firstOrNull;
+            if (current == null) throw StateError('Этот блок уже удалён');
+            await recurrence.editTiming(
+              current,
+              metadataChanged && scope == RepeatScope.following
+                  ? RepeatScope.series
+                  : scope,
+              start!,
+              end!,
+              timezone: zone,
+              allDay: allDay,
+              reminders: reminders,
+            );
           }
         }
-        if (mounted) Navigator.pop(context);
-      } finally {
-        if (mounted) setState(() => saving = false);
+        if (ruleChanged) {
+          await recurrence.changeRuleFrom(
+            repo.snapshot.task(task.id)!,
+            rule,
+            blockId: originalBlock?.id,
+          );
+        }
       }
-    });
-  }
+      if (mounted) Navigator.pop(context);
+    } finally {
+      if (mounted) setState(() => saving = false);
+    }
+  });
+
+  void planNow() => setState(() {
+    final repo = ref.read(appProvider);
+    start = tz.TZDateTime.from(repo.now(), tz.getLocation(zone));
+    start = tz.TZDateTime(
+      tz.getLocation(zone),
+      start!.year,
+      start!.month,
+      start!.day,
+      start!.hour,
+      start!.minute,
+    );
+    end = start!.add(Duration(minutes: repo.snapshot.settings.defaultMinutes));
+  });
+
+  void loadBlock(TimeBlock? block) => setState(() {
+    originalBlock = block;
+    start = block == null
+        ? null
+        : tz.TZDateTime.from(block.start, tz.getLocation(zone));
+    end = block == null
+        ? null
+        : tz.TZDateTime.from(block.end, tz.getLocation(zone));
+    if (block != null) {
+      reminders = [...block.reminders];
+      allDay = block.allDay;
+    }
+  });
+
+  Widget disclosure(
+    String key,
+    String label,
+    IconData icon,
+    List<Widget> children, {
+    bool expanded = false,
+    String? subtitle,
+  }) => ExpansionTile(
+    key: ValueKey(key),
+    initiallyExpanded: expanded,
+    maintainState: true,
+    tilePadding: EdgeInsets.zero,
+    childrenPadding: const EdgeInsets.only(bottom: 12),
+    shape: const Border(),
+    collapsedShape: const Border(),
+    leading: Icon(icon, size: 20, color: Palette.muted),
+    title: Text(label, style: const TextStyle(fontSize: 13)),
+    subtitle: subtitle == null
+        ? null
+        : Text(
+            subtitle,
+            style: const TextStyle(fontSize: 11, color: Palette.muted),
+          ),
+    children: children,
+  );
+
+  String dateLabel(DateTime value) => DateFormat(
+    'd MMM, HH:mm',
+    'ru',
+  ).format(tz.TZDateTime.from(value, tz.getLocation(zone)));
 
   @override
   Widget build(BuildContext context) {
@@ -679,28 +820,357 @@ class _TaskEditorState extends ConsumerState<TaskEditor> {
         ),
         child: ConstrainedBox(
           constraints: BoxConstraints(
-            maxWidth: 720,
+            maxWidth: 600,
             maxHeight: MediaQuery.sizeOf(context).height - 48,
           ),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
               Padding(
-                padding: const EdgeInsets.fromLTRB(24, 14, 12, 4),
+                padding: const EdgeInsets.fromLTRB(24, 16, 12, 12),
                 child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      task == null ? 'НОВАЯ ЗАДАЧА' : 'ЗАДАЧА',
-                      style: const TextStyle(
-                        letterSpacing: 2,
-                        color: Palette.muted,
-                        fontSize: 11,
+                    Expanded(
+                      child: TextField(
+                        key: const ValueKey('task-title'),
+                        controller: title,
+                        autofocus: task == null,
+                        maxLines: null,
+                        style: const TextStyle(
+                          fontSize: 24,
+                          fontWeight: FontWeight.w500,
+                          letterSpacing: -.4,
+                        ),
+                        decoration: const InputDecoration(
+                          hintText: 'Введите название',
+                          filled: false,
+                          border: UnderlineInputBorder(
+                            borderSide: BorderSide(color: Palette.border),
+                          ),
+                          enabledBorder: UnderlineInputBorder(
+                            borderSide: BorderSide(color: Palette.border),
+                          ),
+                          focusedBorder: UnderlineInputBorder(
+                            borderSide: BorderSide(
+                              color: Palette.blue,
+                              width: 2,
+                            ),
+                          ),
+                          contentPadding: EdgeInsets.symmetric(vertical: 12),
+                        ),
                       ),
                     ),
-                    const Spacer(),
-                    if (task != null)
+                    const SizedBox(width: 8),
+                    IconButton(
+                      tooltip: 'Закрыть',
+                      onPressed: saving ? null : () => Navigator.pop(context),
+                      icon: const Icon(Icons.close_rounded, size: 20),
+                    ),
+                  ],
+                ),
+              ),
+              Flexible(
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.fromLTRB(24, 0, 24, 12),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      if (start != null) ...[
+                        ScheduleFields(
+                          start: start!,
+                          end: end!,
+                          allDay: allDay,
+                          timezone: zone,
+                          rule: rule,
+                          onChanged: (s, e, day) => setState(() {
+                            start = s;
+                            end = e;
+                            allDay = day;
+                          }),
+                          onRuleChanged: (v) => setState(() => rule = v),
+                        ),
+                        if (rule != initialRule &&
+                            task?.seriesId.isNotEmpty == true)
+                          const Padding(
+                            padding: EdgeInsets.only(left: 32, top: 4),
+                            child: Text(
+                              'Новая периодичность — с этой задачи.',
+                              style: TextStyle(
+                                color: Palette.muted,
+                                fontSize: 12,
+                              ),
+                            ),
+                          ),
+                        const SizedBox(height: 8),
+                        ReminderPicker(
+                          values: reminders,
+                          onChanged: (v) => setState(() => reminders = v),
+                        ),
+                      ] else
+                        Align(
+                          alignment: Alignment.centerLeft,
+                          child: TextButton.icon(
+                            onPressed: planNow,
+                            icon: const Icon(Icons.schedule_rounded, size: 20),
+                            label: const Text('Запланировать'),
+                          ),
+                        ),
+                      const SizedBox(height: 4),
+                      Row(
+                        children: [
+                          const Icon(
+                            Icons.folder_outlined,
+                            size: 20,
+                            color: Palette.muted,
+                          ),
+                          const SizedBox(width: 16),
+                          Expanded(
+                            child: DropdownButtonHideUnderline(
+                              child: DropdownButton<String>(
+                                key: const ValueKey('task-project'),
+                                value:
+                                    repo.snapshot.projects.any(
+                                      (p) => p.id == projectId,
+                                    )
+                                    ? projectId
+                                    : '',
+                                isExpanded: true,
+                                style: const TextStyle(
+                                  fontFamily: 'Inter',
+                                  fontSize: 13,
+                                  color: Palette.text,
+                                ),
+                                items: [
+                                  const DropdownMenuItem(
+                                    value: '',
+                                    child: Text('Без проекта'),
+                                  ),
+                                  for (final project in repo.snapshot.projects)
+                                    DropdownMenuItem(
+                                      value: project.id,
+                                      child: Row(
+                                        children: [
+                                          Icon(
+                                            Icons.circle,
+                                            size: 9,
+                                            color: Color(project.color),
+                                          ),
+                                          const SizedBox(width: 10),
+                                          Expanded(
+                                            child: Text(
+                                              project.title,
+                                              overflow: TextOverflow.ellipsis,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                ],
+                                onChanged: (v) =>
+                                    setState(() => projectId = v ?? ''),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      disclosure(
+                        'task-description',
+                        'Описание и вложения',
+                        Icons.notes_rounded,
+                        [
+                          LiveMarkdownEditor(
+                            value: description,
+                            onChanged: (v) => description = v,
+                            placeholder: 'Описание, ссылки, заметки по задаче…',
+                          ),
+                        ],
+                      ),
+                      if (task != null) ...[
+                        disclosure(
+                          'task-blocks',
+                          'Блоки в календаре',
+                          Icons.view_agenda_outlined,
+                          [
+                            for (final b in blocks)
+                              ListTile(
+                                contentPadding: EdgeInsets.zero,
+                                dense: true,
+                                title: Text(
+                                  '${dateLabel(b.start)} — ${dateLabel(b.end)}',
+                                  style: const TextStyle(fontSize: 12),
+                                ),
+                                subtitle: Text(
+                                  b.historical
+                                      ? 'История плана'
+                                      : formatDuration(b.duration),
+                                ),
+                                onTap: () async {
+                                  await editBlock(context, b);
+                                  if (!mounted || b.id != originalBlock?.id) {
+                                    return;
+                                  }
+                                  final updated = ref
+                                      .read(appProvider)
+                                      .snapshot
+                                      .blocks
+                                      .where((v) => v.id == b.id)
+                                      .firstOrNull;
+                                  if (updated != null) loadBlock(updated);
+                                },
+                                trailing: PopupMenuButton<String>(
+                                  onSelected: (v) => guard(context, () async {
+                                    if (v == 'remove') {
+                                      await repo.unschedule(b);
+                                      if (mounted &&
+                                          b.id == originalBlock?.id) {
+                                        loadBlock(
+                                          repo.snapshot
+                                              .taskBlocks(task.id)
+                                              .firstOrNull,
+                                        );
+                                      }
+                                    } else {
+                                      await repo.splitBlock(
+                                        b,
+                                        b.start.add(
+                                          Duration(
+                                            milliseconds:
+                                                b.duration.inMilliseconds ~/ 2,
+                                          ),
+                                        ),
+                                      );
+                                      if (mounted &&
+                                          b.id == originalBlock?.id) {
+                                        loadBlock(
+                                          repo.snapshot.blocks.firstWhere(
+                                            (v) => v.id == b.id,
+                                          ),
+                                        );
+                                      }
+                                    }
+                                  }),
+                                  itemBuilder: (_) => const [
+                                    PopupMenuItem(
+                                      value: 'split',
+                                      child: Text('Разделить пополам'),
+                                    ),
+                                    PopupMenuItem(
+                                      value: 'remove',
+                                      child: Text('Убрать из плана'),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            Align(
+                              alignment: Alignment.centerLeft,
+                              child: TextButton.icon(
+                                onPressed: () => guard(context, () async {
+                                  final value = await pickDateTime(
+                                    context,
+                                    tz.TZDateTime.from(
+                                      repo.now(),
+                                      tz.getLocation(zone),
+                                    ),
+                                  );
+                                  if (value == null) return;
+                                  final at = tz.TZDateTime(
+                                    tz.getLocation(zone),
+                                    value.year,
+                                    value.month,
+                                    value.day,
+                                    value.hour,
+                                    value.minute,
+                                  );
+                                  await repo.schedule(
+                                    task,
+                                    at,
+                                    at.add(
+                                      Duration(
+                                        minutes: repo
+                                            .snapshot
+                                            .settings
+                                            .defaultMinutes,
+                                      ),
+                                    ),
+                                  );
+                                  if (mounted && originalBlock == null) {
+                                    loadBlock(
+                                      repo.snapshot.taskBlocks(task.id).last,
+                                    );
+                                  }
+                                }),
+                                icon: const Icon(Icons.add_rounded, size: 18),
+                                label: const Text('Добавить блок'),
+                              ),
+                            ),
+                          ],
+                          subtitle:
+                              '${blocks.length} · ${formatDuration(repo.snapshot.estimate(task.id))}',
+                        ),
+                        disclosure(
+                          'task-sessions',
+                          'Потраченное время',
+                          Icons.timelapse_rounded,
+                          [
+                            Align(
+                              alignment: Alignment.centerLeft,
+                              child: TextButton.icon(
+                                key: const ValueKey('add-work-session'),
+                                onPressed: () => editSession(context, task),
+                                icon: const Icon(Icons.add_rounded, size: 18),
+                                label: const Text('Добавить время вручную'),
+                              ),
+                            ),
+                            for (final s in sessions)
+                              ListTile(
+                                contentPadding: EdgeInsets.zero,
+                                dense: true,
+                                title: Text(
+                                  '${dateLabel(s.start)} — ${s.end == null ? 'сейчас' : dateLabel(s.end!)}',
+                                  style: const TextStyle(fontSize: 12),
+                                ),
+                                subtitle: Text(
+                                  formatDuration(
+                                    (s.end ?? repo.now()).difference(s.start),
+                                  ),
+                                ),
+                                onTap: () =>
+                                    editSession(context, task, session: s),
+                                trailing: IconButton(
+                                  tooltip: 'Удалить запись времени',
+                                  icon: const Icon(
+                                    Icons.delete_outline_rounded,
+                                    size: 18,
+                                  ),
+                                  onPressed: () => guard(
+                                    context,
+                                    () => repo.discardSession(s),
+                                  ),
+                                ),
+                              ),
+                          ],
+                          subtitle: formatDuration(
+                            repo.snapshot.spent(task.id, repo.now()),
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ),
+              const Divider(),
+              Padding(
+                padding: const EdgeInsets.all(16),
+                child: Row(
+                  children: [
+                    if (task != null) ...[
                       IconButton(
                         tooltip: 'Удалить задачу',
+                        icon: const Icon(
+                          Icons.delete_outline_rounded,
+                          size: 20,
+                        ),
                         onPressed: saving
                             ? null
                             : () => guard(context, () async {
@@ -709,346 +1179,20 @@ class _TaskEditorState extends ConsumerState<TaskEditor> {
                                   Navigator.pop(context);
                                 }
                               }),
-                        icon: const Icon(Icons.delete_outline_rounded),
                       ),
-                    IconButton(
-                      tooltip: 'Закрыть',
-                      onPressed: () => Navigator.pop(context),
-                      icon: const Icon(Icons.close_rounded),
-                    ),
-                  ],
-                ),
-              ),
-              Flexible(
-                child: SingleChildScrollView(
-                  padding: const EdgeInsets.fromLTRB(26, 8, 26, 24),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      TextField(
-                        controller: title,
-                        autofocus: task == null,
-                        maxLines: null,
-                        style: const TextStyle(
-                          fontSize: 25,
-                          fontWeight: FontWeight.w600,
-                          letterSpacing: -.5,
-                        ),
-                        decoration: const InputDecoration(
-                          hintText: 'Что хотите сделать?',
-                          filled: false,
-                          border: InputBorder.none,
-                          enabledBorder: InputBorder.none,
-                          focusedBorder: InputBorder.none,
-                          contentPadding: EdgeInsets.symmetric(vertical: 12),
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                      DropdownButtonFormField<String>(
-                        initialValue:
-                            repo.snapshot.projects.any((p) => p.id == projectId)
-                            ? projectId
-                            : '',
-                        decoration: const InputDecoration(labelText: 'Проект'),
-                        items: [
-                          const DropdownMenuItem(
-                            value: '',
-                            child: Text('Без проекта'),
-                          ),
-                          ...repo.snapshot.projects.map(
-                            (p) => DropdownMenuItem(
-                              value: p.id,
-                              child: Row(
-                                children: [
-                                  Icon(
-                                    Icons.circle,
-                                    size: 9,
-                                    color: Color(p.color),
-                                  ),
-                                  const SizedBox(width: 10),
-                                  Text(p.title),
-                                ],
-                              ),
-                            ),
-                          ),
-                        ],
-                        onChanged: (v) => setState(() => projectId = v ?? ''),
-                      ),
-                      const SizedBox(height: 16),
-                      LiveMarkdownEditor(
-                        value: description,
-                        onChanged: (v) => description = v,
-                        placeholder: 'Описание, ссылки, заметки по задаче…',
-                      ),
-                      if (task == null && start != null) ...[
-                        const Divider(),
-                        const SizedBox(height: 18),
-                        Wrap(
-                          spacing: 10,
-                          runSpacing: 10,
-                          children: [
-                            DateTimeButton(
-                              label: 'С',
-                              value: start!,
-                              dateOnly: allDay,
-                              onChanged: (v) => setState(() {
-                                final duration = end!.difference(start!);
-                                start = tz.TZDateTime(
-                                  tz.getLocation(zone),
-                                  v.year,
-                                  v.month,
-                                  v.day,
-                                  v.hour,
-                                  v.minute,
-                                );
-                                end = start!.add(duration);
-                              }),
-                            ),
-                            DateTimeButton(
-                              label: 'До',
-                              value: end!,
-                              dateOnly: allDay,
-                              onChanged: (v) => setState(
-                                () => end = tz.TZDateTime(
-                                  tz.getLocation(zone),
-                                  v.year,
-                                  v.month,
-                                  v.day,
-                                  v.hour,
-                                  v.minute,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                        SwitchListTile(
-                          contentPadding: EdgeInsets.zero,
-                          title: const Text('На весь день'),
-                          value: allDay,
-                          onChanged: (v) => setState(() {
-                            allDay = v;
-                            if (v) {
-                              final loc = tz.getLocation(zone);
-                              start = tz.TZDateTime(
-                                loc,
-                                start!.year,
-                                start!.month,
-                                start!.day,
-                              );
-                              end = tz.TZDateTime(
-                                loc,
-                                start!.year,
-                                start!.month,
-                                start!.day + 1,
-                              );
-                            }
-                          }),
-                        ),
-                        const SizedBox(height: 16),
-                        RepeatPicker(
-                          value: rule,
-                          start: start!,
-                          timezone: zone,
-                          onChanged: (v) => setState(() => rule = v),
-                        ),
-                        const SizedBox(height: 16),
-                        ReminderPicker(
-                          values: reminders,
-                          onChanged: (v) => setState(() => reminders = v),
-                        ),
-                      ],
-                      if (task != null) ...[
-                        const Divider(),
-                        const SizedBox(height: 18),
-                        Row(
-                          children: [
-                            const Text(
-                              'План',
-                              style: TextStyle(fontWeight: FontWeight.w600),
-                            ),
-                            const Spacer(),
-                            Text(
-                              formatDuration(repo.snapshot.estimate(task.id)),
-                              style: const TextStyle(color: Palette.blue),
-                            ),
-                            TextButton.icon(
-                              onPressed: () => guard(context, () async {
-                                final s = await pickDateTime(
-                                  context,
-                                  DateTime.now(),
-                                );
-                                if (s == null) return;
-                                await repo.schedule(
+                      TextButton(
+                        onPressed: saving
+                            ? null
+                            : () => guard(context, () async {
+                                await repo.status(
                                   task,
-                                  s,
-                                  s.add(
-                                    Duration(
-                                      minutes:
-                                          repo.snapshot.settings.defaultMinutes,
-                                    ),
-                                  ),
+                                  task.done ? TaskStatus.todo : TaskStatus.done,
                                 );
+                                if (context.mounted) Navigator.pop(context);
                               }),
-                              icon: const Icon(Icons.add_rounded, size: 17),
-                              label: const Text('Блок'),
-                            ),
-                          ],
-                        ),
-                        if (blocks.isNotEmpty) ...[
-                          const SizedBox(height: 12),
-                          RepeatPicker(
-                            value: rule,
-                            start: blocks.first.start,
-                            timezone: zone,
-                            onChanged: (v) => setState(() => rule = v),
-                          ),
-                          if (rule != initialRule && task.seriesId.isNotEmpty)
-                            const Padding(
-                              padding: EdgeInsets.only(top: 8),
-                              child: Text(
-                                'Новая периодичность применяется с этой задачи. Выполненная работа сохраняется.',
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  color: Palette.muted,
-                                ),
-                              ),
-                            ),
-                          const SizedBox(height: 12),
-                        ],
-                        for (final b in blocks)
-                          ListTile(
-                            contentPadding: EdgeInsets.zero,
-                            dense: true,
-                            leading: Icon(
-                              b.historical
-                                  ? Icons.history_rounded
-                                  : Icons.calendar_today_outlined,
-                              size: 18,
-                              color: Palette.muted,
-                            ),
-                            title: Text(
-                              '${DateFormat('d MMM, HH:mm', 'ru').format(tz.TZDateTime.from(b.start, tz.getLocation(repo.snapshot.settings.timezone)))} — ${DateFormat('d MMM, HH:mm', 'ru').format(tz.TZDateTime.from(b.end, tz.getLocation(repo.snapshot.settings.timezone)))}',
-                            ),
-                            subtitle: Text(
-                              b.historical
-                                  ? 'История плана'
-                                  : formatDuration(b.duration),
-                            ),
-                            onTap: () => editBlock(context, b),
-                            trailing: PopupMenuButton<String>(
-                              onSelected: (v) => guard(context, () async {
-                                if (v == 'remove') await repo.unschedule(b);
-                                if (v == 'split') {
-                                  await repo.splitBlock(
-                                    b,
-                                    b.start.add(
-                                      Duration(
-                                        milliseconds:
-                                            b.duration.inMilliseconds ~/ 2,
-                                      ),
-                                    ),
-                                  );
-                                }
-                              }),
-                              itemBuilder: (_) => [
-                                const PopupMenuItem(
-                                  value: 'split',
-                                  child: Text('Разделить пополам'),
-                                ),
-                                const PopupMenuItem(
-                                  value: 'remove',
-                                  child: Text('Убрать из плана'),
-                                ),
-                              ],
-                            ),
-                          ),
-                        const SizedBox(height: 16),
-                        const Divider(),
-                        const SizedBox(height: 16),
-                        Row(
-                          children: [
-                            const Text(
-                              'Потраченное время',
-                              style: TextStyle(fontWeight: FontWeight.w600),
-                            ),
-                            const Spacer(),
-                            Text(
-                              formatDuration(
-                                repo.snapshot.spent(task.id, repo.now()),
-                              ),
-                              style: const TextStyle(color: Palette.pink),
-                            ),
-                            IconButton(
-                              tooltip: 'Добавить время вручную',
-                              onPressed: () => editSession(context, task),
-                              icon: const Icon(Icons.add_rounded),
-                            ),
-                          ],
-                        ),
-                        if (sessions.isEmpty)
-                          const Padding(
-                            padding: EdgeInsets.symmetric(vertical: 16),
-                            child: Text(
-                              'Рабочих сессий пока нет',
-                              style: TextStyle(color: Palette.muted),
-                            ),
-                          ),
-                        for (final s in sessions)
-                          ListTile(
-                            contentPadding: EdgeInsets.zero,
-                            dense: true,
-                            leading: Icon(
-                              s.running
-                                  ? Icons.play_circle_outline_rounded
-                                  : Icons.timelapse_rounded,
-                              color: s.running ? Palette.pink : Palette.muted,
-                              size: 20,
-                            ),
-                            title: Text(
-                              '${DateFormat('d MMM, HH:mm', 'ru').format(tz.TZDateTime.from(s.start, tz.getLocation(repo.snapshot.settings.timezone)))} — ${s.end == null ? 'сейчас' : DateFormat('HH:mm').format(tz.TZDateTime.from(s.end!, tz.getLocation(repo.snapshot.settings.timezone)))}',
-                            ),
-                            subtitle: Text(
-                              formatDuration(
-                                (s.end ?? repo.now()).difference(s.start),
-                              ),
-                            ),
-                            onTap: () => editSession(context, task, session: s),
-                            trailing: IconButton(
-                              tooltip: 'Удалить запись времени',
-                              icon: const Icon(
-                                Icons.delete_outline_rounded,
-                                size: 18,
-                              ),
-                              onPressed: () =>
-                                  guard(context, () => repo.discardSession(s)),
-                            ),
-                          ),
-                      ],
-                    ],
-                  ),
-                ),
-              ),
-              const Divider(),
-              Padding(
-                padding: const EdgeInsets.all(18),
-                child: Row(
-                  children: [
-                    if (task != null)
-                      TextButton.icon(
-                        onPressed: () => guard(context, () async {
-                          await repo.status(
-                            task,
-                            task.done ? TaskStatus.todo : TaskStatus.done,
-                          );
-                          if (context.mounted) Navigator.pop(context);
-                        }),
-                        icon: Icon(
-                          task.done ? Icons.undo_rounded : Icons.check_rounded,
-                        ),
-                        label: Text(
-                          task.done ? 'Вернуть в работу' : 'Завершить',
-                        ),
+                        child: Text(task.done ? 'Вернуть' : 'Завершить'),
                       ),
+                    ],
                     const Spacer(),
                     FilledButton(
                       onPressed: saving ? null : save,

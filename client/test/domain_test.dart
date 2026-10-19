@@ -626,4 +626,22 @@ END:VCALENDAR''', 'UTC');
       expect(repo.snapshot.tasks, hasLength(2));
     },
   );
+  test(
+    'task color is backward compatible, roundtrips, and survives other settings edits',
+    () async {
+      expect(repo.snapshot.settings.taskColor, 0xff9cb9ff);
+      await repo.updateSettings(30, [15], 'UTC', taskColor: 0xffb7a6e8);
+      final decoded = AppSettings(
+        Entity.fromJson(repo.snapshot.settings.entity.toJson()),
+      );
+      expect(decoded.taskColor, 0xffb7a6e8);
+      await repo.updateSettings(45, [0], 'Europe/Moscow');
+      expect(repo.snapshot.settings.taskColor, 0xffb7a6e8);
+      await expectLater(
+        repo.updateSettings(45, [0], 'UTC', taskColor: 0x809cb9ff),
+        throwsArgumentError,
+      );
+      expect(repo.snapshot.settings.taskColor, 0xffb7a6e8);
+    },
+  );
 }

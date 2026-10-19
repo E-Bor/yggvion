@@ -20,6 +20,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
   late final TextEditingController minutes, url, name, key;
   late String zone;
   late List<int> reminders;
+  late int taskColor;
   bool connecting = false;
   @override
   void initState() {
@@ -33,6 +34,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
     key = TextEditingController();
     zone = repo.snapshot.settings.timezone;
     reminders = [...repo.snapshot.settings.reminders];
+    taskColor = repo.snapshot.settings.taskColor;
   }
 
   @override
@@ -62,27 +64,9 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                   decoration: const InputDecoration(labelText: 'Название'),
                 ),
                 const SizedBox(height: 16),
-                Wrap(
-                  spacing: 10,
-                  children: Palette.projects
-                      .map(
-                        (p) => InkWell(
-                          onTap: () => set(() => color = p.toARGB32()),
-                          borderRadius: BorderRadius.circular(20),
-                          child: CircleAvatar(
-                            radius: 17,
-                            backgroundColor: p,
-                            child: color == p.toARGB32()
-                                ? const Icon(
-                                    Icons.check_rounded,
-                                    size: 18,
-                                    color: Palette.background,
-                                  )
-                                : null,
-                          ),
-                        ),
-                      )
-                      .toList(),
+                TaskColorPicker(
+                  value: color,
+                  onChanged: (v) => set(() => color = v),
                 ),
               ],
             ),
@@ -281,6 +265,18 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                         onChanged: (v) => setState(() => reminders = v),
                       ),
                       const SizedBox(height: 20),
+                      const Text('Цвет задач без проекта'),
+                      const SizedBox(height: 10),
+                      TaskColorPicker(
+                        value: taskColor,
+                        onChanged: (v) => setState(() => taskColor = v),
+                      ),
+                      const SizedBox(height: 8),
+                      const Text(
+                        'У задач проекта используется цвет проекта.',
+                        style: TextStyle(color: Palette.muted, fontSize: 12),
+                      ),
+                      const SizedBox(height: 20),
                       Align(
                         alignment: Alignment.centerLeft,
                         child: FilledButton(
@@ -289,6 +285,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                               int.tryParse(minutes.text) ?? 0,
                               reminders,
                               zone,
+                              taskColor: taskColor,
                             );
                             if (context.mounted) {
                               ScaffoldMessenger.of(context).showSnackBar(
@@ -597,6 +594,7 @@ class ConflictsPanel extends ConsumerWidget {
       'all_day': 'На весь день',
       'default_minutes': 'Блок по умолчанию, мин',
       'reminders': 'Напоминания, мин до начала',
+      'task_color': 'Цвет задач без проекта',
     };
     return labels.entries
         .where((e) => data.containsKey(e.key))
@@ -614,6 +612,14 @@ class ConflictsPanel extends ConsumerWidget {
             value = snapshot.task(value)?.title ?? 'Удалённая задача';
           } else if (e.key == 'all_day') {
             value = data[e.key] == true ? 'Да' : 'Нет';
+          } else if (e.key == 'task_color') {
+            final color = data[e.key] as int? ?? 0xff9cb9ff;
+            final index = Palette.projects.indexWhere(
+              (c) => c.toARGB32() == color,
+            );
+            value = index >= 0
+                ? Palette.projectNames[index]
+                : '#${(color & 0xffffff).toRadixString(16).padLeft(6, '0')}';
           }
           return '${e.value}: $value';
         })

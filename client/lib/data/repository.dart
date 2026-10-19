@@ -496,16 +496,22 @@ class Repository extends ChangeNotifier {
   Future<void> updateSettings(
     int minutes,
     List<int> reminders,
-    String timezone,
-  ) async {
+    String timezone, {
+    int? taskColor,
+  }) async {
     if (minutes < 5 || minutes > 1440) {
       throw ArgumentError('Длительность: от 5 до 1440 минут');
+    }
+    if (taskColor != null &&
+        (taskColor < 0xff000000 || taskColor > 0xffffffff)) {
+      throw ArgumentError('Выберите непрозрачный цвет задачи');
     }
     await commit([
       snapshot.settings.entity.change({
         'default_minutes': minutes,
         'reminders': reminders,
         'timezone': timezone,
+        'task_color': ?taskColor,
       }),
     ]);
   }

@@ -774,7 +774,8 @@ class _CalendarPaneState extends ConsumerState<CalendarPane> {
                       builder: (_) {
                         final task = repo.snapshot.task(b.taskId)!;
                         return GestureDetector(
-                          onTap: () => openTask(context, task: task),
+                          onTap: () =>
+                              openTask(context, task: task, blockId: b.id),
                           onSecondaryTapDown: (d) => showCalendarBlockMenu(
                             context,
                             ref,
@@ -792,7 +793,10 @@ class _CalendarPaneState extends ConsumerState<CalendarPane> {
                             margin: const EdgeInsets.only(bottom: 3),
                             padding: const EdgeInsets.all(4),
                             decoration: BoxDecoration(
-                              color: Palette.blue.withValues(alpha: .12),
+                              color: Palette.taskSurface(
+                                Color(repo.snapshot.taskColor(task)),
+                                subdued: task.done || b.historical,
+                              ),
                               borderRadius: BorderRadius.circular(5),
                             ),
                             child: Text(
@@ -804,7 +808,7 @@ class _CalendarPaneState extends ConsumerState<CalendarPane> {
                                 decoration: task.done
                                     ? TextDecoration.lineThrough
                                     : null,
-                                color: Palette.blue,
+                                color: Color(repo.snapshot.taskColor(task)),
                               ),
                             ),
                           ),
@@ -844,6 +848,7 @@ class CalendarGestureSurface extends StatelessWidget {
   final Widget child;
   @override
   Widget build(BuildContext context) => GestureDetector(
+    supportedDevices: const {PointerDeviceKind.touch, PointerDeviceKind.stylus},
     behavior: HitTestBehavior.opaque,
     onLongPressStart: (d) {
       HapticFeedback.mediumImpact();
@@ -853,10 +858,9 @@ class CalendarGestureSurface extends StatelessWidget {
     onLongPressEnd: (_) => onEnd(),
     onLongPressCancel: onCancel,
     child: GestureDetector(
-      supportedDevices: const {
-        PointerDeviceKind.mouse,
-        PointerDeviceKind.trackpad,
-      },
+      // Two-finger pan/zoom belongs to the scroll view. A pressed trackpad
+      // click is delivered as a mouse pointer and can still select a range.
+      supportedDevices: const {PointerDeviceKind.mouse},
       behavior: HitTestBehavior.opaque,
       onTapUp: (d) => onTap(d.localPosition),
       onPanStart: (d) => onStart(d.localPosition),
@@ -902,7 +906,7 @@ Future<void> showCalendarBlockMenu(
     final repo = ref.read(appProvider);
     switch (choice) {
       case 'task':
-        await openTask(context, task: task);
+        await openTask(context, task: task, blockId: block.id);
       case 'edit':
         await editBlock(context, block);
       case 'split':
@@ -1041,6 +1045,11 @@ class _CalendarBlockState extends ConsumerState<CalendarBlock> {
         key: ValueKey(
           'block-resize-${beginning ? 'start' : 'end'}-${widget.block.id}',
         ),
+        supportedDevices: const {
+          PointerDeviceKind.mouse,
+          PointerDeviceKind.touch,
+          PointerDeviceKind.stylus,
+        },
         behavior: HitTestBehavior.opaque,
         onVerticalDragStart: (_) {
           if (mobile) HapticFeedback.selectionClick();
@@ -1056,18 +1065,28 @@ class _CalendarBlockState extends ConsumerState<CalendarBlock> {
         }),
         onVerticalDragEnd: (_) => commitResize(beginning),
         onVerticalDragCancel: reset,
-        child: Align(
-          alignment: beginning ? Alignment.topRight : Alignment.bottomLeft,
-          child: Container(
-            margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
-            width: mobile ? 26 : 20,
-            height: mobile ? 5 : 2,
-            decoration: BoxDecoration(
-              color: color.withValues(alpha: editing ? 1 : .5),
-              borderRadius: BorderRadius.circular(4),
-            ),
-          ),
-        ),
+        child: !mobile || !editing
+            ? const SizedBox.expand()
+            : Align(
+                alignment: beginning
+                    ? Alignment.topRight
+                    : Alignment.bottomLeft,
+                child: Container(
+                  key: ValueKey(
+                    'block-handle-mark-${beginning ? 'start' : 'end'}-${widget.block.id}',
+                  ),
+                  margin: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 2,
+                  ),
+                  width: mobile ? 26 : 20,
+                  height: mobile ? 5 : 2,
+                  decoration: BoxDecoration(
+                    color: color.withValues(alpha: editing ? 1 : .5),
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                ),
+              ),
       ),
     ),
   );
@@ -1077,8 +1096,7 @@ class _CalendarBlockState extends ConsumerState<CalendarBlock> {
     final repo = ref.watch(appProvider),
         task = repo.snapshot.task(widget.block.taskId);
     if (task == null) return const SizedBox.shrink();
-    final project = repo.snapshot.project(task.projectId);
-    final color = project == null ? Palette.blue : Color(project.color);
+    final color = Color(repo.snapshot.taskColor(task));
     final running = repo.snapshot.sessions.any(
       (s) => s.taskId == task.id && s.running,
     );
@@ -1103,7 +1121,13 @@ class _CalendarBlockState extends ConsumerState<CalendarBlock> {
               maxHeight: height,
               child: GestureDetector(
                 key: ValueKey('calendar-block-${widget.block.id}'),
-                onTap: () => openTask(context, task: task),
+                supportedDevices: const {
+                  PointerDeviceKind.mouse,
+                  PointerDeviceKind.touch,
+                  PointerDeviceKind.stylus,
+                },
+                onTap: () =>
+                    openTask(context, task: task, blockId: widget.block.id),
                 onSecondaryTapDown: (d) => menu(d.globalPosition),
                 onLongPressStart: (_) {
                   HapticFeedback.mediumImpact();
@@ -1121,12 +1145,10 @@ class _CalendarBlockState extends ConsumerState<CalendarBlock> {
                 child: Container(
                   height: height,
                   decoration: BoxDecoration(
-                    color: color.withValues(
-                      alpha: task.done || widget.block.historical
-                          ? .07
-                          : editing
-                          ? .24
-                          : .13,
+                    color: Palette.taskSurface(
+                      color,
+                      subdued: task.done || widget.block.historical,
+                      selected: editing,
                     ),
                     borderRadius: BorderRadius.circular(8),
                     border: Border.all(

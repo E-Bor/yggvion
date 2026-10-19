@@ -682,6 +682,7 @@ class _WorkspaceState extends ConsumerState<Workspace>
     final tasks = repo.snapshot.tasks
         .where(
           (t) =>
+              t.seriesId.isEmpty &&
               repo.snapshot.unscheduled(t, repo.now()) &&
               (projectId.isEmpty || t.projectId == projectId) &&
               t.title.toLowerCase().contains(query.toLowerCase()),

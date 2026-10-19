@@ -19,6 +19,7 @@ import 'package:yggvion/ui/dashboard.dart';
 import 'package:yggvion/ui/providers.dart';
 import 'package:yggvion/ui/repeat_editor.dart';
 import 'package:yggvion/ui/settings.dart';
+import 'package:yggvion/ui/theme.dart';
 import 'package:yggvion/ui/task_card.dart';
 import 'package:yggvion/ui/task_editor.dart';
 
@@ -304,6 +305,10 @@ void main() {
       final block = repo.snapshot.blocks.single;
       expect(block.duration, const Duration(hours: 1));
       final blockFinder = find.byKey(ValueKey('calendar-block-${block.id}'));
+      expect(
+        find.byKey(ValueKey('block-handle-mark-start-${block.id}')),
+        findsNothing,
+      );
       final move = await tester.startGesture(tester.getCenter(blockFinder));
       await tester.pump(const Duration(milliseconds: 600));
       await move.moveBy(const Offset(0, 72));
@@ -318,6 +323,10 @@ void main() {
         ValueKey('block-resize-start-${block.id}'),
       );
       final endHandle = find.byKey(ValueKey('block-resize-end-${block.id}'));
+      expect(
+        find.byKey(ValueKey('block-handle-mark-start-${block.id}')),
+        findsOneWidget,
+      );
       expect(startHandle, findsOneWidget);
       expect(endHandle, findsOneWidget);
       final beforeResize = repo.snapshot.blocks.single;
@@ -420,6 +429,316 @@ void main() {
       await tester.tap(find.text('Готово'));
       await tester.pumpAndSettle();
       expect(result, 'FREQ=WEEKLY;INTERVAL=2;BYDAY=MO,WE');
+    },
+  );
+
+  testInteraction(
+    'trackpad scroll never creates, moves or resizes a calendar event',
+    (tester) async {
+      final repo = await workspace(
+        tester,
+        prepare: (repo) async {
+          await repo.createTask(
+            'Тачпад',
+            start: repo.now().add(const Duration(hours: 1)),
+            end: repo.now().add(const Duration(hours: 2)),
+          );
+        },
+      );
+      final block = repo.snapshot.blocks.single;
+      final grid = find.byKey(const ValueKey('calendar-grid-gestures'));
+      final event = find.byKey(ValueKey('calendar-block-${block.id}'));
+      expect(
+        find.byKey(ValueKey('block-handle-mark-start-${block.id}')),
+        findsNothing,
+      );
+      expect(
+        find.byKey(ValueKey('block-handle-mark-end-${block.id}')),
+        findsNothing,
+      );
+      Future<void> scroll(Offset point) async {
+        final gesture = await tester.createGesture(
+          kind: PointerDeviceKind.trackpad,
+        );
+        await gesture.panZoomStart(point);
+        await gesture.panZoomUpdate(point, pan: const Offset(0, -35));
+        await tester.pump();
+        await gesture.panZoomUpdate(point, pan: const Offset(0, -65));
+        await gesture.panZoomEnd();
+        await settle(tester);
+        expect(find.byType(TaskEditor), findsNothing);
+        expect(repo.snapshot.blocks.single.start, block.start);
+        expect(repo.snapshot.blocks.single.end, block.end);
+      }
+
+      final top = tester.getTopLeft(grid).dy;
+      await scroll(const Offset(700, 250));
+      expect(tester.getTopLeft(grid).dy, lessThan(top));
+      await scroll(tester.getCenter(event));
+      await scroll(
+        tester.getCenter(find.byKey(ValueKey('block-resize-end-${block.id}'))),
+      );
+      // A physical click from a trackpad is delivered as a mouse event.
+      final mouse = await tester.startGesture(
+        const Offset(700, 460),
+        kind: PointerDeviceKind.mouse,
+      );
+      await mouse.moveBy(const Offset(0, 40));
+      await mouse.up();
+      await tester.pumpAndSettle();
+      expect(find.byType(TaskEditor), findsOneWidget);
+    },
+  );
+
+  testInteraction(
+    'planner hides all recurring instances including rolled-over and unscheduled ones',
+    (tester) async {
+      final repo = await workspace(
+        tester,
+        prepare: (repo) async {
+          await repo.createTask('Обычная незапланированная');
+          final at = repo.now().subtract(const Duration(days: 2));
+          final task = await repo.createTask('Регулярная', start: at);
+          await RecurrenceService(repo).create(
+            task,
+            repo.snapshot.taskBlocks(task.id).single,
+            'FREQ=DAILY;COUNT=5',
+          );
+          await repo.rollover();
+          final future = repo.snapshot.blocks.firstWhere(
+            (b) => b.start.isAfter(repo.now()),
+          );
+          await repo.unschedule(future);
+        },
+      );
+      expect(
+        repo.snapshot.tasks.where((t) => t.seriesId.isNotEmpty),
+        isNotEmpty,
+      );
+      await command(tester, LogicalKeyboardKey.digit2);
+      expect(
+        find.widgetWithText(TaskCard, 'Обычная незапланированная'),
+        findsOneWidget,
+      );
+      expect(find.widgetWithText(TaskCard, 'Регулярная'), findsNothing);
+    },
+  );
+
+  testInteraction(
+    'existing editor changes the clicked block, reminders and all day without touching another block',
+    (tester) async {
+      final repo = await workspace(
+        tester,
+        prepare: (repo) async {
+          final task = await repo.createTask(
+            'Два блока',
+            start: repo.now(),
+            reminders: [5],
+          );
+          await repo.schedule(
+            task,
+            repo.now().add(const Duration(hours: 1)),
+            repo.now().add(const Duration(hours: 2)),
+            reminders: [60],
+          );
+        },
+      );
+      final blocks = repo.snapshot.blocks
+        ..sort((a, b) => a.start.compareTo(b.start));
+      final first = blocks.first, second = blocks.last;
+      await tester.tap(find.byKey(ValueKey('calendar-block-${second.id}')));
+      await tester.pumpAndSettle();
+      expect(find.text('ЗАДАЧА'), findsNothing);
+      expect(find.byKey(const ValueKey('schedule-start-time')), findsOneWidget);
+      expect(
+        tester
+            .widget<DropdownButton<int>>(
+              find.byKey(const ValueKey('reminder-choice-0')),
+            )
+            .value,
+        60,
+      );
+      expect(
+        find.byKey(const ValueKey('add-work-session')).hitTestable(),
+        findsNothing,
+      );
+      await tester.tap(find.byKey(const ValueKey('reminder-choice-0')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('За 15 мин').last);
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.byKey(const ValueKey('task-title')),
+        'Исправлено',
+      );
+      await tester.tap(find.byKey(const ValueKey('schedule-all-day')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Сохранить').last);
+      await settle(tester);
+      final saved = repo.snapshot.blocks.firstWhere((b) => b.id == second.id);
+      expect(saved.reminders, [15]);
+      expect(saved.allDay, isTrue);
+      expect(saved.duration, const Duration(days: 1));
+      final untouched = repo.snapshot.blocks.firstWhere(
+        (b) => b.id == first.id,
+      );
+      expect(untouched.entity.encoded, first.entity.encoded);
+      expect(repo.snapshot.task(second.taskId)!.title, 'Исправлено');
+      await tester.tap(find.byKey(ValueKey('calendar-block-${second.id}')));
+      await tester.pumpAndSettle();
+      expect(
+        tester
+            .widget<DropdownButton<int>>(
+              find.byKey(const ValueKey('reminder-choice-0')),
+            )
+            .value,
+        15,
+      );
+      expect(
+        tester
+            .widget<Checkbox>(find.byKey(const ValueKey('schedule-all-day')))
+            .value,
+        isTrue,
+      );
+    },
+  );
+
+  testInteraction(
+    'changing reminders on a series can apply to following instances only',
+    (tester) async {
+      final repo = await workspace(
+        tester,
+        prepare: (repo) async {
+          final at = repo.now().subtract(const Duration(days: 1));
+          final task = await repo.createTask(
+            'Серия',
+            start: at,
+            reminders: [0],
+          );
+          await RecurrenceService(repo).create(
+            task,
+            repo.snapshot.taskBlocks(task.id).single,
+            'FREQ=DAILY;COUNT=3',
+          );
+        },
+      );
+      final today = repo.snapshot.blocks.firstWhere(
+        (b) => b.start.isAtSameMomentAs(repo.now()),
+      );
+      await tester.tap(find.byKey(ValueKey('calendar-block-${today.id}')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('reminder-choice-0')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('За 30 мин').last);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Сохранить').last);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Эту и последующие'));
+      await settle(tester);
+      for (final block in repo.snapshot.blocks) {
+        expect(block.reminders, block.start.isBefore(repo.now()) ? [0] : [30]);
+      }
+    },
+  );
+
+  testInteraction(
+    'default task color persists in settings and project color wins on opaque cards',
+    (tester) async {
+      final repo = await workspace(
+        tester,
+        prepare: (repo) async {
+          await repo.saveProject('Проект', Palette.projects[3].toARGB32());
+          await repo.createTask('Без проекта', start: repo.now());
+          await repo.createTask(
+            'С проектом',
+            projectId: repo.snapshot.projects.single.id,
+            start: repo.now().add(const Duration(hours: 1)),
+          );
+        },
+      );
+      await command(tester, LogicalKeyboardKey.digit5);
+      await tester.ensureVisible(
+        find.byKey(const ValueKey('task-color-1')).first,
+      );
+      await tester.tap(find.byKey(const ValueKey('task-color-1')).first);
+      await tester.ensureVisible(find.text('Сохранить настройки'));
+      await tester.tap(find.text('Сохранить настройки'));
+      await settle(tester);
+      expect(repo.snapshot.settings.taskColor, Palette.projects[1].toARGB32());
+      await command(tester, LogicalKeyboardKey.digit1);
+      for (final task in repo.snapshot.tasks) {
+        final block = repo.snapshot.taskBlocks(task.id).single;
+        final color = task.projectId.isEmpty
+            ? Palette.projects[1]
+            : Palette.projects[3];
+        expect(repo.snapshot.taskColor(task), color.toARGB32());
+        final finder = find.descendant(
+          of: find.byKey(ValueKey('calendar-block-${block.id}')),
+          matching: find.byType(Container),
+        );
+        final panel = tester
+            .widgetList<Container>(finder)
+            .firstWhere(
+              (w) =>
+                  w.decoration is BoxDecoration &&
+                  (w.decoration as BoxDecoration).borderRadius ==
+                      BorderRadius.circular(8),
+            );
+        expect(
+          (panel.decoration as BoxDecoration).color,
+          Palette.taskSurface(color),
+        );
+        expect((panel.decoration as BoxDecoration).color!.a, 1);
+      }
+    },
+  );
+  testInteraction(
+    'compact creation edits time directly and existing events expose the same repeat options',
+    (tester) async {
+      final repo = await workspace(tester);
+      await command(tester, LogicalKeyboardKey.keyN);
+      expect(find.text('НОВАЯ ЗАДАЧА'), findsNothing);
+      expect(find.text('Введите название'), findsOneWidget);
+      await tester.tap(find.text('Запланировать'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('schedule-end-time')));
+      await tester.pumpAndSettle();
+      final fields = find.descendant(
+        of: find.byType(TimePickerDialog),
+        matching: find.byType(TextField),
+      );
+      await tester.enterText(fields.at(0), '14');
+      await tester.enterText(fields.at(1), '45');
+      final ok = MaterialLocalizations.of(
+        tester.element(find.byType(TimePickerDialog)),
+      ).okButtonLabel;
+      await tester.tap(find.text(ok));
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.byKey(const ValueKey('task-title')),
+        'Время и повторение',
+      );
+      await tester.tap(find.text('Сохранить').last);
+      await settle(tester);
+      final original = repo.snapshot.blocks.single;
+      expect(original.end, DateTime.utc(2026, 10, 19, 14, 45));
+      await tester.tap(find.byKey(ValueKey('calendar-block-${original.id}')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byType(RepeatPicker));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Каждую неделю').last);
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('reminder-choice-0')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Без напоминания').last);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Сохранить').last);
+      await settle(tester);
+      final task = repo.snapshot.task(original.taskId)!;
+      expect(task.seriesId, isNotEmpty);
+      for (final block in repo.snapshot.blocks) {
+        expect(block.reminders, isEmpty);
+        expect(block.duration, const Duration(hours: 2, minutes: 45));
+      }
     },
   );
 }

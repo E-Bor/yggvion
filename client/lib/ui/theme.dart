@@ -12,12 +12,89 @@ abstract final class Palette {
       green = Color(0xff8ac9b4);
   static const projects = [
     blue,
-    Color(0xffb19ae8),
-    Color(0xffe5b567),
+    Color(0xffb7a6e8),
+    Color(0xffd6b780),
     green,
-    Color(0xffe8879f),
-    Color(0xff78c9ce),
+    pink,
+    Color(0xff8fc7cf),
+    Color(0xffd7a58d),
+    Color(0xffa8b3c5),
   ];
+  static const projectNames = [
+    'Голубой',
+    'Лаванда',
+    'Песочный',
+    'Шалфей',
+    'Розовый',
+    'Бирюзовый',
+    'Терракота',
+    'Серый',
+  ];
+
+  // Opaque surfaces keep grid lines and overlapping cards from showing through.
+  static Color taskSurface(
+    Color accent, {
+    bool subdued = false,
+    bool selected = false,
+  }) => Color.lerp(
+    surface,
+    accent.withValues(alpha: 1),
+    subdued
+        ? .08
+        : selected
+        ? .33
+        : .23,
+  )!;
+}
+
+class TaskColorPicker extends StatelessWidget {
+  const TaskColorPicker({
+    super.key,
+    required this.value,
+    required this.onChanged,
+  });
+  final int value;
+  final ValueChanged<int> onChanged;
+  @override
+  Widget build(BuildContext context) => Wrap(
+    spacing: 8,
+    runSpacing: 8,
+    children: [
+      for (var i = 0; i < Palette.projects.length; i++)
+        Tooltip(
+          message: Palette.projectNames[i],
+          child: Semantics(
+            label: Palette.projectNames[i],
+            selected: value == Palette.projects[i].toARGB32(),
+            button: true,
+            child: InkWell(
+              key: ValueKey('task-color-$i'),
+              borderRadius: BorderRadius.circular(12),
+              onTap: () => onChanged(Palette.projects[i].toARGB32()),
+              child: Container(
+                width: 42,
+                height: 42,
+                decoration: BoxDecoration(
+                  color: Palette.taskSurface(Palette.projects[i]),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                    color: Palette.projects[i],
+                    width: value == Palette.projects[i].toARGB32() ? 2 : .7,
+                  ),
+                ),
+                child: Icon(
+                  value == Palette.projects[i].toARGB32()
+                      ? Icons.check_rounded
+                      : Icons.circle,
+                  color: Palette.projects[i],
+                  size: value == Palette.projects[i].toARGB32() ? 20 : 10,
+                ),
+              ),
+            ),
+          ),
+        ),
+    ],
+  );
 }
 
 RelativeRect menuPosition(BuildContext context, Offset globalPosition) {

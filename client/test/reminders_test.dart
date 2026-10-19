@@ -20,10 +20,10 @@ void main() {
     tz.initializeTimeZones();
     debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
     IOSFlutterLocalNotificationsPlugin.registerWith();
-    repo = Repository(
-      LocalDatabase(NativeDatabase.memory()),
-      clock: () => DateTime.utc(2026, 10, 19, 12),
-    );
+    // The native plugin validates against wall-clock time before the mocked
+    // channel is called, so this anchor must stay in the future on every run.
+    final now = DateTime.now().toUtc().add(const Duration(days: 1));
+    repo = Repository(LocalDatabase(NativeDatabase.memory()), clock: () => now);
     await repo.initialize();
     calls = [];
     pending = {};

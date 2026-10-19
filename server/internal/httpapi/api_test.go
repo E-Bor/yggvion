@@ -369,3 +369,42 @@ func TestLateOfflineOccurrencesRespectCancellation(t *testing.T) {
 		})
 	}
 }
+
+func TestSettingsTaskColorContract(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		color string
+		valid bool
+	}{
+		{"legacy", "", true},
+		{"default", `,"task_color":null`, true},
+		{"opaque", `,"task_color":4288461311`, true},
+		{"transparent", `,"task_color":2157754879`, false},
+		{"negative", `,"task_color":-1`, false},
+		{"overflow", `,"task_color":4294967296`, false},
+		{"fraction", `,"task_color":4288461311.5`, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, h, token := setup(t)
+			data := json.RawMessage(`{"default_minutes":30,"reminders":[15],"timezone":"UTC"` + tc.color + `}`)
+			response := push(t, h, token, domain.Mutation{OperationID: "settings-color", Record: domain.Record{ID: "settings", Kind: "settings", Data: data}})
+			if !tc.valid {
+				if response.Code != http.StatusBadRequest {
+					t.Fatalf("invalid color accepted: %d", response.Code)
+				}
+				return
+			}
+			result := decodeResults(t, response)[0].Record
+			var settings domain.Settings
+			if err := json.Unmarshal(result.Data, &settings); err != nil {
+				t.Fatal(err)
+			}
+			if (tc.color == "" || tc.name == "default") && settings.TaskColor != nil {
+				t.Fatal("legacy default unexpectedly changed")
+			}
+			if tc.name == "opaque" && (settings.TaskColor == nil || *settings.TaskColor != 4288461311) {
+				t.Fatal("color did not roundtrip")
+			}
+		})
+	}
+}

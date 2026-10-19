@@ -50,19 +50,30 @@ class RepeatPicker extends StatelessWidget {
     required this.start,
     required this.timezone,
     required this.onChanged,
+    this.compact = false,
   });
   final String value, timezone;
   final DateTime start;
   final ValueChanged<String> onChanged;
+  final bool compact;
   @override
   Widget build(BuildContext context) => DropdownButtonFormField<String>(
     key: ValueKey(value),
     isExpanded: true,
     initialValue: repeatPresets.containsKey(value) ? value : 'custom',
-    decoration: const InputDecoration(
-      labelText: 'Повторение',
-      prefixIcon: Icon(Icons.repeat_rounded, size: 19),
-    ),
+    decoration: compact
+        ? const InputDecoration(
+            filled: false,
+            isDense: true,
+            contentPadding: EdgeInsets.symmetric(vertical: 8),
+            border: InputBorder.none,
+            enabledBorder: InputBorder.none,
+            focusedBorder: InputBorder.none,
+          )
+        : const InputDecoration(
+            labelText: 'Повторение',
+            prefixIcon: Icon(Icons.repeat_rounded, size: 19),
+          ),
     items: [
       for (final entry in repeatPresets.entries)
         DropdownMenuItem(value: entry.key, child: Text(entry.value)),

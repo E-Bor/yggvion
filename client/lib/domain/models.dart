@@ -257,6 +257,7 @@ class AppSettings {
   int get defaultMinutes => entity.data['default_minutes'] as int;
   List<int> get reminders => (entity.data['reminders'] as List).cast<int>();
   String get timezone => entity.data['timezone'] as String;
+  int get taskColor => entity.data['task_color'] as int? ?? 0xff9cb9ff;
 }
 
 class TimeRange {
@@ -367,6 +368,8 @@ class Snapshot {
 
   Task? task(String id) => _tasksById[id];
   Project? project(String id) => _projectsById[id];
+  int taskColor(Task task) =>
+      project(task.projectId)?.color ?? settings.taskColor;
   List<TimeBlock> taskBlocks(String id) => [...?_blocksByTask[id]];
   DateTime dayBoundary(DateTime now) {
     final local = tz.TZDateTime.from(now, tz.getLocation(settings.timezone));

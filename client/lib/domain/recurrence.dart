@@ -75,17 +75,19 @@ class RecurrenceService {
 
   /// A new pattern starts at this occurrence. Past work and tracked future
   /// exceptions survive as independent tasks; unworked future plans regenerate.
-  Future<void> changeRuleFrom(Task task, String rule) async {
+  Future<void> changeRuleFrom(Task task, String rule, {String? blockId}) async {
     if (rule.isNotEmpty) parse(rule);
     final blocks = repo.snapshot.taskBlocks(task.id);
     if (blocks.isEmpty) throw StateError('Сначала запланируйте задачу');
+    final block =
+        blocks.where((b) => b.id == blockId).firstOrNull ?? blocks.first;
     if (task.seriesId.isEmpty) {
-      if (rule.isNotEmpty) await create(task, blocks.first, rule);
+      if (rule.isNotEmpty) await create(task, block, rule);
       return;
     }
     final old = await repo.db.entity(task.seriesId);
     if (old == null || old.deleted) throw StateError('Серия уже удалена');
-    final cutoff = parseTime(task.occurrence), block = blocks.first;
+    final cutoff = parseTime(task.occurrence);
     final changes = <Entity>[
       old.change({
         'rule': parse(old.data['rule'] as String)

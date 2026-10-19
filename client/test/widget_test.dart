@@ -86,8 +86,17 @@ void main() {
       );
       await tester.tap(find.text('Спланировать неделю').first);
       await tester.pumpAndSettle();
-      await tester.ensureVisible(find.byTooltip('Добавить время вручную'));
-      await tester.tap(find.byTooltip('Добавить время вручную'));
+      await expectLater(
+        find.byType(YggvionApp),
+        matchesGoldenFile('goldens/task_editor_${size.width.toInt()}.png'),
+      );
+      await tester.ensureVisible(find.byKey(const ValueKey('task-sessions')));
+      await tester.tap(find.text('Потраченное время'));
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(
+        find.byKey(const ValueKey('add-work-session')),
+      );
+      await tester.tap(find.byKey(const ValueKey('add-work-session')));
       await tester.pumpAndSettle();
       expect(find.text('Добавить потраченное время'), findsOneWidget);
       await tester.tap(find.text('Сохранить').last);
@@ -119,7 +128,7 @@ void main() {
         await tester.tap(find.text('Незапланированная задача'));
       }
       await tester.pumpAndSettle();
-      expect(find.text('Что хотите сделать?'), findsOneWidget);
+      expect(find.text('Введите название'), findsOneWidget);
       expect(tester.takeException(), isNull);
       await tester.enterText(
         find.byType(TextField).first,

@@ -105,6 +105,7 @@ class TaskCard extends ConsumerWidget {
         running = repo.snapshot.sessions.any(
           (s) => s.taskId == task.id && s.running,
         );
+    final accent = Color(repo.snapshot.taskColor(task));
     return GestureDetector(
       onSecondaryTapDown: (details) async {
         final value = await showMenu<String>(
@@ -130,18 +131,18 @@ class TaskCard extends ConsumerWidget {
         duration: const Duration(milliseconds: 120),
         margin: const EdgeInsets.only(bottom: 8),
         decoration: BoxDecoration(
-          color: selected
-              ? Palette.blue.withValues(alpha: .10)
-              : running
-              ? Palette.pink.withValues(alpha: .06)
-              : Palette.surface,
+          color: Palette.taskSurface(
+            accent,
+            subdued: task.done,
+            selected: selected,
+          ),
           borderRadius: BorderRadius.circular(12),
           border: Border.all(
             color: selected
-                ? Palette.blue
+                ? accent
                 : running
                 ? Palette.pink.withValues(alpha: .5)
-                : Palette.border,
+                : accent.withValues(alpha: .3),
             width: .7,
           ),
         ),
