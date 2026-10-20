@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:drift/drift.dart';
 import 'package:drift/native.dart';
+import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import '../domain/models.dart';
@@ -12,6 +13,12 @@ class LocalDatabase extends GeneratedDatabase {
   static Future<LocalDatabase> open() async {
     final dir = await getApplicationSupportDirectory();
     await dir.create(recursive: true);
+    try {
+      await removeRetiredFiles(dir);
+    } on FileSystemException catch (error) {
+      // Retry on the next launch; a locked cache must not block workspace access.
+      debugPrint('Could not remove retired local caches: $error');
+    }
     return LocalDatabase(
       NativeDatabase.createInBackground(
         File(p.join(dir.path, 'yggvion.sqlite')),
@@ -19,8 +26,28 @@ class LocalDatabase extends GeneratedDatabase {
     );
   }
 
+  /// Only these app-owned caches are retired. Never follow links into attachments
+  /// or delete paths saved in old model/voice metadata.
+  static Future<void> removeRetiredFiles(Directory root) async {
+    for (final name in ['local-ai', 'ai-recordings']) {
+      final path = p.join(root.path, name);
+      switch (await FileSystemEntity.type(path, followLinks: false)) {
+        case FileSystemEntityType.directory:
+          await Directory(path).delete(recursive: true);
+        case FileSystemEntityType.link:
+          await Link(path).delete();
+        case FileSystemEntityType.file:
+          await File(path).delete();
+        case FileSystemEntityType.notFound:
+          break;
+        default:
+          throw FileSystemException('Unexpected retired cache type', path);
+      }
+    }
+  }
+
   @override
-  int get schemaVersion => 2;
+  int get schemaVersion => 4;
   @override
   Iterable<TableInfo<Table, Object?>> get allTables => const [];
   @override
@@ -41,13 +68,19 @@ class LocalDatabase extends GeneratedDatabase {
         await customStatement(sql);
       }
     },
-    onUpgrade: (m, from, to) async {
+    onUpgrade: (m, from, to) => transaction(() async {
       if (from < 2) {
         await customStatement(
           'CREATE TABLE recovery_snapshots(id TEXT PRIMARY KEY, created TEXT NOT NULL, payload TEXT NOT NULL)',
         );
       }
-    },
+      if (from < 4) {
+        // Version 3 was used by the reverted semantic-search experiment.
+        // Its vectors and AI metadata are disposable, unlike accepted tasks.
+        await customStatement('DROP TABLE IF EXISTS semantic_vectors');
+        await customStatement("DELETE FROM metadata WHERE key GLOB 'ai_*'");
+      }
+    }),
     beforeOpen: (details) async {
       await customStatement('PRAGMA journal_mode=WAL');
       await customStatement('PRAGMA busy_timeout=5000');

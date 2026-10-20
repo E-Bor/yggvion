@@ -3,7 +3,6 @@ import FlutterMacOS
 
 class MainFlutterWindow: NSWindow {
   private var iconChannel: FlutterMethodChannel?
-  private var hardwareChannel: FlutterMethodChannel?
 
   override func awakeFromNib() {
     let flutterViewController = FlutterViewController()
@@ -15,17 +14,6 @@ class MainFlutterWindow: NSWindow {
     self.center()
 
     RegisterGeneratedPlugins(registry: flutterViewController)
-
-    let hardware = FlutterMethodChannel(name: "dev.yggvion/hardware", binaryMessenger: flutterViewController.engine.binaryMessenger)
-    hardware.setMethodCallHandler { call, result in
-      guard call.method == "info" else { result(FlutterMethodNotImplemented); return }
-      let directory = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-      let values = try? directory.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey])
-      result(["memory_bytes": ProcessInfo.processInfo.physicalMemory,
-              "free_bytes": values?.volumeAvailableCapacityForImportantUsage ?? 0,
-              "name": "Mac · \(ProcessInfo.processInfo.processorCount) ядер"])
-    }
-    hardwareChannel = hardware
 
     let channel = FlutterMethodChannel(name: "dev.yggvion/app_icon",
                                        binaryMessenger: flutterViewController.engine.binaryMessenger)

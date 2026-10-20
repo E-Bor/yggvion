@@ -21,8 +21,6 @@ import 'task_card.dart';
 import 'task_editor.dart';
 import 'theme.dart';
 import 'app_logo.dart';
-import 'ai_page.dart';
-import 'ai_voice_button.dart';
 import 'server_settings.dart';
 
 class YggvionApp extends ConsumerWidget {
@@ -43,7 +41,7 @@ class YggvionApp extends ConsumerWidget {
   );
 }
 
-enum PageKind { today, planner, board, notes, settings, ai }
+enum PageKind { today, planner, board, notes, settings }
 
 class Workspace extends ConsumerStatefulWidget {
   const Workspace({super.key});
@@ -73,7 +71,6 @@ class _WorkspaceState extends ConsumerState<Workspace>
     'Канбан',
     'Заметки',
     'Настройки',
-    'AI',
   ];
   static const icons = [
     Icons.wb_sunny_outlined,
@@ -81,13 +78,11 @@ class _WorkspaceState extends ConsumerState<Workspace>
     Icons.view_kanban_outlined,
     Icons.description_outlined,
     Icons.tune_rounded,
-    Icons.auto_awesome_outlined,
   ];
   List<PageKind> get mobilePages => [
     PageKind.board,
     PageKind.planner,
     PageKind.notes,
-    if (ref.read(aiProvider)?.enabled == true) PageKind.ai,
     PageKind.today,
   ];
   @override
@@ -239,12 +234,6 @@ class _WorkspaceState extends ConsumerState<Workspace>
   @override
   Widget build(BuildContext context) {
     final repo = ref.watch(appProvider), size = MediaQuery.sizeOf(context);
-    final aiEnabled = ref.watch(
-      aiProvider.select((ai) => ai?.enabled ?? false),
-    );
-    ref.listen(aiProvider.select((ai) => ai?.enabled ?? false), (_, enabled) {
-      if (!enabled && page == PageKind.ai) go(PageKind.today);
-    });
     ref.listen(appProvider, (_, current) {
       if (projectId.isNotEmpty &&
           !current.snapshot.projects.any(
@@ -302,18 +291,9 @@ class _WorkspaceState extends ConsumerState<Workspace>
               control: !meta,
             ): () =>
                 go(PageKind.values[i]),
-          if (aiEnabled)
-            SingleActivator(
-              LogicalKeyboardKey.digit6,
-              meta: meta,
-              control: !meta,
-            ): () =>
-                go(PageKind.ai),
         },
-        const SingleActivator(LogicalKeyboardKey.f1): () => showShortcutHelp(
-          context,
-          aiEnabled: ref.read(aiProvider)?.enabled == true,
-        ),
+        const SingleActivator(LogicalKeyboardKey.f1): () =>
+            showShortcutHelp(context),
         const SingleActivator(LogicalKeyboardKey.escape): () {
           if (birthdaysOpen) {
             setState(() => birthdaysOpen = false);
@@ -370,7 +350,6 @@ class _WorkspaceState extends ConsumerState<Workspace>
                           PageKind.today => _today(desktop),
                           PageKind.planner => _planner(desktop),
                           PageKind.board => _board(),
-                          PageKind.ai => const AiPage(),
                           // Do not reopen a stale empty draft while its queued
                           // deletion is still being written.
                           PageKind.notes =>
@@ -415,22 +394,6 @@ class _WorkspaceState extends ConsumerState<Workspace>
               ? null
               : NavigationBar(
                   height: 68,
-                  labelPadding: aiEnabled
-                      ? const EdgeInsets.symmetric(horizontal: 2)
-                      : null,
-                  labelTextStyle: aiEnabled
-                      ? WidgetStateProperty.resolveWith(
-                          (states) => TextStyle(
-                            fontSize: 10,
-                            height: 1.2,
-                            letterSpacing: -.2,
-                            fontWeight: FontWeight.w500,
-                            color: states.contains(WidgetState.selected)
-                                ? Palette.text
-                                : Palette.muted,
-                          ),
-                        )
-                      : null,
                   selectedIndex: mobilePages.indexOf(
                     page == PageKind.settings ? PageKind.today : page,
                   ),
@@ -444,17 +407,12 @@ class _WorkspaceState extends ConsumerState<Workspace>
                       ),
                   ],
                 ),
-          floatingActionButton:
-              desktop || page == PageKind.settings || page == PageKind.ai
+          floatingActionButton: desktop || page == PageKind.settings
               ? null
               : Column(
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
-                    if (page == PageKind.today && aiEnabled) ...[
-                      const AiVoiceButton(),
-                      const SizedBox(height: 12),
-                    ],
                     PopupMenuButton<String>(
                       key: const ValueKey('create-menu'),
                       tooltip: 'Создать',
@@ -584,7 +542,6 @@ class _WorkspaceState extends ConsumerState<Workspace>
               if (!desktop &&
                   page != PageKind.settings &&
                   page != PageKind.notes &&
-                  page != PageKind.ai &&
                   repo.snapshot.projects.isNotEmpty)
                 PopupMenuButton<String>(
                   tooltip: 'Фильтр проектов',
@@ -604,7 +561,7 @@ class _WorkspaceState extends ConsumerState<Workspace>
                       ),
                   ],
                 ),
-              if (page != PageKind.ai) TimerControl(compact: !wide),
+              TimerControl(compact: !wide),
               IconButton(
                 tooltip: 'Поиск · ⌘F / Ctrl+F',
                 onPressed: search,
@@ -616,16 +573,7 @@ class _WorkspaceState extends ConsumerState<Workspace>
                   onPressed: () => go(PageKind.settings),
                   icon: const Icon(Icons.tune_rounded),
                 ),
-              if (desktop &&
-                  page != PageKind.settings &&
-                  page != PageKind.ai) ...[
-                if (home &&
-                    ref.watch(
-                      aiProvider.select((ai) => ai?.enabled ?? false),
-                    )) ...[
-                  const SizedBox(width: 8),
-                  const AiVoiceButton(compact: true),
-                ],
+              if (desktop && page != PageKind.settings) ...[
                 const SizedBox(width: 8),
                 if (wide)
                   OutlinedButton.icon(
@@ -834,10 +782,6 @@ class _WorkspaceState extends ConsumerState<Workspace>
                       ),
                     ),
                   for (var i = 0; i < 4; i++) navigation(i),
-                  if (ref.watch(
-                    aiProvider.select((ai) => ai?.enabled ?? false),
-                  ))
-                    navigation(PageKind.ai.index),
                   const SizedBox(height: 30),
                   if (!collapsed) ...[
                     const Padding(
@@ -931,10 +875,7 @@ class _WorkspaceState extends ConsumerState<Workspace>
                   if (collapsed) ...[
                     IconButton(
                       tooltip: 'Клавиши · F1',
-                      onPressed: () => showShortcutHelp(
-                        context,
-                        aiEnabled: ref.read(aiProvider)?.enabled == true,
-                      ),
+                      onPressed: () => showShortcutHelp(context),
                       icon: const Icon(Icons.keyboard_outlined, size: 20),
                     ),
                     Padding(
@@ -977,10 +918,7 @@ class _WorkspaceState extends ConsumerState<Workspace>
                                 color: Palette.muted,
                               ),
                             ),
-                            onTap: () => showShortcutHelp(
-                              context,
-                              aiEnabled: ref.read(aiProvider)?.enabled == true,
-                            ),
+                            onTap: () => showShortcutHelp(context),
                           ),
                           const SizedBox(height: 12),
                           Tooltip(

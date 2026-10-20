@@ -35,9 +35,6 @@ dependencies:
   qr_flutter: 4.1.0
   app_links: 6.4.1
   mobile_scanner: 7.2.0
-  llamadart: 0.15.3
-  whisper_ggml: 2.8.1
-  record: 6.2.0
   share_plus: 12.0.1
 
 dev_dependencies:
@@ -46,18 +43,13 @@ dev_dependencies:
   flutter_lints: ^6.0.0
   msix: ^3.18.0
 
-# whisper_ggml requests FFmpeg 2.x, which has no arm64 simulator slice.
-# The publisher's 3.6.7 XCFrameworks preserve the conversion API and support it.
-dependency_overrides:
-  ffmpeg_kit_flutter_new_min: 3.6.7
-
 msix_config:
   display_name: Yggvion
   publisher_display_name: Yggvion
   identity_name: dev.yggvion.yggvion
   publisher: CN=Yggvion
   msix_version: 0.1.0.0
-  capabilities: internetClient, microphone, webcam
+  capabilities: internetClient, webcam
   install_certificate: false
   sign_msix: false
   logo_path: assets/branding/app-icon.png
@@ -76,8 +68,3 @@ flutter:
     - family: Inter
       fonts:
         - asset: assets/fonts/Inter.ttf
-
-hooks:
-  user_defines:
-    llamadart:
-      llamadart_native_runtimes: [llama_cpp]

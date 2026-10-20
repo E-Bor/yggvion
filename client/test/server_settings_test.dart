@@ -4,11 +4,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:timezone/data/latest.dart' as tz;
-import 'package:yggvion/data/ai_service.dart';
 import 'package:yggvion/data/database.dart';
 import 'package:yggvion/data/repository.dart';
 import 'package:yggvion/data/sync.dart';
-import 'package:yggvion/ui/ai_settings.dart';
 import 'package:yggvion/ui/providers.dart';
 import 'package:yggvion/ui/server_settings.dart';
 import 'package:yggvion/ui/theme.dart';
@@ -40,7 +38,7 @@ void main() {
     await initializeDateFormatting('ru');
   });
   for (final width in [390.0, 1440.0]) {
-    testWidgets('server, backup and AI settings remain usable at $width px', (
+    testWidgets('server and backup settings remain usable at $width px', (
       tester,
     ) async {
       tester.view.physicalSize = Size(width, 900);
@@ -52,12 +50,11 @@ void main() {
         repo = Repository(LocalDatabase(NativeDatabase.memory()));
         await repo.initialize();
       });
-      final sync = AdminFixture(repo), ai = AiService(repo)..enabled = true;
+      final sync = AdminFixture(repo);
       final container = ProviderContainer(
         overrides: [
           appProvider.overrideWith((ref) => repo),
           syncProvider.overrideWithValue(sync),
-          aiProvider.overrideWith((ref) => ai),
         ],
       );
       for (final page in <Widget>[
@@ -65,7 +62,6 @@ void main() {
         const InstallServerPage(),
         const BackupsPage(),
         const RemoteBackupsPage(initial: {'kind': 'sftp'}),
-        const AiSettingsPage(),
       ]) {
         await tester.pumpWidget(
           UncontrolledProviderScope(
@@ -91,7 +87,6 @@ void main() {
         );
       }
       await tester.pumpWidget(const SizedBox());
-      await tester.runAsync(ai.shutdown);
       sync.dispose();
       container.dispose();
       await tester.runAsync(repo.db.close);

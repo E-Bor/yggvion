@@ -5,9 +5,6 @@ import UserNotifications
 @main
 @objc class AppDelegate: FlutterAppDelegate {
   private var iconChannel: FlutterMethodChannel?
-  private var hardwareChannel: FlutterMethodChannel?
-  private var aiBackgroundChannel: FlutterMethodChannel?
-  private var aiBackgroundTask: UIBackgroundTaskIdentifier = .invalid
 
   override func application(
     _ application: UIApplication,
@@ -17,45 +14,6 @@ import UserNotifications
     GeneratedPluginRegistrant.register(with: self)
     let launched = super.application(application, didFinishLaunchingWithOptions: launchOptions)
     if let controller = window?.rootViewController as? FlutterViewController {
-      let background = FlutterMethodChannel(
-        name: "dev.yggvion/ai_background", binaryMessenger: controller.binaryMessenger)
-      background.setMethodCallHandler { [weak self] call, result in
-        guard let self else { result(nil); return }
-        switch call.method {
-        case "begin":
-          if self.aiBackgroundTask == .invalid {
-            self.aiBackgroundTask = application.beginBackgroundTask(
-              withName: "Voice message transcription"
-            ) { [weak self] in
-              // Audio and queue state have already been saved by Flutter.
-              // iOS may suspend us; processing resumes on the next launch.
-              guard let self, self.aiBackgroundTask != .invalid else { return }
-              application.endBackgroundTask(self.aiBackgroundTask)
-              self.aiBackgroundTask = .invalid
-            }
-          }
-          result(nil)
-        case "end":
-          if self.aiBackgroundTask != .invalid {
-            application.endBackgroundTask(self.aiBackgroundTask)
-            self.aiBackgroundTask = .invalid
-          }
-          result(nil)
-        default:
-          result(FlutterMethodNotImplemented)
-        }
-      }
-      aiBackgroundChannel = background
-      let hardware = FlutterMethodChannel(name: "dev.yggvion/hardware", binaryMessenger: controller.binaryMessenger)
-      hardware.setMethodCallHandler { call, result in
-        guard call.method == "info" else { result(FlutterMethodNotImplemented); return }
-        let directory = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        let values = try? directory.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey])
-        result(["memory_bytes": ProcessInfo.processInfo.physicalMemory,
-                "free_bytes": values?.volumeAvailableCapacityForImportantUsage ?? 0,
-                "name": UIDevice.current.model])
-      }
-      hardwareChannel = hardware
       let channel = FlutterMethodChannel(name: "dev.yggvion/app_icon",
                                          binaryMessenger: controller.binaryMessenger)
       channel.setMethodCallHandler { call, result in

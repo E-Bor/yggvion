@@ -125,11 +125,10 @@ class Repository extends ChangeNotifier {
 
   /// Compute dependent changes after queued local/sync writes have finished.
   Future<void> commitComputed(
-    Future<List<Entity>> Function() compute, {
-    Future<void> Function()? writeLocalState,
-  }) => serial(() async {
+    Future<List<Entity>> Function() compute,
+  ) => serial(() async {
     final changes = await compute();
-    if (changes.isEmpty && writeLocalState == null) return;
+    if (changes.isEmpty) return;
     await db.transaction(() async {
       for (final proposed in changes) {
         final current = await db.entity(proposed.id);
@@ -152,7 +151,6 @@ class Repository extends ChangeNotifier {
           [record.id, newId(), record.encoded, ordinal],
         );
       }
-      if (writeLocalState != null) await writeLocalState();
     });
     await reload();
     if (onChange != null) unawaited(onChange!());

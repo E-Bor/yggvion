@@ -4,9 +4,7 @@ import '../data/sync.dart';
 import '../data/reminders.dart';
 import '../data/clipboard.dart';
 import '../data/app_icon.dart';
-import '../data/ai_service.dart';
 
-final aiProvider = ChangeNotifierProvider<AiService?>((ref) => null);
 final invitationLinksProvider = Provider<Stream<Uri>?>((ref) => null);
 
 // The native shell supplies this optional service at startup.

@@ -11,7 +11,6 @@ import 'task_editor.dart';
 import 'theme.dart';
 import 'birthdays.dart';
 import 'server_settings.dart';
-import 'ai_settings.dart';
 
 class SettingsPage extends ConsumerStatefulWidget {
   const SettingsPage({super.key, required this.onOpenBirthdays});
@@ -563,17 +562,6 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                           context,
                           MaterialPageRoute<void>(
                             builder: (_) => const BackupsPage(),
-                          ),
-                        ),
-                      ),
-                      ListTile(
-                        leading: const Icon(Icons.auto_awesome_outlined),
-                        title: const Text('Локальный AI'),
-                        trailing: const Icon(Icons.chevron_right_rounded),
-                        onTap: () => Navigator.push(
-                          context,
-                          MaterialPageRoute<void>(
-                            builder: (_) => const AiSettingsPage(),
                           ),
                         ),
                       ),

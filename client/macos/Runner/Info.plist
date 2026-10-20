@@ -30,8 +30,6 @@
 	<string>MainMenu</string>
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
-	<key>NSMicrophoneUsageDescription</key>
-	<string>Голосовые команды распознаются на этом устройстве.</string>
 	<key>NSCameraUsageDescription</key>
 	<string>Камера нужна для сканирования приглашения на ваш сервер.</string>
 	<key>FlutterDeepLinkingEnabled</key><false/>

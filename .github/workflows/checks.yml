@@ -38,7 +38,7 @@ jobs:
       - run: python3 tool/build_server_bundle.py
         working-directory: .
       - run: flutter pub get
-      - run: dart format --output=none --set-exit-if-changed lib test tool/ai_smoke.dart
+      - run: dart format --output=none --set-exit-if-changed lib test
       - run: flutter analyze
       - run: go build -o "$RUNNER_TEMP/yggvion-test-server" ./cmd/yggvion
         working-directory: server
@@ -68,7 +68,7 @@ jobs:
           channel: stable
           cache: true
       - if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev libsecret-1-dev libjsoncpp-dev libjson-glib-dev liblzma-dev
+        run: sudo apt-get update && sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev libsecret-1-dev libjsoncpp-dev liblzma-dev
       - uses: actions/setup-go@v5
         with:
           go-version-file: server/go.mod
