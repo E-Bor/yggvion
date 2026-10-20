@@ -52,7 +52,7 @@ class AiTimeInput {
       .map((e) => e.key)
       .join('|');
   static final _number =
-      '(?:\\d{1,2}|н[оу]ль\\s+(?:$_single)|'
+      '(?:\\d{1,2}|н[оу]ль\\s+(?:ноль|нуль|$_single)|'
       '(?:${_tens.keys.join('|')})(?:\\s+(?:$_single))?|'
       '${_units.keys.join('|')})';
   static final _unparsedNumber = RegExp(
@@ -64,24 +64,24 @@ class AiTimeInput {
       r'вторник(?:а|у|е|ом)?|сред[ауеы]|четверг(?:а|у|е|ом)?|'
       r'пятниц[ауеы]|суббот[ауеы]|воскресень[ея]';
   static final _spoken = RegExp(
-    '(?<![а-яёa-z\\d])'
-    '(в|к|на|с|$_calendarDay)(?:\\s*[,;–—])?\\s+($_number|час)'
+    '(?<![а-яёa-z\\d.,:+/\\-])'
+    '(?:(в|к|на|с|до|$_calendarDay)(?:\\s*[,;:–—])?\\s+)?($_number|час)'
     '(?:\\s+(час(?:а|ов)?))?'
     '(?:\\s+(?:и\\s+)?($_number)(?:\\s+минут(?:у|ы)?)?)?'
     '(?:\\s+(утра|дня|вечера|ночи))?'
     '(?![а-яёa-z\\d])',
   );
   static final _digits = RegExp(
-    r'(?<![а-яёa-z\d.+:/-])(\d{1,2})\s*([:.\-–—])\s*(\d{2})'
+    r'(?<![а-яёa-z\d.,+:/-])(\d{1,2})\s*([:.,\-–—])\s*(\d{2})'
     r'(?![а-яёa-z\d]|[./:\-]\d)',
   );
-  static final _context = RegExp(r'(?:^|[^а-яёa-z\d])(?:в|к|на|с)\s*$');
-  static final _calendarContext = RegExp(
-    '(?:^|[^а-яёa-z\\d])(?:$_calendarDay)(?:\\s*[,;:–—])?\\s*\$',
+  static final _attachedPreposition = RegExp(
+    r'(?<![а-яёa-z\d])([вкс]|на)(?=\d{1,2}[:.,\-–—])',
   );
-  static final _continuation = RegExp(r'^\s*(?:до|или|[-–—])\s*$');
   static final _duration = RegExp(
-    r'(?:через|длительностью|продолжительностью|в течение|на протяжении)\s*$',
+    r'(?:через|длительност[ьи]|длительностью|продолжительность|'
+    r'продолжительностью|в течение|на протяжении)'
+    r'\s*:?\s*(?:(?:примерно|около)\s+)?$',
   );
   static final _period = RegExp(
     r'^\s*(утра|дня|вечера|ночи|am|pm)(?![а-яёa-z\d])',
@@ -89,6 +89,25 @@ class AiTimeInput {
   static final _dateOrDurationSuffix = RegExp(
     r'^\s*(?:январ|феврал|март|апрел|ма[йя]|июн|июл|август|сентябр|'
     r'октябр|ноябр|декабр|числ|год|дн|день|недел|месяц|минут|секунд)',
+  );
+  static final _nonClockPrefix = RegExp(
+    r'(?:^|[^а-яёa-z\d])(?:верси[яиюе]|релиз[ау]?|сборк[аиу]|'
+    r'номер(?:а|ом|у)?|телефон(?:а|у)?|цен[ауы]|стоимостью|стоимост[ьи]|'
+    r'сумм[ауы]|за)(?:\s+(?:до|на|с))?\s*:?\s*$',
+  );
+  static final _nonClockSuffix = RegExp(
+    r'^\s*(?:[₽$€%]|(?:руб(?:ль|ля|лей)?|доллар(?:а|ов)?|евро|'
+    r'кг|км|см|мм|мл|литр(?:а|ов)?|процент(?:а|ов)?|подряд)'
+    r'(?![а-яёa-z]))',
+  );
+  static final _on = RegExp(r'(?:^|[^а-яёa-z\d])на\s*$');
+  static final _hours = RegExp(r'^\s*(?:час(?:а|ов)?|ч\.?)(?![а-яёa-z])');
+  static final _dates = RegExp(
+    r'(?<!\d)(?:\d{1,2}\s*[,./-]\s*\d{1,2}\s*[,./-]\s*\d{4}|'
+    r'\d{4}\s*[,./-]\s*\d{1,2}\s*[,./-]\s*\d{1,2})(?!\d)',
+  );
+  static final _phoneNumbers = RegExp(
+    r'(?<![а-яёa-z\d])\+?\d[\d ()–-]{7,}\d(?!\d)',
   );
 
   static int _value(String text) {
@@ -103,7 +122,7 @@ class AiTimeInput {
   /// The structured model field can use the same numeric separators as ASR.
   static String? normalizeClock(String text) {
     final match = RegExp(
-      r'^(\d{1,2})\s*[:.\-–— ]\s*(\d{2})$',
+      r'^(\d{1,2})\s*[:.,\-–— ]\s*(\d{2})$',
     ).firstMatch(text.trim());
     if (match == null) return null;
     return _clock(int.parse(match[1]!), int.parse(match[2]!));
@@ -124,37 +143,45 @@ class AiTimeInput {
   }
 
   static AiTimeInput fromRequest(String input) {
-    final text = input.toLowerCase().replaceAll('ё', 'е');
+    final text = input
+        .toLowerCase()
+        .replaceAll('ё', 'е')
+        .replaceAllMapped(_attachedPreposition, (m) => '${m[1]} ');
+    // Keep offsets while excluding dates and long telephone numbers. Otherwise
+    // scanning "18 00" globally could pick it out of "+7 900 123 18 00".
+    final blocked = [
+      ..._dates.allMatches(text),
+      ..._phoneNumbers
+          .allMatches(
+            text.replaceAllMapped(_dates, (m) => ''.padLeft(m[0]!.length)),
+          )
+          .where((m) => RegExp(r'\d').allMatches(m[0]!).length >= 10),
+    ];
+    bool isClockContext(int start, int end) {
+      if (blocked.any((m) => start < m.end && end > m.start)) return false;
+      final before = text.substring(0, start), after = text.substring(end);
+      return !_duration.hasMatch(before) &&
+          !(_on.hasMatch(before) && _hours.hasMatch(after)) &&
+          !_nonClockPrefix.hasMatch(before) &&
+          !_nonClockSuffix.hasMatch(after) &&
+          !_dateOrDurationSuffix.hasMatch(after);
+    }
+
     final found = <({int start, int end, String? time})>[];
     for (final match in _digits.allMatches(text)) {
       final before = text.substring(0, match.start);
-      // Dots and hyphens also appear in dates, versions and identifiers.
-      // A weekday is also a time context: ASR often writes "понедельник
-      // 12.30" or "завтра 12-30" without inserting a preposition.
-      final followsTime =
-          found.isNotEmpty &&
-          _continuation.hasMatch(text.substring(found.last.end, match.start));
-      if (match[2] != ':' &&
-          !_context.hasMatch(before) &&
-          !_calendarContext.hasMatch(before) &&
-          !followsTime &&
-          normalizeClock(text) == null) {
-        continue;
-      }
       if (match[2] == '.' &&
+          int.parse(match[3]!) >= 1 &&
           int.parse(match[3]!) <= 12 &&
-          RegExp(r'(?:^|[^а-яёa-z\d])на\s*$').hasMatch(before)) {
+          _on.hasMatch(before)) {
         continue; // "на 13.05" could mean May 13; let the model resolve it.
       }
       final period = _period.firstMatch(text.substring(match.end));
-      if (_duration.hasMatch(before) ||
-          (period == null &&
-              _dateOrDurationSuffix.hasMatch(text.substring(match.end)))) {
-        continue;
-      }
+      final end = match.end + (period?.end ?? 0);
+      if (!isClockContext(match.start, end)) continue;
       found.add((
         start: match.start,
-        end: match.end + (period?.end ?? 0),
+        end: end,
         time: _clock(int.parse(match[1]!), int.parse(match[3]!), period?[1]),
       ));
     }
@@ -163,9 +190,18 @@ class AiTimeInput {
         continue;
       }
       final after = text.substring(match.end);
-      if (RegExp(r'^[\d:./\-–—]').hasMatch(after) ||
-          _dateOrDurationSuffix.hasMatch(after) ||
+      final start = match.start + match[0]!.indexOf(match[2]!);
+      if (RegExp(r'^[\d:.,/\-–—]').hasMatch(after) ||
+          !isClockContext(start, match.end) ||
           _unparsedNumber.hasMatch(after)) {
+        continue;
+      }
+      // A standalone quantity is not a clock. Unanchored spoken clocks need
+      // minutes, "часов", or a period such as "вечера".
+      if (match[1] == null &&
+          match[3] == null &&
+          match[4] == null &&
+          match[5] == null) {
         continue;
       }
       // "На час" and "на 13 часов" may be durations. "С 13" may be a
@@ -176,7 +212,7 @@ class AiTimeInput {
         continue;
       }
       found.add((
-        start: match.start,
+        start: start,
         end: match.end,
         time: _clock(
           _value(match[2]!),

@@ -283,6 +283,28 @@ void main() {
     },
   );
 
+  for (final command in [
+    'Поставь событие на завтра встреча с другом в 18.00',
+    'Поставь событие на завтра встреча с другом 18 00',
+  ]) {
+    test('voice queue preserves the trailing clock: $command', () async {
+      speech.pending = Completer<String>()..complete(command);
+      language.answer =
+          '{"action":"task","title":"Встреча с другом","time":"12:00"}';
+      await ai.startRecording();
+      await ai.finishRecording();
+      await until(() => !ai.processing);
+      final item = ai.proposals.single;
+      expect(item.state, AiProposalState.ready);
+      expect(item.draft!.summary, contains('21 октября · 18:00'));
+      expect(item.draft!.data['auto_scheduled'], isNot(true));
+      await ai.confirm(item);
+      final block = repo.snapshot.blocks.single;
+      expect(block.start, DateTime.utc(2026, 10, 21, 15));
+      expect(block.end, DateTime.utc(2026, 10, 21, 15, 30));
+    });
+  }
+
   test(
     'failed transcription keeps audio locally and retry removes it on success',
     () async {

@@ -80,6 +80,29 @@ void main() {
   );
 
   test(
+    'a trailing clock reaches the prompt and no-clock requests use a free slot',
+    () {
+      const input = 'Поставь событие на завтра встреча с другом в 18.00';
+      expect(
+        AiPrompt.build(input, snapshot(), now).system,
+        contains('Явное время начала: 18:00'),
+      );
+      final explicit = parse(input, time: '12:00');
+      expect(explicit.data['start'], '2026-10-21T15:00:00.000Z');
+      for (final request in [
+        'Поставь событие на завтра встреча с другом',
+        'Поставь событие на завтра встреча с другом когда-нибудь',
+      ]) {
+        final draft = parse(request, time: '18:00');
+        expect(draft.action, 'task');
+        expect(draft.data['auto_scheduled'], isTrue);
+        expect(draft.summary, contains('Подобрано свободное время'));
+        expect(duration(draft), const Duration(minutes: 45));
+      }
+    },
+  );
+
+  test(
     'omitted duration always uses the setting, even when the model invents one',
     () {
       for (final modelMinutes in [null, 0, 30, 60, 120, 'unknown']) {
@@ -103,6 +126,8 @@ void main() {
     'на полтора часа': 90,
     'на час с половиной': 90,
     'на 1,5 часа': 90,
+    'на 1,50 часа': 90,
+    'на 1.50 часа': 90,
     'на два часа и пятнадцать минут': 135,
     'на сорок пять минут': 45,
     'длительностью 2 часа 10 минут': 130,

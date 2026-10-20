@@ -49,6 +49,89 @@ void main() {
     expect(draft.summary, contains('31 октября · 13:30'));
   });
 
+  for (final clock in [
+    '18:00',
+    '18.00',
+    '18,00',
+    '18-00',
+    '18 00',
+    'восемнадцать ноль ноль',
+    'восемнадцать часов',
+    'шесть вечера',
+  ]) {
+    for (final request in [
+      'Поставь событие на завтра встреча с другом в $clock',
+      'Поставь событие на завтра встреча с другом $clock',
+      'Поставь событие $clock встреча с другом завтра',
+    ]) {
+      test('finds a clock anywhere in the request: $request', () {
+        expect(AiTimeInput.fromRequest(request).time, '18:00');
+        final draft = task(request, time: '14:00');
+        expect(draft.data['start'], '2026-10-21T15:00:00.000Z');
+        expect(draft.data['end'], '2026-10-21T15:30:00.000Z');
+        expect(draft.data['auto_scheduled'], isNot(true));
+      });
+    }
+  }
+
+  test('clock punctuation and attached prepositions survive transcription', () {
+    for (final request in [
+      'Поставь встречу завтра в18.00',
+      'Поставь встречу завтра к18:00',
+      'Поставь встречу завтра на18-00',
+      'Поставь встречу завтра на 18.00',
+      'Поставь встречу завтра в: 18.00',
+      'Поставь встречу завтра в 18.00.',
+      'Поставь встречу завтра, время: 18,00.',
+      'Завтра обновить версию в 18.00',
+    ]) {
+      expect(AiTimeInput.fromRequest(request).time, '18:00', reason: request);
+    }
+  });
+
+  test('unrelated numbers do not become times during a global scan', () {
+    for (final request in [
+      'Купить завтра книгу за 18.00 рублей',
+      'Купить завтра билет стоимостью 18,00 евро',
+      'Обновить завтра до версии 18.00',
+      'Проверить завтра номер +7 (900) 123 18 00',
+      'Позвонить завтра +7 900 123-18-00',
+      'Завтра пройти 18.00 км',
+      'Завтра работать 18 часов подряд',
+      'Завтра работать на 1,5 часа',
+      'Завтра работать на 1.5 часа',
+      'Завтра работать на 1,50 часа',
+      'Завтра работать на 1.50 часа',
+      'Поставь задачу на 21.10.2026',
+      'Поставь задачу на 2026-10-21',
+      'Поставь задачу на 21,10,2026',
+    ]) {
+      final time = AiTimeInput.fromRequest(request);
+      expect(time.time, isNull, reason: request);
+      expect(time.question, isNull, reason: request);
+    }
+    expect(
+      AiTimeInput.fromRequest(
+        'Завтра обновить версию 18.00, встреча 19.30',
+      ).time,
+      '19:30',
+    );
+  });
+
+  test(
+    'global clock alternatives and malformed clocks request clarification',
+    () {
+      for (final request in [
+        'Поставь встречу с другом завтра 18.00 или 19.00',
+        'Поставь встречу с другом завтра 25.00',
+        'Поставь встречу с другом завтра 18.75',
+        'Поставь встречу с другом завтра 18,75',
+      ]) {
+        expect(task(request).action, 'clarify', reason: request);
+      }
+    },
+  );
+
   for (final entry in {
     'Встреча завтра в 13:30': '13:30',
     'Встреча завтра на 13-30.': '13:30',
