@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:crypto/crypto.dart';
 import 'package:dio/dio.dart';
+import 'package:dio/io.dart';
 import 'package:drift/drift.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:path/path.dart' as p;
@@ -11,36 +12,48 @@ import '../domain/models.dart';
 import 'repository.dart';
 
 class SyncService {
-  SyncService(this.repo, {Dio? client, FlutterSecureStorage? secureStorage})
-    : client =
-          client ??
-          Dio(
-            BaseOptions(
-              connectTimeout: const Duration(seconds: 8),
-              receiveTimeout: const Duration(seconds: 30),
-              sendTimeout: const Duration(seconds: 60),
-            ),
-          ),
-      secure =
-          secureStorage ??
-          const FlutterSecureStorage(
-            mOptions: MacOsOptions(useDataProtectionKeyChain: false),
-          );
+  SyncService(
+    this.repo, {
+    Dio? client,
+    FlutterSecureStorage? secureStorage,
+    this.realtime = true,
+  }) : client =
+           client ??
+           Dio(
+             BaseOptions(
+               connectTimeout: const Duration(seconds: 8),
+               receiveTimeout: const Duration(seconds: 30),
+               sendTimeout: const Duration(seconds: 60),
+               followRedirects: false,
+             ),
+           ),
+       secure =
+           secureStorage ??
+           const FlutterSecureStorage(
+             mOptions: MacOsOptions(useDataProtectionKeyChain: false),
+           );
   final Repository repo;
   final Dio client;
   final FlutterSecureStorage secure;
+  final bool realtime;
   Timer? _timer;
   Timer? _eventRetry;
   StreamSubscription<List<int>>? _events;
   CancelToken? _eventCancel;
   bool _listening = false;
   bool _busy = false, _disposed = false;
+  bool _pairing = false;
   String? _url, _token;
+  String? _generation, _privateCA;
+  String? get privateCA => _privateCA;
   String? get url => _url;
   bool get connected => _url != null && _token != null;
   Future<void> initialize() async {
     _url = await repo.db.meta('server_url');
     _token = _url == null ? null : await secure.read(key: 'server_token');
+    _privateCA = await secure.read(key: 'server_ca');
+    _generation = await repo.db.meta('server_generation');
+    if (_privateCA != null) _configureTrust(client, _privateCA!);
     repo.onChange = sync;
     _timer = Timer.periodic(
       const Duration(seconds: 20),
@@ -58,6 +71,7 @@ class SyncService {
         uri.userInfo.isNotEmpty ||
         uri.query.isNotEmpty ||
         uri.fragment.isNotEmpty ||
+        (uri.path.isNotEmpty && uri.path != '/') ||
         (uri.scheme != 'https' &&
             !(uri.scheme == 'http' &&
                 ['localhost', '127.0.0.1', '::1'].contains(uri.host)))) {
@@ -68,17 +82,79 @@ class SyncService {
     return uri;
   }
 
-  Future<void> pair(String url, String key, String name) async {
+  static void _configureTrust(Dio dio, String ca) {
+    final context = SecurityContext(withTrustedRoots: false);
+    context.setTrustedCertificatesBytes(utf8.encode(ca));
+    dio.httpClientAdapter.close(force: true);
+    dio.httpClientAdapter = IOHttpClientAdapter(
+      createHttpClient: () => HttpClient(context: context),
+    );
+    dio.options.followRedirects = false;
+  }
+
+  Future<void> pair(
+    String url,
+    String key,
+    String name, {
+    String? privateCA,
+  }) async {
+    if (_pairing) throw StateError('Подключение уже выполняется');
+    _pairing = true;
+    try {
+      final deadline = DateTime.now().add(const Duration(minutes: 2));
+      while (_busy) {
+        if (DateTime.now().isAfter(deadline)) {
+          throw StateError('Дождитесь завершения текущей синхронизации');
+        }
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+      }
+      await _pairNow(url, key, name, privateCA: privateCA);
+    } finally {
+      _pairing = false;
+      unawaited(_listen());
+    }
+    await sync();
+  }
+
+  Future<void> _pairNow(
+    String url,
+    String key,
+    String name, {
+    String? privateCA,
+  }) async {
     final uri = validateURL(url);
     final base = uri.toString().replaceAll(RegExp(r'/+$'), '');
-    final response = await client.post<Map<String, dynamic>>(
-      '$base/api/v1/pair',
-      data: {'name': name, 'key': key},
-    );
+    final candidate = privateCA == null && _privateCA == null
+        ? client
+        : Dio(client.options.copyWith());
+    if (privateCA != null) _configureTrust(candidate, privateCA);
+    late Response<Map<String, dynamic>> response;
+    try {
+      response = await candidate.post<Map<String, dynamic>>(
+        '$base/api/v1/pair',
+        data: {'name': name, 'key': key},
+      );
+    } finally {
+      if (candidate != client) candidate.close(force: true);
+    }
     final data = response.data!;
     final oldId = repo.deviceId;
     final newId = data['device_id'] as String;
     await secure.write(key: 'server_token', value: data['token'] as String);
+    if (privateCA != null) {
+      await secure.write(key: 'server_ca', value: privateCA);
+      _configureTrust(client, privateCA);
+    } else {
+      await secure.delete(key: 'server_ca');
+      if (_privateCA != null) {
+        client.httpClientAdapter.close(force: true);
+        client.httpClientAdapter = IOHttpClientAdapter();
+      }
+    }
+    _privateCA = privateCA;
+    _eventCancel?.cancel();
+    await _events?.cancel();
+    _listening = false;
     await repo.db.setMeta('server_url', base);
     await repo.db.setMeta('device_id', newId);
     repo.deviceId = newId;
@@ -89,12 +165,10 @@ class SyncService {
         .map((s) => s.entity.change({'device_id': newId}))
         .toList();
     if (active.isNotEmpty) await repo.commit(active);
-    await sync();
-    unawaited(_listen());
   }
 
   Future<void> _listen() async {
-    if (!connected || _disposed || _listening) return;
+    if (!realtime || !connected || _disposed || _listening || _pairing) return;
     _listening = true;
     _eventCancel = CancelToken();
     try {
@@ -131,14 +205,171 @@ class SyncService {
     }
   }
 
-  Options get _auth => Options(headers: {'Authorization': 'Bearer $_token'});
+  Map<String, String> get authHeaders => {
+    'Authorization': 'Bearer $_token',
+    'X-Yggvion-Generation': ?_generation,
+  };
+  Options get _auth => Options(headers: authHeaders);
+
+  Future<Map<String, dynamic>> request(
+    String method,
+    String path, {
+    Object? data,
+  }) async {
+    if (!connected || !path.startsWith('/api/v1/')) {
+      throw StateError('Сначала подключите сервер');
+    }
+    final result = await client.request<Map<String, dynamic>>(
+      '$_url$path',
+      data: data,
+      options: _auth.copyWith(method: method),
+    );
+    return result.data ?? {};
+  }
+
+  Future<String> createInvitation() async {
+    final data = await request('POST', '/api/v1/invitations');
+    final payload = {
+      'url': _url,
+      'code': data['code'],
+      'ca': _privateCA,
+      'expires_at': data['expires_at'],
+    };
+    return Uri(
+      scheme: 'yggvion',
+      host: 'connect',
+      fragment: base64Url.encode(utf8.encode(jsonEncode(payload))),
+    ).toString();
+  }
+
+  Future<void> pairInvitation(String link, String name) async {
+    final uri = Uri.parse(link.trim());
+    if (link.length > 16000 ||
+        uri.scheme != 'yggvion' ||
+        uri.host != 'connect' ||
+        uri.fragment.isEmpty) {
+      throw ArgumentError('Неверная ссылка приглашения');
+    }
+    final payload =
+        jsonDecode(utf8.decode(base64Url.decode(uri.fragment)))
+            as Map<String, dynamic>;
+    if (!DateTime.parse(
+      payload['expires_at'] as String,
+    ).isAfter(DateTime.now())) {
+      throw StateError(
+        'Приглашение истекло. Создайте новое на подключённом устройстве.',
+      );
+    }
+    await pair(
+      payload['url'] as String,
+      payload['code'] as String,
+      name,
+      privateCA: payload['ca'] as String?,
+    );
+  }
+
+  Future<void> _checkGeneration() async {
+    Map<String, dynamic> state;
+    try {
+      state = await request('GET', '/api/v1/state');
+    } on DioException catch (e) {
+      if (e.response?.statusCode == 404 && _generation == null) return;
+      rethrow;
+    }
+    final next = state['generation'] as String;
+    if ((_generation != null && _generation != next) ||
+        (_generation == null && state['generation_required'] == true)) {
+      // Stage every page before replacing anything locally. A network failure
+      // keeps the old workspace usable and preserves edits made while fetching.
+      final restored = <String, Entity>{};
+      var cursor = 0;
+      while (true) {
+        final page = await client.get<Map<String, dynamic>>(
+          '$_url/api/v1/changes',
+          queryParameters: {'after': cursor},
+          options: Options(
+            headers: {
+              'Authorization': 'Bearer $_token',
+              'X-Yggvion-Generation': next,
+            },
+          ),
+        );
+        final body = page.data!;
+        for (final raw in body['records'] as List) {
+          final entity = Entity.fromJson(raw as Map<String, dynamic>);
+          restored[entity.id] = entity;
+        }
+        cursor = body['cursor'] as int;
+        if (body['has_more'] != true) break;
+      }
+      await repo.serial(() async {
+        await repo.db.transaction(() async {
+          final records = await repo.db.entities(includeDeleted: true);
+          final outbox = await repo.db
+              .customSelect('SELECT * FROM outbox')
+              .get();
+          final conflicts = await repo.db
+              .customSelect('SELECT * FROM conflicts')
+              .get();
+          final now = DateTime.now().toUtc().toIso8601String();
+          await repo.db.customStatement(
+            'INSERT INTO recovery_snapshots VALUES(?,?,?)',
+            [
+              now,
+              now,
+              jsonEncode({
+                'records': records.map((e) => jsonDecode(e.encoded)).toList(),
+                'outbox': outbox.map((e) => e.data).toList(),
+                'conflicts': conflicts.map((e) => e.data).toList(),
+              }),
+            ],
+          );
+          for (final table in [
+            'outbox',
+            'records',
+            'conflicts',
+            'search_index',
+          ]) {
+            await repo.db.customStatement('DELETE FROM $table');
+          }
+          for (final record in restored.values) {
+            await repo.db.put(record);
+          }
+          // A snapshot taken before the first pairing can be completely empty.
+          var ordinal = int.parse(await repo.db.meta('ordinal') ?? '0');
+          for (final fallback in Repository.workspaceDefaults(
+            repo.snapshot.settings.timezone,
+          )) {
+            final current = restored[fallback.id];
+            if (current == null || current.deleted) {
+              final initial = fallback.withVersion(current?.version ?? 0);
+              await repo.db.put(initial);
+              await repo.db.customStatement(
+                'INSERT INTO outbox(id,operation_id,payload,ordinal) VALUES(?,?,?,?)',
+                [initial.id, repo.newId(), initial.encoded, ++ordinal],
+              );
+            }
+          }
+          await repo.db.setMeta('ordinal', '$ordinal');
+          await repo.db.setMeta('sync_cursor', '$cursor');
+          await repo.db.setMeta('server_generation', next);
+        });
+        await repo.reload();
+      });
+    } else {
+      await repo.db.setMeta('server_generation', next);
+    }
+    _generation = next;
+  }
+
   Future<void> sync() async {
-    if (!connected || _busy || _disposed) return;
+    if (!connected || _busy || _disposed || _pairing) return;
     _busy = true;
     repo.syncStatus = 'Синхронизация';
     repo.syncError = null;
     repo.publish();
     try {
+      await _checkGeneration();
       // Drain in dependency order; do not hold the local write queue over HTTP.
       while (!_disposed) {
         final pending = await repo.serial(
@@ -269,6 +500,7 @@ class SyncService {
         options: Options(
           sendTimeout: const Duration(minutes: 15),
           headers: {
+            ...authHeaders,
             'Authorization': 'Bearer $_token',
             'Content-Type': 'application/octet-stream',
             'Content-Length': await file.length(),

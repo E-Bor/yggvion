@@ -20,7 +20,7 @@ class LocalDatabase extends GeneratedDatabase {
   }
 
   @override
-  int get schemaVersion => 1;
+  int get schemaVersion => 2;
   @override
   Iterable<TableInfo<Table, Object?>> get allTables => const [];
   @override
@@ -35,9 +35,17 @@ class LocalDatabase extends GeneratedDatabase {
         'CREATE TABLE metadata(key TEXT PRIMARY KEY, value TEXT NOT NULL)',
         'CREATE TABLE conflicts(id TEXT PRIMARY KEY, local TEXT NOT NULL, remote TEXT NOT NULL)',
         'CREATE TABLE files(id TEXT PRIMARY KEY, name TEXT NOT NULL, path TEXT NOT NULL, uploaded INTEGER NOT NULL DEFAULT 0)',
+        'CREATE TABLE recovery_snapshots(id TEXT PRIMARY KEY, created TEXT NOT NULL, payload TEXT NOT NULL)',
         "CREATE VIRTUAL TABLE search_index USING fts5(id UNINDEXED, content, tokenize='unicode61')",
       ]) {
         await customStatement(sql);
+      }
+    },
+    onUpgrade: (m, from, to) async {
+      if (from < 2) {
+        await customStatement(
+          'CREATE TABLE recovery_snapshots(id TEXT PRIMARY KEY, created TEXT NOT NULL, payload TEXT NOT NULL)',
+        );
       }
     },
     beforeOpen: (details) async {

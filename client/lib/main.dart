@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:app_links/app_links.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_timezone/flutter_timezone.dart';
 import 'package:intl/date_symbol_data_local.dart';
@@ -8,6 +9,7 @@ import 'data/app_icon.dart';
 import 'data/reminders.dart';
 import 'data/repository.dart';
 import 'data/sync.dart';
+import 'data/ai_service.dart';
 import 'ui/app.dart';
 import 'ui/providers.dart';
 import 'ui/theme.dart';
@@ -25,6 +27,8 @@ Future<void> main() async {
     final reminders = ReminderService(repo);
     await reminders.initialize();
     final appIcons = AppIconService(repo)..start();
+    final ai = AiService(repo);
+    await ai.initialize();
     runApp(
       ProviderScope(
         overrides: [
@@ -32,6 +36,8 @@ Future<void> main() async {
           syncProvider.overrideWithValue(sync),
           remindersProvider.overrideWithValue(reminders),
           appIconProvider.overrideWith((ref) => appIcons),
+          aiProvider.overrideWith((ref) => ai),
+          invitationLinksProvider.overrideWithValue(AppLinks().uriLinkStream),
         ],
         child: const YggvionApp(),
       ),

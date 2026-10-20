@@ -21,6 +21,8 @@ import 'task_card.dart';
 import 'task_editor.dart';
 import 'theme.dart';
 import 'app_logo.dart';
+import 'ai_settings.dart';
+import 'server_settings.dart';
 
 class YggvionApp extends ConsumerWidget {
   const YggvionApp({super.key});
@@ -58,6 +60,7 @@ class _WorkspaceState extends ConsumerState<Workspace>
   Future<void>? noteCleanup;
   DateTime? calendarDate, homeDate;
   Timer? ticker;
+  StreamSubscription<Uri>? invitationLinks;
   bool mobileTasks = true;
   bool birthdaysOpen = false;
   double? sidebarWidth, sidebarDragOrigin, sidebarDragWidth;
@@ -101,6 +104,29 @@ class _WorkspaceState extends ConsumerState<Workspace>
       if (pending != null) _openReminder(pending);
       refresh();
       unawaited(guard(context, reminders.requestPermissionOnce));
+      invitationLinks = ref
+          .read(invitationLinksProvider)
+          ?.listen(
+            (uri) {
+              if (mounted && uri.scheme == 'yggvion' && uri.host == 'connect') {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute<void>(
+                    builder: (_) =>
+                        SynchronizationPage(invitation: uri.toString()),
+                  ),
+                );
+              }
+            },
+            onError: (Object error) {
+              if (mounted && error is! MissingPluginException) {
+                setState(
+                  () => runtimeError =
+                      'Не удалось открыть приглашение. Вставьте ссылку в разделе «Синхронизация».',
+                );
+              }
+            },
+          );
     });
   }
 
@@ -142,6 +168,7 @@ class _WorkspaceState extends ConsumerState<Workspace>
   @override
   void dispose() {
     ticker?.cancel();
+    invitationLinks?.cancel();
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
@@ -383,50 +410,60 @@ class _WorkspaceState extends ConsumerState<Workspace>
                 ),
           floatingActionButton: desktop || page == PageKind.settings
               ? null
-              : PopupMenuButton<String>(
-                  tooltip: 'Создать',
-                  onSelected: (v) => guard(context, () async {
-                    if (v == 'task') {
-                      await openTask(context);
-                    } else {
-                      await createNote();
-                    }
-                  }),
-                  itemBuilder: (_) => [
-                    const PopupMenuItem(
-                      value: 'note',
-                      child: ListTile(
-                        leading: Icon(Icons.note_add_outlined),
-                        title: Text('Заметка'),
-                      ),
-                    ),
-                    const PopupMenuItem(
-                      value: 'task',
-                      child: ListTile(
-                        leading: Icon(Icons.add_task_rounded),
-                        title: Text('Незапланированная задача'),
+              : Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const AssistantButton(),
+                    if (ref.watch(
+                      aiProvider.select((ai) => ai?.enabled ?? false),
+                    ))
+                      const SizedBox(width: 12),
+                    PopupMenuButton<String>(
+                      tooltip: 'Создать',
+                      onSelected: (v) => guard(context, () async {
+                        if (v == 'task') {
+                          await openTask(context);
+                        } else {
+                          await createNote();
+                        }
+                      }),
+                      itemBuilder: (_) => [
+                        const PopupMenuItem(
+                          value: 'note',
+                          child: ListTile(
+                            leading: Icon(Icons.note_add_outlined),
+                            title: Text('Заметка'),
+                          ),
+                        ),
+                        const PopupMenuItem(
+                          value: 'task',
+                          child: ListTile(
+                            leading: Icon(Icons.add_task_rounded),
+                            title: Text('Незапланированная задача'),
+                          ),
+                        ),
+                      ],
+                      child: Container(
+                        width: 54,
+                        height: 54,
+                        decoration: BoxDecoration(
+                          color: context.accentColor,
+                          borderRadius: BorderRadius.circular(18),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withValues(alpha: .25),
+                              blurRadius: 20,
+                              offset: const Offset(0, 6),
+                            ),
+                          ],
+                        ),
+                        child: const Icon(
+                          Icons.add_rounded,
+                          color: Palette.background,
+                        ),
                       ),
                     ),
                   ],
-                  child: Container(
-                    width: 54,
-                    height: 54,
-                    decoration: BoxDecoration(
-                      color: context.accentColor,
-                      borderRadius: BorderRadius.circular(18),
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.black.withValues(alpha: .25),
-                          blurRadius: 20,
-                          offset: const Offset(0, 6),
-                        ),
-                      ],
-                    ),
-                    child: const Icon(
-                      Icons.add_rounded,
-                      color: Palette.background,
-                    ),
-                  ),
                 ),
         ),
       ),
@@ -567,6 +604,7 @@ class _WorkspaceState extends ConsumerState<Workspace>
                     onPressed: () => openTask(context),
                     icon: const Icon(Icons.add_rounded, size: 20),
                   ),
+                const AssistantButton(),
               ],
             ];
       return Container(

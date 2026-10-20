@@ -15,3 +15,6 @@ server/yggvion
 *.p12
 *.pem
 *.key
+/client/assets/server/yggvion-linux-*
+/client/assets/server/manifest.json
+/client/assets/server/install.sh

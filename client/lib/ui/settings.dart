@@ -10,6 +10,8 @@ import 'providers.dart';
 import 'task_editor.dart';
 import 'theme.dart';
 import 'birthdays.dart';
+import 'server_settings.dart';
+import 'ai_settings.dart';
 
 class SettingsPage extends ConsumerStatefulWidget {
   const SettingsPage({super.key, required this.onOpenBirthdays});
@@ -19,7 +21,7 @@ class SettingsPage extends ConsumerStatefulWidget {
 }
 
 class _SettingsPageState extends ConsumerState<SettingsPage> {
-  late final TextEditingController minutes, url, name, key;
+  late final TextEditingController minutes;
   late String zone;
   late List<int> reminders;
   int? pendingAccentColor;
@@ -27,7 +29,6 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
   String? minutesError, saveError;
   int saveVersion = 0;
   bool savingSettings = false;
-  bool connecting = false;
   @override
   void initState() {
     super.initState();
@@ -35,9 +36,6 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
     minutes = TextEditingController(
       text: '${repo.snapshot.settings.defaultMinutes}',
     );
-    url = TextEditingController(text: ref.read(syncProvider).url ?? '');
-    name = TextEditingController(text: repo.deviceName);
-    key = TextEditingController();
     zone = repo.snapshot.settings.timezone;
     reminders = [...repo.snapshot.settings.reminders];
     defaultMinutes = repo.snapshot.settings.defaultMinutes;
@@ -83,7 +81,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
 
   @override
   void dispose() {
-    for (final c in [minutes, url, name, key]) {
+    for (final c in [minutes]) {
       c.dispose();
     }
     super.dispose();
@@ -277,7 +275,6 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
   @override
   Widget build(BuildContext context) {
     final repo = ref.watch(appProvider),
-        sync = ref.read(syncProvider),
         notifications = ref.read(remindersProvider);
     return ListView(
       padding: const EdgeInsets.all(24),
@@ -543,126 +540,43 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                   ),
                 ),
                 section(
-                  'Синхронизация с VPS',
+                  'Подключение и помощник',
                   Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      Text(
-                        repo.syncStatus,
-                        style: TextStyle(color: context.accentColor),
-                      ),
-                      if (repo.syncError != null)
-                        Padding(
-                          padding: const EdgeInsets.only(top: 8),
-                          child: Text(
-                            repo.syncError!,
-                            style: const TextStyle(color: Palette.muted),
+                      ListTile(
+                        leading: const Icon(Icons.sync_rounded),
+                        title: const Text('Синхронизация'),
+                        subtitle: Text(repo.syncStatus),
+                        trailing: const Icon(Icons.chevron_right_rounded),
+                        onTap: () => Navigator.push(
+                          context,
+                          MaterialPageRoute<void>(
+                            builder: (_) => const SynchronizationPage(),
                           ),
                         ),
-                      const SizedBox(height: 18),
-                      TextField(
-                        controller: url,
-                        keyboardType: TextInputType.url,
-                        decoration: const InputDecoration(
-                          labelText: 'Адрес сервера',
-                          hintText: 'https://planner.example.com',
-                        ),
                       ),
-                      const SizedBox(height: 12),
-                      TextField(
-                        controller: name,
-                        decoration: const InputDecoration(
-                          labelText: 'Название устройства',
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                      TextField(
-                        controller: key,
-                        obscureText: true,
-                        enableSuggestions: false,
-                        autocorrect: false,
-                        decoration: const InputDecoration(
-                          labelText: 'Ключ подключения',
-                        ),
-                      ),
-                      const SizedBox(height: 18),
-                      Wrap(
-                        spacing: 12,
-                        runSpacing: 8,
-                        children: [
-                          FilledButton(
-                            onPressed: connecting
-                                ? null
-                                : () => guard(context, () async {
-                                    setState(() => connecting = true);
-                                    try {
-                                      await sync.pair(
-                                        url.text,
-                                        key.text,
-                                        name.text,
-                                      );
-                                      key.clear();
-                                    } finally {
-                                      if (mounted) {
-                                        setState(() => connecting = false);
-                                      }
-                                    }
-                                  }),
-                            child: Text(
-                              connecting
-                                  ? 'Подключение…'
-                                  : 'Подключить устройство',
-                            ),
+                      ListTile(
+                        leading: const Icon(Icons.backup_outlined),
+                        title: const Text('Резервное копирование'),
+                        trailing: const Icon(Icons.chevron_right_rounded),
+                        onTap: () => Navigator.push(
+                          context,
+                          MaterialPageRoute<void>(
+                            builder: (_) => const BackupsPage(),
                           ),
-                          OutlinedButton(
-                            onPressed: sync.connected
-                                ? () => guard(context, sync.sync)
-                                : null,
-                            child: const Text('Синхронизировать'),
-                          ),
-                        ],
-                      ),
-                      if (sync.connected) ...[
-                        const SizedBox(height: 18),
-                        FutureBuilder<List<Map<String, dynamic>>>(
-                          future: sync.devices(),
-                          builder: (context, snapshot) {
-                            if (snapshot.hasError) {
-                              return const Text(
-                                'Не удалось получить список устройств',
-                              );
-                            }
-                            return Column(
-                              children: [
-                                for (final d in snapshot.data ?? [])
-                                  ListTile(
-                                    contentPadding: EdgeInsets.zero,
-                                    leading: const Icon(
-                                      Icons.devices_rounded,
-                                      size: 20,
-                                    ),
-                                    title: Text(d['name'] as String),
-                                    subtitle: d['id'] == repo.deviceId
-                                        ? const Text('Это устройство')
-                                        : null,
-                                    trailing: d['id'] != repo.deviceId
-                                        ? TextButton(
-                                            onPressed: () =>
-                                                guard(context, () async {
-                                                  await sync.revoke(
-                                                    d['id'] as String,
-                                                  );
-                                                  if (mounted) setState(() {});
-                                                }),
-                                            child: const Text('Отозвать'),
-                                          )
-                                        : null,
-                                  ),
-                              ],
-                            );
-                          },
                         ),
-                      ],
+                      ),
+                      ListTile(
+                        leading: const Icon(Icons.auto_awesome_outlined),
+                        title: const Text('Локальный AI'),
+                        trailing: const Icon(Icons.chevron_right_rounded),
+                        onTap: () => Navigator.push(
+                          context,
+                          MaterialPageRoute<void>(
+                            builder: (_) => const AiSettingsPage(),
+                          ),
+                        ),
+                      ),
                     ],
                   ),
                 ),

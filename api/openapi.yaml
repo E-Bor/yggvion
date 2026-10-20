@@ -1,20 +1,207 @@
 openapi: 3.1.0
 info:
   title: Yggvion personal sync API
-  version: 1.0.0
+  version: 1.1.0
   description: >-
     One owner, device tokens, optimistic record versions. UTC RFC3339 timestamps;
     IANA timezone retained on blocks/series. Mutations in a batch are atomic.
     Version conflicts are returned per record without overwriting either side.
+    Protocol 2 clients read /state before pushing and send X-Yggvion-Generation
+    on sync, changes and attachment requests. Missing generations are accepted
+    until the first restore; stale or subsequently missing generations return
+    409 generation_changed. Clients quarantine local records/outbox/conflicts,
+    reset the cursor and fetch the restored dataset before sending new writes.
 servers:
   - url: https://planner.example.com/api/v1
 security:
   - deviceToken: []
 paths:
+  /state:
+    get:
+      summary: Server generation and supported administrative capabilities
+      responses:
+        '200':
+          description: Read before each sync cycle
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [generation, generation_required, protocol, private_ca, backups]
+                properties:
+                  generation: {type: string}
+                  generation_required: {type: boolean}
+                  protocol: {type: integer, const: 2}
+                  private_ca: {type: string, description: 'Public PEM CA, empty for public HTTPS'}
+                  backups: {type: boolean}
+        '401': {$ref: '#/components/responses/Error'}
+  /invitations:
+    post:
+      summary: Create a single-use invitation valid for ten minutes
+      description: Revoking the issuing device invalidates its unused invitations. Maximum 32 live invitations.
+      responses:
+        '201':
+          description: Transfer code and CA only via a trusted QR/link channel
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  code: {type: string}
+                  expires_at: {type: string, format: date-time}
+                  private_ca: {type: string}
+        '401': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+  /backups:
+    get:
+      summary: List encrypted local backups, schedule and current background job
+      responses:
+        '200':
+          description: Secrets are omitted from remote configuration
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  backups: {type: array, items: {$ref: '#/components/schemas/Backup'}}
+                  config: {$ref: '#/components/schemas/BackupConfig'}
+                  remote: {$ref: '#/components/schemas/BackupRemote'}
+                  status:
+                    type: object
+                    properties:
+                      running: {type: boolean}
+                      operation: {type: string}
+                      error: {type: string}
+                      finished: {type: [string, 'null'], format: date-time}
+        '401': {$ref: '#/components/responses/Error'}
+    post:
+      summary: Start an encrypted user-data and attachments snapshot; replicate if configured
+      responses:
+        '202': {description: Job accepted; poll GET /backups for completion}
+        '409': {$ref: '#/components/responses/Error'}
+  /backups/config:
+    put:
+      summary: Set backup frequency and local retention
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/BackupConfig'}
+      responses:
+        '200': {description: Configuration saved}
+        '400': {$ref: '#/components/responses/Error'}
+  /backups/recovery-key:
+    get:
+      summary: Explicit authenticated export of the private age recovery key
+      responses:
+        '200':
+          description: Store outside this VPS; never include in a backup archive or log
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  key: {type: string}
+        '401': {$ref: '#/components/responses/Error'}
+  /backups/{id}/download:
+    parameters:
+      - {$ref: '#/components/parameters/BackupID'}
+    get:
+      summary: Stream encrypted archive, independent of the attachment size limit
+      responses:
+        '200':
+          description: Portable age-encrypted .yggbackup file
+          content:
+            application/octet-stream: {schema: {type: string, format: binary}}
+        '404': {$ref: '#/components/responses/Error'}
+  /backups/{id}:
+    parameters:
+      - {$ref: '#/components/parameters/BackupID'}
+    delete:
+      summary: Delete one local backup; external copies remain
+      responses:
+        '202': {description: Deletion job accepted}
+        '409': {$ref: '#/components/responses/Error'}
+  /backups/{id}/restore:
+    parameters:
+      - {$ref: '#/components/parameters/BackupID'}
+    post:
+      summary: Validate, create safety backup, atomically replace user records and rotate generation
+      description: Authentication, revoked devices and TLS identity survive. Running sessions close at backup creation time.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [confirm]
+              properties:
+                confirm: {type: string, const: restore}
+      responses:
+        '202': {description: Restore job accepted}
+        '400': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+  /backups/import:
+    post:
+      summary: Stream, validate and re-encrypt an archive under this server's recovery key
+      description: Maximum 100 GiB encrypted body. Imported copies do not replace current data until explicitly restored.
+      parameters:
+        - in: header
+          name: X-Yggvion-Recovery-Key
+          required: true
+          schema: {type: string, writeOnly: true}
+      requestBody:
+        required: true
+        content:
+          application/octet-stream: {schema: {type: string, format: binary}}
+      responses:
+        '202': {description: Validation/import job accepted after upload}
+        '413': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+  /backups/remote:
+    get:
+      summary: List encrypted copies in the configured S3/SFTP destination
+      responses:
+        '200':
+          description: External copies
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  backups: {type: array, items: {$ref: '#/components/schemas/Backup'}}
+        '502': {$ref: '#/components/responses/Error'}
+    put:
+      summary: Validate remote credentials and enable automatic encrypted replication
+      description: Empty secrets preserve existing credentials only for an unchanged destination/user. HTTPS is required for S3; SFTP requires the exact SHA256 SSH fingerprint.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/BackupRemote'}
+      responses:
+        '200': {description: Destination checked and stored with mode 0600}
+        '400': {$ref: '#/components/responses/Error'}
+  /backups/remote/{id}/fetch:
+    parameters:
+      - {$ref: '#/components/parameters/BackupID'}
+    post:
+      summary: Retrieve, validate and import an external archive
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                key: {type: string, writeOnly: true, description: Empty uses current server key}
+      responses:
+        '202': {description: Fetch job accepted}
+        '409': {$ref: '#/components/responses/Error'}
   /pair:
     post:
       security: []
-      summary: Issue a revocable token for a device
+      summary: Exchange a single-use invitation or legacy pairing key for a device token
       requestBody:
         required: true
         content:
@@ -38,7 +225,10 @@ paths:
                   device_id: {type: string}
                   token: {type: string}
         '401': {$ref: '#/components/responses/Error'}
+        '429': {$ref: '#/components/responses/Error'}
   /sync:
+    parameters:
+      - {$ref: '#/components/parameters/Generation'}
     post:
       summary: Apply 1–100 ordered mutations with idempotent operation IDs
       requestBody:
@@ -79,8 +269,11 @@ paths:
                         record: {$ref: '#/components/schemas/Record'}
         '400': {$ref: '#/components/responses/Error'}
         '401': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
         '500': {$ref: '#/components/responses/Error'}
   /changes:
+    parameters:
+      - {$ref: '#/components/parameters/Generation'}
     get:
       summary: Read up to 500 ordered changes including tombstones
       parameters:
@@ -100,6 +293,7 @@ paths:
                   cursor: {type: integer, format: int64}
                   has_more: {type: boolean}
         '401': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
   /events:
     get:
       summary: SSE sync hints; clients must retrieve durable changes using their cursor
@@ -140,6 +334,7 @@ paths:
         '401': {$ref: '#/components/responses/Error'}
   /attachments/{id}:
     parameters:
+      - {$ref: '#/components/parameters/Generation'}
       - in: path
         name: id
         required: true
@@ -165,6 +360,17 @@ paths:
         '401': {$ref: '#/components/responses/Error'}
         '404': {$ref: '#/components/responses/Error'}
 components:
+  parameters:
+    BackupID:
+      in: path
+      name: id
+      required: true
+      schema: {type: string, pattern: '^[a-f0-9]{32}$'}
+    Generation:
+      in: header
+      name: X-Yggvion-Generation
+      schema: {type: string}
+      description: Required after any restore; mismatches return 409 generation_changed
   securitySchemes:
     deviceToken: {type: http, scheme: bearer}
   responses:
@@ -178,6 +384,38 @@ components:
             properties:
               error: {type: string}
   schemas:
+    Backup:
+      type: object
+      required: [id, created, bytes, records, files, reason]
+      properties:
+        id: {type: string, pattern: '^[a-f0-9]{32}$'}
+        created: {type: string, format: date-time}
+        bytes: {type: integer, minimum: 0}
+        records: {type: integer, minimum: 0}
+        files: {type: integer, minimum: 0}
+        reason: {type: string, enum: [manual, scheduled, before_restore, before_update, import]}
+    BackupConfig:
+      type: object
+      additionalProperties: false
+      required: [every_hours, keep_daily, keep_weekly]
+      properties:
+        every_hours: {type: integer, enum: [0, 6, 12, 24, 168], default: 24}
+        keep_daily: {type: integer, minimum: 1, maximum: 90, default: 7}
+        keep_weekly: {type: integer, minimum: 0, maximum: 52, default: 4}
+    BackupRemote:
+      type: object
+      additionalProperties: false
+      required: [kind]
+      properties:
+        kind: {type: string, enum: [disabled, s3, sftp]}
+        endpoint: {type: string, description: 'HTTPS origin for S3 or host:port for SFTP'}
+        bucket: {type: string}
+        region: {type: string}
+        prefix: {type: string, description: S3 prefix or absolute SFTP directory without dot segments}
+        username: {type: string, description: S3 access key or SSH username}
+        secret: {type: string, writeOnly: true}
+        private_key: {type: string, writeOnly: true}
+        fingerprint: {type: string, description: Exact OpenSSH SHA256 fingerprint for SFTP}
     Record:
       type: object
       required: [id, kind, version, deleted, data, seq]
@@ -240,7 +478,7 @@ components:
       required: [title, content, pinned]
       properties:
         title: {type: string, minLength: 1}
-        content: {type: string, description: Markdown, attachments use attachment:SHA256 URLs}
+        content: {type: string, description: 'Markdown, attachments use attachment:SHA256 URLs'}
         pinned: {type: string, enum: ['', scratchpad, reference]}
     Project:
       type: object
@@ -255,12 +493,12 @@ components:
         default_minutes: {type: integer, minimum: 5, maximum: 1440}
         reminders: {type: array, maxItems: 12, items: {type: integer, minimum: 0, maximum: 525600}}
         timezone: {type: string}
-        task_color: {type: integer, nullable: true, minimum: 4278190080, maximum: 4294967295, default: 4288461311, description: Unified opaque ARGB application accent for controls, highlights, accent text and tasks without a project. The legacy JSON name is retained for compatibility. Omitted or null uses the default blue. Projects keep their own colors.}
+        task_color: {type: integer, nullable: true, minimum: 4278190080, maximum: 4294967295, default: 4288461311, description: 'Unified opaque ARGB application accent for controls, highlights, accent text and tasks without a project. The legacy JSON name is retained for compatibility. Omitted or null uses the default blue. Projects keep their own colors.'}
     Series:
       type: object
       required: [title, description, project_id, start, minutes, timezone, rule, reminders, all_day, exceptions]
       properties:
-        birthday_date: {type: string, format: date, description: Optional birth date; title is the person's name. Annual birthday tasks use deterministic IDs by series and year, compute age, and fall back to February 28 for leap-day birthdays in common years. Changing birth date preserves yearly completion.}
+        birthday_date: {type: string, format: date, description: 'Optional birth date; title is the person''s name. Annual birthday tasks use deterministic IDs by series and year, compute age, and fall back to February 28 for leap-day birthdays in common years. Changing birth date preserves yearly completion.'}
         title: {type: string}
         description: {type: string}
         project_id: {type: string}

@@ -19,33 +19,43 @@ import (
 	"sync"
 	"time"
 
+	"yggvion/server/internal/backup"
 	"yggvion/server/internal/domain"
 	"yggvion/server/internal/store"
 )
 
 type API struct {
-	Store       *store.Store
-	PairingKey  string
-	Files       string
-	mu          sync.Mutex
-	subscribers map[chan struct{}]struct{}
+	Store        *store.Store
+	PairingKey   string
+	Files        string
+	DataMu       sync.RWMutex
+	Backups      *backup.Manager
+	Lifetime     context.Context
+	CAPEM        string
+	pairWindow   time.Time
+	pairAttempts int
+	mu           sync.Mutex
+	subscribers  map[chan struct{}]struct{}
 }
 type deviceKey struct{}
 
 func New(s *store.Store, key, files string) *API {
-	return &API{Store: s, PairingKey: key, Files: files, subscribers: make(map[chan struct{}]struct{})}
+	return &API{Store: s, PairingKey: key, Files: files, Lifetime: context.Background(), subscribers: make(map[chan struct{}]struct{})}
 }
 func (a *API) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) { write(w, 200, map[string]string{"status": "ok"}) })
 	mux.HandleFunc("POST /api/v1/pair", a.pair)
-	mux.Handle("POST /api/v1/sync", a.auth(http.HandlerFunc(a.push)))
-	mux.Handle("GET /api/v1/changes", a.auth(http.HandlerFunc(a.changes)))
+	mux.Handle("POST /api/v1/sync", a.auth(a.current(http.HandlerFunc(a.push))))
+	mux.Handle("GET /api/v1/changes", a.auth(a.current(http.HandlerFunc(a.changes))))
 	mux.Handle("GET /api/v1/events", a.auth(http.HandlerFunc(a.events)))
 	mux.Handle("GET /api/v1/devices", a.auth(http.HandlerFunc(a.devices)))
 	mux.Handle("DELETE /api/v1/devices/{id}", a.auth(http.HandlerFunc(a.revoke)))
-	mux.Handle("PUT /api/v1/attachments/{id}", a.auth(http.HandlerFunc(a.upload)))
-	mux.Handle("GET /api/v1/attachments/{id}", a.auth(http.HandlerFunc(a.download)))
+	mux.Handle("PUT /api/v1/attachments/{id}", a.auth(a.current(http.HandlerFunc(a.upload))))
+	mux.Handle("GET /api/v1/attachments/{id}", a.auth(a.current(http.HandlerFunc(a.download))))
+	mux.Handle("GET /api/v1/state", a.auth(http.HandlerFunc(a.state)))
+	mux.Handle("POST /api/v1/invitations", a.auth(http.HandlerFunc(a.invite)))
+	a.backupRoutes(mux)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("Cache-Control", "no-store")
@@ -90,6 +100,19 @@ func (a *API) auth(next http.Handler) http.Handler {
 	})
 }
 func (a *API) pair(w http.ResponseWriter, r *http.Request) {
+	a.mu.Lock()
+	if time.Since(a.pairWindow) > time.Minute {
+		a.pairWindow = time.Now()
+		a.pairAttempts = 0
+	}
+	a.pairAttempts++
+	allowed := a.pairAttempts <= 30
+	a.mu.Unlock()
+	if !allowed {
+		w.Header().Set("Retry-After", "60")
+		fail(w, 429, "rate_limited")
+		return
+	}
 	var input struct {
 		Name string `json:"name"`
 		Key  string `json:"key"`
@@ -98,16 +121,19 @@ func (a *API) pair(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, "invalid_json")
 		return
 	}
-	got, want := sha256.Sum256([]byte(input.Key)), sha256.Sum256([]byte(a.PairingKey))
-	if len(a.PairingKey) < 32 || subtle.ConstantTimeCompare(got[:], want[:]) != 1 {
-		fail(w, 401, "invalid_pairing_key")
-		return
-	}
 	if strings.TrimSpace(input.Name) == "" || len(input.Name) > 100 {
 		fail(w, 400, "invalid_device_name")
 		return
 	}
-	id, token, e := a.Store.Pair(r.Context(), input.Name)
+	id, token, e := a.Store.PairInvitation(r.Context(), input.Key, input.Name)
+	if errors.Is(e, sql.ErrNoRows) {
+		got, want := sha256.Sum256([]byte(input.Key)), sha256.Sum256([]byte(a.PairingKey))
+		if len(a.PairingKey) < 32 || subtle.ConstantTimeCompare(got[:], want[:]) != 1 {
+			fail(w, 401, "invalid_pairing_key")
+			return
+		}
+		id, token, e = a.Store.Pair(r.Context(), input.Name)
+	}
 	if e != nil {
 		fail(w, 500, "storage_error")
 		return
@@ -206,6 +232,9 @@ func (a *API) events(w http.ResponseWriter, r *http.Request) {
 		case <-r.Context().Done():
 			return
 		case <-ticker.C:
+			if _, err := a.Store.Authorize(r.Context(), strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")); err != nil {
+				return
+			}
 		case <-c:
 		}
 	}

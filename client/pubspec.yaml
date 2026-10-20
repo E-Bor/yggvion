@@ -31,6 +31,14 @@ dependencies:
   intl: ^0.20.2
   collection: ^1.19.1
   super_clipboard: ^0.9.1
+  dartssh2: 4.1.0
+  qr_flutter: 4.1.0
+  app_links: 6.4.1
+  mobile_scanner: 7.2.0
+  llamadart: 0.15.3
+  whisper_ggml: 2.8.1
+  record: 6.2.0
+  share_plus: 12.0.1
 
 dev_dependencies:
   flutter_test:
@@ -44,7 +52,7 @@ msix_config:
   identity_name: dev.yggvion.yggvion
   publisher: CN=Yggvion
   msix_version: 0.1.0.0
-  capabilities: internetClient
+  capabilities: internetClient, microphone, webcam
   install_certificate: false
   sign_msix: false
   logo_path: assets/branding/app-icon.png
@@ -58,7 +66,13 @@ flutter:
   assets:
     - assets/branding/logo-mask.png
     - assets/branding/logo-mask-small.png
+    - assets/server/
   fonts:
     - family: Inter
       fonts:
         - asset: assets/fonts/Inter.ttf
+
+hooks:
+  user_defines:
+    llamadart:
+      llamadart_native_runtimes: [llama_cpp]

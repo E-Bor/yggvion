@@ -10,6 +10,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 )
 
 // Generate large request bodies without allocating an entire attachment in memory.
@@ -38,6 +39,10 @@ func TestAttachmentSizeLimit(t *testing.T) {
 			server := httptest.NewServer(New(s, strings.Repeat("test", 8), files).Handler())
 			defer server.Close()
 			client := server.Client()
+			transport := client.Transport.(*http.Transport).Clone()
+			transport.ExpectContinueTimeout = time.Second
+			client.Transport = transport
+			defer transport.CloseIdleConnections()
 			id := strings.Repeat("0", 64)
 			if tc.status == http.StatusCreated {
 				hash := sha256.New()

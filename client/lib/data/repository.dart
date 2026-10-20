@@ -63,30 +63,26 @@ class Repository extends ChangeNotifier {
     lastCalendarTaskId = await db.meta('last_calendar_task');
     await reload();
     final initial = <Entity>[];
-    if (await db.entity('scratchpad') == null) {
-      initial.add(
-        Note.create('scratchpad', 'Быстрая заметка', pinned: 'scratchpad'),
-      );
-    }
-    if (await db.entity('reference') == null) {
-      initial.add(Note.create('reference', 'Под рукой', pinned: 'reference'));
-    }
-    if (await db.entity('settings') == null) {
-      initial.add(
-        Entity(
-          id: 'settings',
-          kind: 'settings',
-          data: {
-            'default_minutes': 30,
-            'reminders': [0],
-            'timezone': timezone,
-          },
-        ),
-      );
+    for (final record in workspaceDefaults(timezone)) {
+      if (await db.entity(record.id) == null) initial.add(record);
     }
     if (initial.isNotEmpty) await commit(initial);
     await rollover();
   }
+
+  static List<Entity> workspaceDefaults(String timezone) => [
+    Note.create('scratchpad', 'Быстрая заметка', pinned: 'scratchpad'),
+    Note.create('reference', 'Под рукой', pinned: 'reference'),
+    Entity(
+      id: 'settings',
+      kind: 'settings',
+      data: {
+        'default_minutes': 30,
+        'reminders': [0],
+        'timezone': timezone,
+      },
+    ),
+  ];
 
   Future<void> reload() async {
     snapshot = Snapshot(await db.entities());
@@ -96,6 +92,32 @@ class Repository extends ChangeNotifier {
                 .getSingle())
             .read<int>('n');
     notifyListeners();
+  }
+
+  Future<List<({String id, String created})>> localRecoverySnapshots() async {
+    final rows = await db
+        .customSelect(
+          'SELECT id,created FROM recovery_snapshots ORDER BY created DESC',
+        )
+        .get();
+    return rows
+        .map(
+          (row) => (
+            id: row.read<String>('id'),
+            created: row.read<String>('created'),
+          ),
+        )
+        .toList();
+  }
+
+  Future<String> localRecoveryPayload(String id) async {
+    final row = await db
+        .customSelect(
+          'SELECT payload FROM recovery_snapshots WHERE id=?',
+          variables: [Variable(id)],
+        )
+        .getSingle();
+    return row.read<String>('payload');
   }
 
   Future<void> commit(List<Entity> changes) =>

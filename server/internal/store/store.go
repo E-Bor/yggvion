@@ -43,6 +43,14 @@ func Open(path string) (*Store, error) {
 		return nil, err
 	}
 	db.SetMaxOpenConns(1)
+	var schemaVersion int
+	if err = db.QueryRow("PRAGMA user_version").Scan(&schemaVersion); err != nil || schemaVersion > 2 {
+		db.Close()
+		if err != nil {
+			return nil, err
+		}
+		return nil, fmt.Errorf("unsupported database version %d", schemaVersion)
+	}
 	for _, query := range []string{"PRAGMA journal_mode=WAL", "PRAGMA busy_timeout=5000", "PRAGMA foreign_keys=ON", schema} {
 		if _, err = db.Exec(query); err != nil {
 			db.Close()
@@ -55,7 +63,12 @@ func Open(path string) (*Store, error) {
 			return nil, err
 		}
 	}
-	return &Store{DB: db}, nil
+	s := &Store{DB: db}
+	if _, err = db.Exec("INSERT OR IGNORE INTO server_meta(key,value) VALUES('generation',?)", RandomSecret()); err != nil {
+		db.Close()
+		return nil, err
+	}
+	return s, nil
 }
 
 func hash(value string) string { h := sha256.Sum256([]byte(value)); return hex.EncodeToString(h[:]) }

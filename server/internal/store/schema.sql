@@ -14,4 +14,8 @@ CREATE TABLE IF NOT EXISTS devices (
 CREATE TABLE IF NOT EXISTS attachments (
  id TEXT PRIMARY KEY, name TEXT NOT NULL, size INTEGER NOT NULL, media_type TEXT NOT NULL
 );
-PRAGMA user_version = 1;
+CREATE TABLE IF NOT EXISTS server_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS invitations (
+ token_hash TEXT PRIMARY KEY, expires INTEGER NOT NULL, issuer TEXT NOT NULL
+);
+PRAGMA user_version = 2;
