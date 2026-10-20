@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:intl/intl.dart';
 import 'package:timezone/timezone.dart' as tz;
+import 'ai_time.dart';
 import 'models.dart';
 
 class AiDraft {
@@ -10,6 +11,32 @@ class AiDraft {
   final String summary;
   final List<({String taskId, DateTime start, DateTime end})> blocks;
   bool get writes => ['task', 'note', 'plan'].contains(action);
+  Map<String, dynamic> toJson() => {
+    'action': action,
+    'data': data,
+    'summary': summary,
+    'blocks': [
+      for (final b in blocks)
+        {
+          'task_id': b.taskId,
+          'start': b.start.toUtc().toIso8601String(),
+          'end': b.end.toUtc().toIso8601String(),
+        },
+    ],
+  };
+  factory AiDraft.fromJson(Map<String, dynamic> json) => AiDraft(
+    json['action'] as String,
+    Map<String, dynamic>.from(json['data'] as Map),
+    json['summary'] as String,
+    blocks: [
+      for (final b in json['blocks'] as List)
+        (
+          taskId: b['task_id'] as String,
+          start: DateTime.parse(b['start'] as String),
+          end: DateTime.parse(b['end'] as String),
+        ),
+    ],
+  );
 }
 
 // The model proposes a small typed command. Dates, permissions, free slots and
@@ -43,6 +70,49 @@ class AiActions {
     },
     'required': ['action'],
   };
+  // When the command already supplies its schedule, the model only extracts
+  // event content. It cannot replace known time/default duration with a question.
+  static Map<String, dynamic> taskSchema([
+    Iterable<String> projectIds = const [],
+  ]) => {
+    'type': 'object',
+    'additionalProperties': false,
+    'properties': {
+      'action': {
+        'type': 'string',
+        'enum': ['task'],
+      },
+      'title': {'type': 'string'},
+      'description': {'type': 'string'},
+      'project_id': {
+        'type': 'string',
+        'enum': ['', ...projectIds],
+      },
+      'minutes': {'type': 'integer'},
+    },
+    'required': ['action', 'title'],
+  };
+
+  static bool requestsFreeTime(String input) => RegExp(
+    r'свободн(?:ое|ый|ую|ом|ого)\s+(?:врем|окн|слот|промежут)|'
+    r'свободн(?:ое|ый|ую)\s+(?:окно|интервал)|когда\s+(?:будет\s+)?свободно',
+    caseSensitive: false,
+  ).hasMatch(input);
+
+  static bool requestsNewTask(String input) {
+    final text = input.toLowerCase().trim();
+    if (RegExp(
+      r'заметк|статистик|распредели|перенеси|измени|удали|'
+      r'(?:все|эти|мои|существующие)\s+задач',
+    ).hasMatch(text)) {
+      return false;
+    }
+    return RegExp(
+      r'^(?:пожалуйста[,\s]+)?(?:запиши(?:те)?|запланируй(?:те)?|'
+      r'создай(?:те)?|добавь(?:те)?|поставь(?:те)?|назначь(?:те)?)\s',
+    ).hasMatch(text);
+  }
+
   static DateTime date(String value, tz.Location zone) {
     if (!RegExp(r'^\d{4}-\d{2}-\d{2}$').hasMatch(value)) {
       throw const FormatException('Уточните дату');
@@ -54,10 +124,11 @@ class AiActions {
   }
 
   static int clock(String value) {
-    if (!RegExp(r'^(?:[01]\d|2[0-3]):[0-5]\d$').hasMatch(value)) {
+    final normalized = AiTimeInput.normalizeClock(value);
+    if (normalized == null) {
       throw const FormatException('Уточните время в формате ЧЧ:ММ');
     }
-    final parts = value.split(':').map(int.parse).toList();
+    final parts = normalized.split(':').map(int.parse).toList();
     return parts[0] * 60 + parts[1];
   }
 
@@ -81,11 +152,16 @@ class AiActions {
     Snapshot snapshot,
     DateTime now, {
     String? request,
+    DateTime? referenceTime,
   }) {
     if (json.length > 32000) {
       throw const FormatException('Ответ модели слишком длинный');
     }
-    final d = jsonDecode(json) as Map<String, dynamic>;
+    final decoded = jsonDecode(json);
+    if (decoded is! Map<String, dynamic>) {
+      throw const FormatException('Модель не вернула предложение действия');
+    }
+    final d = decoded;
     final action = d['action'];
     final zone = tz.getLocation(snapshot.settings.timezone);
     String text(String key, {int max = 16000}) {
@@ -104,17 +180,36 @@ class AiActions {
       return value;
     }
 
+    int durationMinutes(
+      AiDurationInput duration, {
+      int? range,
+      int min = 1,
+      int max = 1440,
+    }) {
+      final value =
+          duration.minutes ??
+          range ??
+          (request != null && !duration.specified
+              ? snapshot.settings.defaultMinutes
+              : number('minutes', snapshot.settings.defaultMinutes, min, max));
+      if (value < min || value > max) {
+        throw FormatException(
+          'Длительность должна быть от $min до $max минут.',
+        );
+      }
+      return value;
+    }
+
     var dateText = text('date');
-    final today = tz.TZDateTime.from(now, zone);
-    final requested = ['task', 'plan'].contains(action)
-        ? relativeDate(request ?? '', today, zone)
+    final today = tz.TZDateTime.from(referenceTime ?? now, zone);
+    final requested = ['task', 'plan', 'statistics'].contains(action)
+        ? requestDate(request ?? '', today, zone)
         : null;
     if (requested != null) {
       dateText = dayKey(requested);
     } else if (d['weekday'] is int) {
       final weekday = number('weekday', 1, 1, 7);
       var delta = (weekday - today.weekday + 7) % 7;
-      if (delta == 0) delta = 7;
       dateText = dayKey(
         tz.TZDateTime(zone, today.year, today.month, today.day + delta),
       );
@@ -147,35 +242,76 @@ class AiActions {
             !snapshot.projects.any((p) => p.id == project)) {
           throw const FormatException('Проект не найден');
         }
-        final minutes = number(
-          'minutes',
-          snapshot.settings.defaultMinutes,
-          1,
-          1440,
+        final requestedTime = AiTimeInput.fromRequest(request ?? '');
+        final requestedDuration = AiDurationInput.fromRequest(request ?? '');
+        if (requestedTime.question != null) {
+          return AiDraft('clarify', {}, requestedTime.question!);
+        }
+        if (requestedDuration.question != null) {
+          return AiDraft('clarify', {}, requestedDuration.question!);
+        }
+        // Missing time on a named day means automatic scheduling, not a
+        // made-up clock from the model and not another question.
+        final freeTime =
+            requestsFreeTime(request ?? '') ||
+            (dateText.isNotEmpty &&
+                (request != null
+                    ? requestedTime.time == null
+                    : text('time').isEmpty));
+        final minutes = durationMinutes(
+          requestedDuration,
+          range: freeTime ? null : requestedTime.rangeMinutes,
         );
-        final timeText = text('time');
+        final timeText = requestedTime.time ?? text('time');
         DateTime? start;
         if (dateText.isNotEmpty) {
-          if (timeText.isEmpty) {
+          if (freeTime) {
+            final day = date(dateText, zone);
+            if (day.isAfter(now.add(const Duration(days: 89)))) {
+              throw const FormatException(
+                'Свободное время можно подобрать в пределах ближайших 90 дней.',
+              );
+            }
+            final window = dayWindow(request ?? '');
+            final begin = requestedTime.time == null
+                ? window.$1
+                : clock(requestedTime.time!);
+            final finish = requestedTime.endTime == null
+                ? window.$2
+                : clock(requestedTime.endTime!);
+            start = freeSlot(snapshot, day, now, minutes, begin, finish, zone);
+            if (start == null) {
+              return AiDraft(
+                'clarify',
+                {},
+                '${DateFormat('d MMMM', 'ru').format(day)} нет свободного окна '
+                    'на $minutes мин в интервале '
+                    '${DateFormat('HH:mm').format(at(day, begin, zone))}–'
+                    '${DateFormat('HH:mm').format(at(day, finish, zone))}. '
+                    'Выберите другой день или часы.',
+              );
+            }
+          } else if (timeText.isEmpty) {
             return AiDraft(
               'clarify',
               {},
               'На какое время ${DateFormat('d MMMM', 'ru').format(date(dateText, zone))} запланировать «$title»?',
             );
-          }
-          final minute = clock(timeText);
-          start = at(date(dateText, zone), minute, zone);
-          if (start.hour != minute ~/ 60 || start.minute != minute % 60) {
-            throw const FormatException(
-              'В этом часовом поясе такого времени нет',
-            );
+          } else {
+            final minute = clock(timeText);
+            start = at(date(dateText, zone), minute, zone);
+            if (start.hour != minute ~/ 60 || start.minute != minute % 60) {
+              throw const FormatException(
+                'В этом часовом поясе такого времени нет',
+              );
+            }
           }
           if (start.isBefore(now.subtract(const Duration(minutes: 1)))) {
             throw const FormatException(
               'Получилась дата в прошлом. Уточните день и время.',
             );
           }
-        } else if (timeText.isNotEmpty) {
+        } else if (timeText.isNotEmpty || freeTime) {
           return AiDraft(
             'clarify',
             {},
@@ -190,6 +326,16 @@ class AiActions {
                   occupiesTime(snapshot, b) &&
                   overlaps(start!, end!, b.start, b.end),
             );
+        var scheduleSummary = 'Без времени · планировщик';
+        if (start != null && end != null) {
+          final localEnd = tz.TZDateTime.from(end, zone);
+          final endPattern = dayKey(start) == dayKey(localEnd)
+              ? 'HH:mm'
+              : 'd MMMM · HH:mm';
+          scheduleSummary =
+              '${DateFormat('d MMMM · HH:mm', 'ru').format(start)} — '
+              '${DateFormat(endPattern, 'ru').format(localEnd)}';
+        }
         return AiDraft(
           'task',
           {
@@ -198,8 +344,11 @@ class AiActions {
             'project_id': project,
             'start': start?.toUtc().toIso8601String(),
             'end': end?.toUtc().toIso8601String(),
+            if (freeTime) 'auto_scheduled': true,
           },
-          '$title\n${start == null ? 'Без времени · планировщик' : '${DateFormat('d MMMM · HH:mm', 'ru').format(start)} — ${DateFormat('HH:mm').format(tz.TZDateTime.from(end!, zone))} · ${zone.name}'}${collision ? '\nЭто время пересекается с другим событием.' : ''}',
+          '$title\n$scheduleSummary'
+              '${freeTime ? '\nПодобрано свободное время · $minutes мин' : ''}'
+              '${collision ? '\nЭто время пересекается с другим событием.' : ''}',
         );
       case 'plan':
         final ids = (d['task_ids'] as List? ?? []).cast<String>().toSet();
@@ -229,12 +378,11 @@ class AiActions {
             'В пилоте можно распределять задачи в пределах ближайших 90 дней. Выберите более близкий период.',
           );
         }
-        final minutes = number(
-          'minutes',
-          snapshot.settings.defaultMinutes,
-          5,
-          480,
-        );
+        final requestedDuration = AiDurationInput.fromRequest(request ?? '');
+        if (requestedDuration.question != null) {
+          return AiDraft('clarify', {}, requestedDuration.question!);
+        }
+        final minutes = durationMinutes(requestedDuration, min: 5, max: 480);
         final begin = clock(
           text('day_start').isEmpty ? '09:00' : text('day_start'),
         );
@@ -299,7 +447,11 @@ class AiActions {
           blocks: blocks,
         );
       case 'statistics':
-        final start = date(dateText, zone), days = number('days', 7, 1, 366);
+        final period = statisticsPeriod(request ?? '', today, zone);
+        final start = period?.$1 ?? date(dateText, zone);
+        final days = period?.$2 ?? number('days', 7, 1, 366);
+        d['date'] = dayKey(start);
+        d['days'] = days;
         final end = tz.TZDateTime(
           zone,
           start.year,
@@ -332,6 +484,126 @@ class AiActions {
           'Модель предложила неподдерживаемую команду',
         );
     }
+  }
+
+  static DateTime? freeSlot(
+    Snapshot snapshot,
+    DateTime day,
+    DateTime now,
+    int minutes,
+    int begin,
+    int finish,
+    tz.Location zone,
+  ) {
+    if (begin >= finish) {
+      throw const FormatException('Конец интервала должен быть позже начала.');
+    }
+    final limit = at(day, finish, zone);
+    final middle = (begin + finish - minutes) / 2;
+    final candidates = [for (var m = begin; m < finish; m += 5) m]
+      ..sort((a, b) {
+        final distance = (a - middle).abs().compareTo((b - middle).abs());
+        return distance == 0 ? a.compareTo(b) : distance;
+      });
+    for (final m in candidates) {
+      final start = at(day, m, zone);
+      final end = start.add(Duration(minutes: minutes));
+      if (start.hour != m ~/ 60 ||
+          start.minute != m % 60 ||
+          start.isBefore(now) ||
+          end.isAfter(limit)) {
+        continue;
+      }
+      if (!snapshot.blocks.any(
+        (b) =>
+            occupiesTime(snapshot, b) && overlaps(start, end, b.start, b.end),
+      )) {
+        return start;
+      }
+    }
+    return null;
+  }
+
+  static (int, int) dayWindow(String input) {
+    final text = input.toLowerCase();
+    if (RegExp(r'(^|[^а-яё])утром([^а-яё]|$)').hasMatch(text)) {
+      return (8 * 60, 12 * 60);
+    }
+    if (RegExp(r'(^|[^а-яё])вечером([^а-яё]|$)').hasMatch(text)) {
+      return (17 * 60, 21 * 60);
+    }
+    return (9 * 60, 18 * 60);
+  }
+
+  static (DateTime, int)? statisticsPeriod(
+    String input,
+    DateTime today,
+    tz.Location zone,
+  ) {
+    final text = input.toLowerCase();
+    final day = tz.TZDateTime(zone, today.year, today.month, today.day);
+    if (text.contains('сегодня')) return (day, 1);
+    if (text.contains('позавчера')) {
+      return (tz.TZDateTime(zone, day.year, day.month, day.day - 2), 1);
+    }
+    if (text.contains('вчера')) {
+      return (tz.TZDateTime(zone, day.year, day.month, day.day - 1), 1);
+    }
+    if (RegExp(r'(?:эт[ауой]|текущ\S*|прошл\S*)\s+недел').hasMatch(text)) {
+      return (
+        tz.TZDateTime(
+          zone,
+          day.year,
+          day.month,
+          day.day - day.weekday + 1 - (text.contains('прошл') ? 7 : 0),
+        ),
+        7,
+      );
+    }
+    return null;
+  }
+
+  static DateTime? requestDate(String input, DateTime today, tz.Location zone) {
+    final text = input.toLowerCase();
+    final iso = RegExp(r'(?<!\d)\d{4}-\d{2}-\d{2}(?!\d)').firstMatch(text);
+    if (iso != null) return date(iso[0]!, zone);
+    const months = [
+      'января',
+      'февраля',
+      'марта',
+      'апреля',
+      'мая',
+      'июня',
+      'июля',
+      'августа',
+      'сентября',
+      'октября',
+      'ноября',
+      'декабря',
+    ];
+    final named = RegExp(
+      '(?<!\\d)(\\d{1,2})\\s+(${months.join('|')})(?:\\s+(\\d{4}))?(?![а-яё\\d])',
+    ).firstMatch(text);
+    final dotted = RegExp(
+      r'(?:^|на\s+)(\d{1,2})\.(0?[1-9]|1[0-2])(?:\.(\d{4}))?(?![\d.])',
+    ).firstMatch(text);
+    if (named == null && dotted == null) {
+      return relativeDate(input, today, zone);
+    }
+    final match = (named ?? dotted)!;
+    final day = int.parse(match[1]!);
+    final month = named == null
+        ? int.parse(match[2]!)
+        : months.indexOf(match[2]!) + 1;
+    var year = int.tryParse(match[3] ?? '') ?? today.year;
+    if (match[3] == null &&
+        (month < today.month || (month == today.month && day < today.day))) {
+      year++;
+    }
+    return date(
+      '$year-${month.toString().padLeft(2, '0')}-${day.toString().padLeft(2, '0')}',
+      zone,
+    );
   }
 
   /// Common relative dates are resolved from the user's words, never by LLM
@@ -369,11 +641,17 @@ class AiActions {
       }
       if (found.length != 1) return null;
       final weekday = found.single;
-      if (RegExp(r'следующ\S*\s+недел').hasMatch(words)) {
+      if (RegExp(
+        'следующ\\S*\\s+(?:недел|${names[weekday - 1]})',
+      ).hasMatch(words)) {
         delta = 7 - today.weekday + weekday;
+      } else if (RegExp(
+        '(?:эт(?:у|от|а|ой|ом)|текущ\\S*)\\s+(?:недел|${names[weekday - 1]})',
+      ).hasMatch(words)) {
+        delta = weekday - today.weekday;
       } else {
         delta = (weekday - today.weekday + 7) % 7;
-        if (delta == 0) delta = 7;
+        if (RegExp(r'через\s+недел').hasMatch(words)) delta += 7;
       }
     }
     return tz.TZDateTime(zone, today.year, today.month, today.day + delta);

@@ -3,10 +3,10 @@ PODS:
     - FlutterMacOS
   - device_info_plus (0.0.1):
     - FlutterMacOS
-  - ffmpeg_kit_flutter_new_min (7.1.1):
-    - ffmpeg_kit_flutter_new_min/min (= 7.1.1)
+  - ffmpeg_kit_flutter_new_min (8.1.2):
+    - ffmpeg_kit_flutter_new_min/min (= 8.1.2)
     - FlutterMacOS
-  - ffmpeg_kit_flutter_new_min/min (7.1.1):
+  - ffmpeg_kit_flutter_new_min/min (8.1.2):
     - FlutterMacOS
   - file_picker (0.0.1):
     - FlutterMacOS
@@ -85,7 +85,7 @@ EXTERNAL SOURCES:
 SPEC CHECKSUMS:
   app_links: 05a6ec2341985eb05e9f97dc63f5837c39895c3f
   device_info_plus: 4fb280989f669696856f8b129e4a5e3cd6c48f76
-  ffmpeg_kit_flutter_new_min: 623d95fe4c00311175a10f9ab3efa312c266ead6
+  ffmpeg_kit_flutter_new_min: 5eb213c6e89209f8ea9a3a7537d991ed3a4ba5c2
   file_picker: 7584aae6fa07a041af2b36a2655122d42f578c1a
   flutter_local_notifications: 4bf37a31afde695b56091b4ae3e4d9c7a7e6cda0
   flutter_secure_storage_macos: 7f45e30f838cf2659862a4e4e3ee1c347c2b3b54

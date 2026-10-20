@@ -16,6 +16,7 @@ class AiModel {
   final int bytes, memoryGiB;
   String get url =>
       'https://huggingface.co/$repository/resolve/$revision/$file';
+
   double get gib => bytes / 1073741824;
 }
 
@@ -64,29 +65,15 @@ const languageModels = [
   ),
 ];
 const speechModel = AiModel(
-  'whisper-base',
-  'Whisper · русский и другие языки',
+  'whisper-small',
+  'Whisper Small',
   'ggerganov/whisper.cpp',
   '5359861c739e955e79d9a303bcbc70fb988958b1',
-  'ggml-base.bin',
-  147951465,
-  '60ed5bc3dd14eea856493d334349b405782ddcaf0028d4b5df4088345fba2efe',
-  1,
+  'ggml-small.bin',
+  487601967,
+  '1be3a9b2063867b937e64e2ec7483364a79917e157fa98c5d94b5c1fffea987b',
+  2,
 );
-
-const speechModels = [
-  speechModel,
-  AiModel(
-    'whisper-small',
-    'Whisper Small · точнее',
-    'ggerganov/whisper.cpp',
-    '5359861c739e955e79d9a303bcbc70fb988958b1',
-    'ggml-small.bin',
-    487601967,
-    '1be3a9b2063867b937e64e2ec7483364a79917e157fa98c5d94b5c1fffea987b',
-    2,
-  ),
-];
 
 class AiHardware {
   const AiHardware({

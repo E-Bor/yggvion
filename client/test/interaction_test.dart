@@ -451,11 +451,12 @@ void main() {
         72,
       );
       expect(tester.getSize(grid).width, greaterThan(width));
-      for (final section in PageKind.values) {
+      for (final section in PageKind.values.where((p) => p != PageKind.ai)) {
         await tester.tap(find.byKey(ValueKey('nav-${section.name}')));
         await settle(tester);
         expect(tester.takeException(), isNull);
       }
+      expect(find.byKey(const ValueKey('nav-ai')), findsNothing);
       await tester.tap(find.byKey(const ValueKey('nav-today')));
       await settle(tester);
       await tester.tap(find.byTooltip('Вперёд'));

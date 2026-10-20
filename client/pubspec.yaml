@@ -46,6 +46,11 @@ dev_dependencies:
   flutter_lints: ^6.0.0
   msix: ^3.18.0
 
+# whisper_ggml requests FFmpeg 2.x, which has no arm64 simulator slice.
+# The publisher's 3.6.7 XCFrameworks preserve the conversion API and support it.
+dependency_overrides:
+  ffmpeg_kit_flutter_new_min: 3.6.7
+
 msix_config:
   display_name: Yggvion
   publisher_display_name: Yggvion

@@ -4,6 +4,7 @@
 
 list(APPEND FLUTTER_PLUGIN_LIST
   app_links
+  ffmpeg_kit_flutter_new_min
   flutter_secure_storage_windows
   flutter_timezone
   irondash_engine_context
