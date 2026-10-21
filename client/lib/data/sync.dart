@@ -324,14 +324,10 @@ class SyncService {
               }),
             ],
           );
-          for (final table in [
-            'outbox',
-            'records',
-            'conflicts',
-            'search_index',
-          ]) {
+          for (final table in ['outbox', 'records', 'conflicts']) {
             await repo.db.customStatement('DELETE FROM $table');
           }
+          await repo.db.clearSearchIndex();
           for (final record in restored.values) {
             await repo.db.put(record);
           }

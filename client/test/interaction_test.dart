@@ -33,6 +33,26 @@ Future<void> settle(WidgetTester tester) async {
   await tester.pumpAndSettle();
 }
 
+/// Widget tests use a simulated clock, while the persistent search isolate uses
+/// real message delivery. Pumping only frames cannot finish its round trips.
+Future<void> settleSearch(WidgetTester tester) async {
+  final progress = find.descendant(
+    of: find.byType(SearchDialog),
+    matching: find.byType(LinearProgressIndicator),
+  );
+  final deadline = DateTime.now().add(const Duration(seconds: 5));
+  while (progress.evaluate().isNotEmpty) {
+    if (DateTime.now().isAfter(deadline)) {
+      fail('Search did not finish within five seconds');
+    }
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 5)),
+    );
+    await tester.pump(const Duration(milliseconds: 20));
+  }
+  await settle(tester);
+}
+
 Future<Repository> workspace(
   WidgetTester tester, {
   bool mobile = false,

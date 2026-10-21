@@ -8,7 +8,8 @@ import 'package:yggvion/domain/models.dart';
 import 'package:yggvion/ui/app.dart';
 import 'package:yggvion/ui/statistics.dart';
 import 'package:yggvion/ui/task_editor.dart';
-import 'interaction_test.dart' show workspace, settle, command, testInteraction;
+import 'interaction_test.dart'
+    show workspace, settle, settleSearch, command, testInteraction;
 
 Future<void> statisticsFixture(Repository repo) async {
   await repo.saveProject('Разработка', 0xff9cb9ff);
@@ -72,9 +73,17 @@ void main() {
         of: find.byType(SearchDialog),
         matching: find.byType(TextField),
       );
-      await tester.enterText(input, 'стаматалог');
-      await tester.pump(const Duration(milliseconds: 200));
-      await settle(tester);
+      await tester.enterText(input, 'С');
+      await tester.pump(const Duration(milliseconds: 100));
+      await settleSearch(tester);
+      expect(find.text('Стоматолог'), findsOneWidget);
+      expect(find.text('Одна буква — точный поиск'), findsOneWidget);
+      for (final query in ['стам', 'стаматал', 'стаматалог']) {
+        await tester.enterText(input, query);
+        await tester.pump(const Duration(milliseconds: 200));
+        await settleSearch(tester);
+        expect(find.text('Стоматолог'), findsOneWidget, reason: query);
+      }
       expect(find.text('Допуск: 2 опечатки в слове'), findsOneWidget);
       expect(find.text('Стоматолог'), findsOneWidget);
       await tester.tap(find.text('Стоматолог'));

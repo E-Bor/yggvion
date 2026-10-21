@@ -1,8 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-import 'dart:isolate';
-import 'dart:math' as math;
 import 'package:drift/drift.dart';
 import 'package:drift/native.dart';
 import 'package:flutter/foundation.dart';
@@ -10,9 +8,13 @@ import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import '../domain/models.dart';
 import '../domain/fuzzy_search.dart';
+import 'search_worker.dart';
 
 class LocalDatabase extends GeneratedDatabase {
   LocalDatabase(super.executor);
+  final _searchWorker = SearchWorker();
+  int _searchRevision = 0, _vocabularyRevision = -1;
+  Future<void>? _preparingVocabulary;
   static Future<LocalDatabase> open() async {
     final dir = await getApplicationSupportDirectory();
     await dir.create(recursive: true);
@@ -50,7 +52,7 @@ class LocalDatabase extends GeneratedDatabase {
   }
 
   @override
-  int get schemaVersion => 5;
+  int get schemaVersion => 6;
   @override
   Iterable<TableInfo<Table, Object?>> get allTables => const [];
   @override
@@ -66,8 +68,8 @@ class LocalDatabase extends GeneratedDatabase {
         'CREATE TABLE conflicts(id TEXT PRIMARY KEY, local TEXT NOT NULL, remote TEXT NOT NULL)',
         'CREATE TABLE files(id TEXT PRIMARY KEY, name TEXT NOT NULL, path TEXT NOT NULL, uploaded INTEGER NOT NULL DEFAULT 0)',
         'CREATE TABLE recovery_snapshots(id TEXT PRIMARY KEY, created TEXT NOT NULL, payload TEXT NOT NULL)',
-        "CREATE VIRTUAL TABLE search_index USING fts5(id UNINDEXED, content, tokenize='unicode61')",
-        "CREATE VIRTUAL TABLE search_terms USING fts5vocab(search_index, 'row')",
+        _searchSchema,
+        _vocabularySchema,
         'CREATE TABLE app_activity(id INTEGER PRIMARY KEY, start INTEGER NOT NULL, end INTEGER NOT NULL)',
         'CREATE INDEX app_activity_end ON app_activity(end)',
       ]) {
@@ -88,14 +90,47 @@ class LocalDatabase extends GeneratedDatabase {
       }
       if (from < 5) {
         await customStatement(
-          "CREATE VIRTUAL TABLE search_terms USING fts5vocab(search_index, 'row')",
-        );
-        await customStatement(
           'CREATE TABLE app_activity(id INTEGER PRIMARY KEY, start INTEGER NOT NULL, end INTEGER NOT NULL)',
         );
         await customStatement(
           'CREATE INDEX app_activity_end ON app_activity(end)',
         );
+      }
+      if (from < 6) {
+        // Search is a derived index. Rebuild it from the unchanged records,
+        // including the visible Markdown title of each note.
+        await customStatement('DROP TABLE IF EXISTS search_terms');
+        await customStatement('DROP TABLE search_index');
+        await customStatement(_searchSchema);
+        await customStatement(_vocabularySchema);
+        var lastRow = 0;
+        while (true) {
+          final rows = await customSelect(
+            "SELECT rowid,payload FROM records WHERE rowid>? AND deleted=0 AND kind IN ('note','task') ORDER BY rowid LIMIT 256",
+            variables: [Variable(lastRow)],
+          ).get();
+          if (rows.isEmpty) break;
+          await batch((batch) {
+            for (final row in rows) {
+              final entity = Entity.fromJson(
+                jsonDecode(row.read<String>('payload')) as Map<String, dynamic>,
+              );
+              final document = searchDocument(entity);
+              if (document != null) {
+                batch.customStatement(
+                  'INSERT INTO search_index(rowid,title,body,category) VALUES(?,?,?,?)',
+                  [
+                    row.read<int>('rowid'),
+                    document.title,
+                    document.body,
+                    document.category,
+                  ],
+                );
+              }
+            }
+          });
+          lastRow = rows.last.read<int>('rowid');
+        }
       }
     }),
     beforeOpen: (details) async {
@@ -103,6 +138,10 @@ class LocalDatabase extends GeneratedDatabase {
       await customStatement('PRAGMA busy_timeout=5000');
     },
   );
+  static const _searchSchema =
+      "CREATE VIRTUAL TABLE search_index USING fts5(title, body, category, tokenize='unicode61', prefix='1 2 3 4')";
+  static const _vocabularySchema =
+      "CREATE VIRTUAL TABLE search_terms USING fts5vocab(search_index, 'col')";
   Future<List<Entity>> entities({bool includeDeleted = false}) async {
     final rows = await customSelect(
       'SELECT payload FROM records ${includeDeleted ? '' : 'WHERE deleted=0'} ORDER BY rowid',
@@ -128,18 +167,69 @@ class LocalDatabase extends GeneratedDatabase {
           );
   }
 
-  Future<void> put(Entity entity) async {
+  Future<void> put(Entity entity) => transaction(() async {
     await customStatement(
       'INSERT INTO records(id,kind,payload,deleted) VALUES (?,?,?,?) ON CONFLICT(id) DO UPDATE SET payload=excluded.payload, deleted=excluded.deleted',
       [entity.id, entity.kind, entity.encoded, entity.deleted ? 1 : 0],
     );
-    await customStatement('DELETE FROM search_index WHERE id=?', [entity.id]);
-    if (!entity.deleted && entity.searchable.isNotEmpty) {
+    if (entity.kind != 'note' && entity.kind != 'task') return;
+    final row = await customSelect(
+      'SELECT r.rowid,s.title,s.body,s.category FROM records r LEFT JOIN search_index s ON s.rowid=r.rowid WHERE r.id=?',
+      variables: [Variable(entity.id)],
+    ).getSingle();
+    final document = searchDocument(entity);
+    if (row.readNullable<String>('title') == document?.title &&
+        row.readNullable<String>('body') == document?.body &&
+        row.readNullable<String>('category') == document?.category) {
+      return; // Status/timer/sync metadata changes do not rebuild search text.
+    }
+    final rowId = row.read<int>('rowid');
+    await customStatement('DELETE FROM search_index WHERE rowid=?', [rowId]);
+    if (document != null) {
       await customStatement(
-        'INSERT INTO search_index(id,content) VALUES (?,?)',
-        [entity.id, entity.searchable],
+        'INSERT INTO search_index(rowid,title,body,category) VALUES (?,?,?,?)',
+        [rowId, document.title, document.body, document.category],
       );
     }
+    _searchRevision++;
+  });
+
+  Future<void> clearSearchIndex() async {
+    await customStatement('DELETE FROM search_index');
+    _searchRevision++;
+  }
+
+  Future<void> _prepareVocabulary() async {
+    while (_vocabularyRevision != _searchRevision) {
+      final preparing = _preparingVocabulary ??= _loadVocabulary(
+        _searchRevision,
+      );
+      try {
+        await preparing;
+      } finally {
+        if (identical(_preparingVocabulary, preparing)) {
+          _preparingVocabulary = null;
+        }
+      }
+    }
+  }
+
+  Future<void> _loadVocabulary(int revision) async {
+    final rows = await customSelect(
+      "SELECT DISTINCT term FROM search_terms WHERE col IN ('title','body') ORDER BY term",
+    ).get();
+    await _searchWorker.expand(
+      const [],
+      0,
+      vocabulary: rows.map((r) => r.read<String>('term')).toList(),
+    );
+    _vocabularyRevision = revision;
+  }
+
+  @override
+  Future<void> close() async {
+    _searchWorker.dispose();
+    await super.close();
   }
 
   Future<String?> meta(String key) async => (await customSelect(
@@ -169,52 +259,70 @@ class LocalDatabase extends GeneratedDatabase {
     }
     final words = searchWords(query);
     if (words.isEmpty) return [];
-    final results = await _searchMatches(prefixSearchQuery(words));
-    if (maxTypos == 0 || results.length >= 100) return results;
-    final lengths = words
-        .map((word) => word.runes.length)
-        .where((length) => length >= 3 && length <= 64)
-        .toList();
-    if (lengths.isEmpty) return results;
-    final terms = await customSelect(
-      'SELECT term, doc FROM search_terms WHERE length(term) BETWEEN ? AND ?',
-      variables: [
-        Variable(math.max(1, lengths.reduce(math.min) - maxTypos)),
-        Variable(lengths.reduce(math.max) + maxTypos),
-      ],
-    ).get();
-    final vocabulary = terms
-        .map(
-          (row) =>
-              (word: row.read<String>('term'), documents: row.read<int>('doc')),
-        )
-        .toList();
-    final expansions = await Isolate.run(
-      () => expandedSearchQueries(words, vocabulary, maxTypos),
-    );
-    final ids = results.map((e) => e.id).toSet();
-    for (final expansion in expansions) {
-      for (final result in await _searchMatches(expansion)) {
-        if (ids.add(result.id)) results.add(result);
+    final exact = prefixSearchQuery(words);
+    List<String>? expansions;
+    final results = <Entity>[];
+    final rowIds = <int>[];
+    // Location is the primary priority; edit distance ranks within each group.
+    for (final category in ['note', 'task']) {
+      for (final columns in ['title', '{title body}']) {
+        Future<void> append(String expression) async {
+          final matches = await _searchMatches(
+            'category:$category AND $columns:($expression)',
+            rowIds,
+            100 - results.length,
+          );
+          for (final row in matches) {
+            rowIds.add(row.read<int>('rowid'));
+            results.add(
+              Entity.fromJson(
+                jsonDecode(row.read<String>('payload')) as Map<String, dynamic>,
+              ),
+            );
+          }
+        }
+
+        await append(exact);
         if (results.length >= 100) return results;
+        if (expansions == null) {
+          if (words.any((w) => wordTypoLimit(w, maxTypos) > 0)) {
+            await _prepareVocabulary();
+            try {
+              expansions = await _searchWorker.expand(words, maxTypos);
+            } catch (_) {
+              _vocabularyRevision = -1;
+              rethrow;
+            }
+          } else {
+            expansions = const [];
+          }
+        }
+        for (final expansion in expansions) {
+          await append(expansion);
+          if (results.length >= 100) return results;
+        }
       }
     }
     return results;
   }
 
-  Future<List<Entity>> _searchMatches(String expression) async {
-    final rows = await customSelect(
-      "SELECT r.payload FROM search_index s JOIN records r ON r.id=s.id WHERE search_index MATCH ? AND r.deleted=0 AND r.kind IN ('task','note') ORDER BY rank LIMIT 100",
-      variables: [Variable(expression)],
-    ).get();
-    return rows
-        .map(
-          (r) => Entity.fromJson(
-            jsonDecode(r.read<String>('payload')) as Map<String, dynamic>,
-          ),
-        )
-        .toList();
-  }
+  Future<List<QueryRow>> _searchMatches(
+    String expression,
+    List<int> excluded,
+    int limit,
+  ) => customSelect(
+    '''SELECT r.payload, matches.rowid FROM (
+        SELECT rowid, rank FROM search_index WHERE search_index MATCH ?
+        ${excluded.isEmpty ? '' : 'AND rowid NOT IN (${List.filled(excluded.length, '?').join(',')})'}
+        ORDER BY rank LIMIT ?
+      ) matches JOIN records r ON r.rowid=matches.rowid
+      ORDER BY matches.rank, matches.rowid''',
+    variables: [
+      Variable(expression),
+      ...excluded.map(Variable.new),
+      Variable(limit),
+    ],
+  ).get();
 
   Future<int> beginActivity(DateTime time) => customInsert(
     'INSERT INTO app_activity(start,end) VALUES (?,?)',

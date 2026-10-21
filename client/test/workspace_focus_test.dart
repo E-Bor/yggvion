@@ -7,7 +7,8 @@ import 'package:timezone/data/latest.dart' as tz;
 import 'package:yggvion/ui/app.dart';
 import 'package:yggvion/ui/notes.dart';
 import 'package:yggvion/ui/task_editor.dart';
-import 'interaction_test.dart' show workspace, settle, command, testInteraction;
+import 'interaction_test.dart'
+    show workspace, settle, settleSearch, command, testInteraction;
 
 void main() {
   setUpAll(() async {
@@ -47,7 +48,7 @@ void main() {
         'поездки',
       );
       await tester.pump(const Duration(milliseconds: 200));
-      await settle(tester);
+      await settleSearch(tester);
       expect(find.text('План поездки'), findsOneWidget);
       expect(find.text('Прежнее название'), findsNothing);
       await tester.tap(find.text('План поездки'));

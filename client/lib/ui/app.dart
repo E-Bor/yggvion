@@ -8,6 +8,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:timezone/timezone.dart' as tz;
 import '../data/repository.dart';
 import '../domain/models.dart';
+import '../domain/fuzzy_search.dart';
 import '../domain/recurrence.dart';
 import 'calendar.dart';
 import 'birthdays.dart';
@@ -1330,7 +1331,7 @@ class _SearchDialogState extends ConsumerState<SearchDialog> {
       results = [];
     });
     if (value.trim().isEmpty) return;
-    debounce = Timer(const Duration(milliseconds: 140), () async {
+    debounce = Timer(const Duration(milliseconds: 180), () async {
       try {
         final repo = ref.read(appProvider);
         final next = await repo.db.search(
@@ -1353,6 +1354,18 @@ class _SearchDialogState extends ConsumerState<SearchDialog> {
         }
       }
     });
+  }
+
+  String searchHint(int tolerance) {
+    final words = searchWords(query);
+    if (words.length == 1 && words.single.runes.length == 1) {
+      return 'Одна буква — точный поиск';
+    }
+    return switch (tolerance) {
+      0 => 'Точное совпадение · настройки → точность поиска',
+      1 => 'Допуск: 1 опечатка в слове',
+      _ => 'Допуск: 2 опечатки в слове',
+    };
   }
 
   @override
@@ -1384,15 +1397,12 @@ class _SearchDialogState extends ConsumerState<SearchDialog> {
             padding: const EdgeInsets.fromLTRB(24, 0, 24, 10),
             child: Align(
               alignment: Alignment.centerLeft,
-              child: Text(switch (ref
-                  .watch(appProvider)
-                  .snapshot
-                  .settings
-                  .searchTypos) {
-                0 => 'Точное совпадение · настройки → точность поиска',
-                1 => 'Допуск: 1 опечатка в слове',
-                _ => 'Допуск: 2 опечатки в слове',
-              }, style: const TextStyle(color: Palette.muted, fontSize: 12)),
+              child: Text(
+                searchHint(
+                  ref.watch(appProvider).snapshot.settings.searchTypos,
+                ),
+                style: const TextStyle(color: Palette.muted, fontSize: 12),
+              ),
             ),
           ),
           const Divider(),
@@ -1408,7 +1418,7 @@ class _SearchDialogState extends ConsumerState<SearchDialog> {
                         ? 'Найдётся даже прошлое'
                         : 'Ничего не найдено',
                     subtitle: query.trim().isEmpty
-                        ? 'Введите слово или начало слова.\nПоиск работает без интернета.'
+                        ? 'Можно начать с одной буквы.\nПоиск работает без интернета.'
                         : 'Попробуйте другое слово или увеличьте\nдопуск ошибок в настройках.',
                   )
                 : ListView.builder(

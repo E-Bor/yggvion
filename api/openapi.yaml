@@ -494,7 +494,7 @@ components:
         reminders: {type: array, maxItems: 12, items: {type: integer, minimum: 0, maximum: 525600}}
         timezone: {type: string}
         task_color: {type: integer, nullable: true, minimum: 4278190080, maximum: 4294967295, default: 4288461311, description: 'Unified opaque ARGB application accent for controls, highlights, accent text and tasks without a project. The legacy JSON name is retained for compatibility. Omitted or null uses the default blue. Projects keep their own colors.'}
-        search_typos: {type: integer, nullable: true, minimum: 0, maximum: 2, default: 1, description: 'Allowed typos per search word of at least 3 characters; 0 disables fuzzy matching. Omitted or null defaults to 1. Exact prefix matches precede fuzzy results.'}
+        search_typos: {type: integer, nullable: true, minimum: 0, maximum: 2, default: 1, description: 'Allowed typos per typed word prefix; the untyped suffix is ignored. A single character is always exact; two characters allow at most one typo. 0 disables fuzzy matching. Omitted or null defaults to 1. Notes precede tasks; within each type title matches precede body matches, with exact matches first within each group.'}
     Series:
       type: object
       required: [title, description, project_id, start, minutes, timezone, rule, reminders, all_day, exceptions]

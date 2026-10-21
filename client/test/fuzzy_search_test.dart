@@ -27,11 +27,98 @@ void main() {
     expect(typoDistance('a', '', 1), 1);
   });
 
+  test(
+    'prefix distance allows edits without charging for the remaining suffix',
+    () {
+      for (final (query, word, distance) in [
+        ('дру', 'друг', 0),
+        ('дну', 'друг', 1),
+        ('стам', 'стоматолог', 1),
+        ('стоммат', 'стоматолог', 1),
+        ('стмат', 'стоматолог', 1),
+        ('стмо', 'стоматолог', 1),
+        ('стаматал', 'стоматолог', 2),
+        ('други', 'друг', 1),
+        ('днх', 'друг', 2),
+        ('ёлк', 'елка', 0),
+        ('😃ко', '😀кот', 1),
+        ('', 'друг', 0),
+      ]) {
+        expect(
+          typoDistance(query, word, distance, prefix: true),
+          distance,
+          reason: '$query → $word',
+        );
+        if (distance > 0) {
+          expect(
+            typoDistance(query, word, distance - 1, prefix: true),
+            greaterThan(distance - 1),
+            reason: '$query → $word with a smaller tolerance',
+          );
+        }
+      }
+      expect(
+        typoDistance('матол', 'стоматолог', 1, prefix: true),
+        greaterThan(1),
+      );
+    },
+  );
+
   late LocalDatabase db;
   setUp(() {
     db = LocalDatabase(NativeDatabase.memory());
   });
   tearDown(() => db.close());
+
+  test('mistyped prefixes match before the whole word is entered', () async {
+    await db.put(Task.create('friend', 'Друг'));
+    await db.put(Note.create('note', '', content: '# Дружеская встреча'));
+    await db.put(
+      Task.create('dentist', 'Запись', description: 'Стоматолог завтра'),
+    );
+    await db.put(
+      Note.create(
+        'long',
+        '',
+        content: 'стоматолог${List.filled(80, 'а').join()}',
+      ),
+    );
+    await db.put(Task.create('unrelated', 'Преддруг'));
+
+    // The user's example: the untyped final letter is not a second error.
+    expect(await db.search('ДНу', maxTypos: 0), isEmpty);
+    expect(
+      (await db.search('ДНу', maxTypos: 1)).map((e) => e.id),
+      unorderedEquals(['friend', 'note']),
+    );
+    for (final query in ['дрру', 'дуг', 'рду', 'хру']) {
+      expect(
+        (await db.search(query, maxTypos: 1)).map((e) => e.id),
+        contains('friend'),
+        reason: query,
+      );
+    }
+    // All typed fragments must match, independently of their order in the text.
+    expect((await db.search('встрч дну', maxTypos: 1)).single.id, 'note');
+    expect(await db.search('днх', maxTypos: 1), isEmpty);
+    expect(
+      (await db.search('днх', maxTypos: 2)).map((e) => e.id),
+      containsAll(['friend', 'note']),
+    );
+    expect((await db.search('ззз', maxTypos: 2)).single.id, 'dentist');
+    expect(await db.search('ффф', maxTypos: 2), isEmpty);
+    expect(
+      (await db.search('стам', maxTypos: 1)).map((e) => e.id),
+      unorderedEquals(['dentist', 'long']),
+    );
+    expect(await db.search('матол', maxTypos: 1), isEmpty);
+
+    await db.put(Note.create('exact', '', content: 'Днутекст'));
+    final results = await db.search('дну', maxTypos: 2);
+    expect(results.first.id, 'exact');
+    expect(results.map((e) => e.id), containsAll(['friend', 'note']));
+    expect(results.map((e) => e.id).toSet(), hasLength(results.length));
+  });
 
   test(
     'search covers titles, descriptions, notes and ranks exact matches first',
@@ -93,11 +180,15 @@ void main() {
   );
 
   test(
-    'short terms stay exact and two-typo results do not duplicate exact ones',
+    'one letter stays exact and two letters allow at most one typo',
     () async {
       await db.put(Note.create('one', 'Поездка', content: 'дом кот коттедж'));
       await db.put(Note.create('two', 'Идеи', content: 'том'));
-      expect(await db.search('до', maxTypos: 2), hasLength(1));
+      expect(await db.search('д', maxTypos: 2), hasLength(1));
+      expect(await db.search('х', maxTypos: 2), isEmpty);
+      expect(await db.search('до', maxTypos: 0), hasLength(1));
+      expect(await db.search('до', maxTypos: 2), hasLength(2));
+      expect(await db.search('хх', maxTypos: 2), isEmpty);
       expect(await db.search('дом', maxTypos: 2), hasLength(2));
     },
   );
