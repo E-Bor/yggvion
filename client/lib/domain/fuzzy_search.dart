@@ -70,13 +70,7 @@ SearchDocument? searchDocument(Entity entity) {
     case 'note':
       final note = Note(entity);
       final title = note.displayLabel;
-      // Keep legacy, no-longer-visible titles searchable without promoting them
-      // over the title actually shown in the note list.
-      final body = [
-        note.content,
-        if (note.title != title) note.title,
-      ].join('\n');
-      return (title: title, body: body, category: 'note');
+      return (title: title, body: note.content, category: 'note');
     case 'task':
       return (
         title: entity.data['title'] as String? ?? '',

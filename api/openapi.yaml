@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Yggvion personal sync API
-  version: 1.1.0
+  version: 1.2.0
   description: >-
     One owner, device tokens, optimistic record versions. UTC RFC3339 timestamps;
     IANA timezone retained on blocks/series. Mutations in a batch are atomic.
@@ -33,7 +33,21 @@ paths:
                   protocol: {type: integer, const: 2}
                   private_ca: {type: string, description: 'Public PEM CA, empty for public HTTPS'}
                   backups: {type: boolean}
+                  note_folders: {type: boolean, description: Supports note_folder records and note folder/order metadata}
+                  server_schema: {type: integer}
         '401': {$ref: '#/components/responses/Error'}
+  /metrics:
+    get:
+      summary: On-demand Linux VPS resource snapshot, cached for 30 seconds
+      description: Authenticated. CPU is the host busy percentage over a short sample. Memory excludes available cache; disk refers to the data filesystem. No background sampler.
+      responses:
+        '200':
+          description: Current or cached sample; null CPU means no measurable tick delta
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ServerMetrics'}
+        '401': {$ref: '#/components/responses/Error'}
+        '503': {$ref: '#/components/responses/Error'}
   /invitations:
     post:
       summary: Create a single-use invitation valid for ten minutes
@@ -384,6 +398,18 @@ components:
             properties:
               error: {type: string}
   schemas:
+    ServerMetrics:
+      type: object
+      required: [sampled_at, cpu_percent, memory_total_bytes, memory_used_bytes, process_memory_bytes, disk_total_bytes, disk_available_bytes, uptime_seconds]
+      properties:
+        sampled_at: {type: string, format: date-time}
+        cpu_percent: {type: [number, 'null'], minimum: 0, maximum: 100}
+        memory_total_bytes: {type: integer, minimum: 0}
+        memory_used_bytes: {type: integer, minimum: 0}
+        process_memory_bytes: {type: integer, minimum: 0}
+        disk_total_bytes: {type: integer, minimum: 0}
+        disk_available_bytes: {type: integer, minimum: 0}
+        uptime_seconds: {type: integer, minimum: 0}
     Backup:
       type: object
       required: [id, created, bytes, records, files, reason]
@@ -421,7 +447,7 @@ components:
       required: [id, kind, version, deleted, data, seq]
       properties:
         id: {type: string, pattern: '^[a-zA-Z0-9_-]{1,160}$'}
-        kind: {type: string, enum: [task, block, session, note, project, settings, series, snooze]}
+        kind: {type: string, enum: [task, block, session, note, note_folder, project, settings, series, snooze]}
         version: {type: integer, minimum: 0, description: '0 for creation, server increments on accepted change'}
         deleted: {type: boolean}
         seq: {type: integer, minimum: 0, description: Server change cursor}
@@ -431,6 +457,7 @@ components:
             - {$ref: '#/components/schemas/Block'}
             - {$ref: '#/components/schemas/Session'}
             - {$ref: '#/components/schemas/Note'}
+            - {$ref: '#/components/schemas/NoteFolder'}
             - {$ref: '#/components/schemas/Project'}
             - {$ref: '#/components/schemas/Settings'}
             - {$ref: '#/components/schemas/Series'}
@@ -478,8 +505,16 @@ components:
       required: [title, content, pinned]
       properties:
         title: {type: string, minLength: 1}
-        content: {type: string, description: 'Markdown, attachments use attachment:SHA256 URLs'}
+        content: {type: string, description: 'Markdown; attachments use attachment:SHA256 URLs, internal note links use note:ID and remain stable across renames. Task descriptions support the same links.'}
         pinned: {type: string, enum: ['', scratchpad, reference]}
+        folder_id: {type: string, description: 'Optional note_folder ID. Empty or a removed folder is displayed as unfiled.'}
+        sort_order: {type: integer, minimum: -10000000000000, maximum: 10000000000000, default: 0}
+    NoteFolder:
+      type: object
+      required: [title]
+      properties:
+        title: {type: string, minLength: 1, maxLength: 1000}
+        sort_order: {type: integer, minimum: -10000000000000, maximum: 10000000000000, default: 0}
     Project:
       type: object
       required: [title, color]

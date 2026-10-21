@@ -296,7 +296,9 @@ void main() {
       expect(repo.snapshot.notes.where((n) => n.pinned.isEmpty), hasLength(1));
       final noteContent = find.descendant(
         of: find.byType(NotesPage),
-        matching: find.byType(TextField),
+        matching: find.byWidgetPredicate(
+          (w) => w is TextField && w.maxLines == null,
+        ),
       );
       expect(
         tester
@@ -390,7 +392,9 @@ void main() {
         Future<void> write(String content) async {
           final field = find.descendant(
             of: find.byType(NotesPage),
-            matching: find.byType(TextField),
+            matching: find.byWidgetPredicate(
+              (w) => w is TextField && w.maxLines == null,
+            ),
           );
           final input = tester.widget<EditableText>(
             find.descendant(of: field, matching: find.byType(EditableText)),
@@ -429,7 +433,10 @@ void main() {
           await settle(tester);
           await tester.tap(find.text('Вторая заметка', findRichText: true));
           await settle(tester);
-          expect(find.byType(TextField), findsNothing);
+          expect(
+            find.byWidgetPredicate((w) => w is TextField && w.maxLines == null),
+            findsNothing,
+          );
         } else {
           expect(find.text('Первая заметка'), findsOneWidget);
           expect(find.text('Вторая заметка'), findsOneWidget);

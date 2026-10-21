@@ -14,6 +14,8 @@ import 'package:share_plus/share_plus.dart';
 import '../data/server_installer.dart';
 import '../domain/models.dart';
 import 'providers.dart';
+import 'local_backups.dart';
+import '../domain/server_metrics.dart';
 import 'settings.dart';
 import 'theme.dart';
 
@@ -99,6 +101,10 @@ class _SynchronizationPageState extends ConsumerState<SynchronizationPage> {
   bool busy = false;
   List<Map<String, dynamic>> devices = [];
   String? error;
+  ServerMetrics? metrics;
+  String? metricsError;
+  bool refreshing = false;
+  bool? reachable;
   @override
   void initState() {
     super.initState();
@@ -116,22 +122,131 @@ class _SynchronizationPageState extends ConsumerState<SynchronizationPage> {
   }
 
   Future<void> refresh() async {
-    try {
-      final result = await ref.read(syncProvider).devices();
+    final sync = ref.read(syncProvider);
+    if (refreshing || !sync.connected) return;
+    setState(() => refreshing = true);
+    await Future.wait([
+      () async {
+        try {
+          final result = await sync.devices();
+          if (mounted) {
+            setState(() {
+              devices = result;
+              error = null;
+              reachable = true;
+            });
+          }
+        } catch (_) {
+          if (mounted) {
+            setState(() {
+              reachable = false;
+              error = 'Нет ответа от сервера. Локальные данные доступны.';
+            });
+          }
+        }
+      }(),
+      () async {
+        try {
+          final result = await sync.metrics();
+          if (mounted) {
+            setState(() {
+              metrics = result;
+              metricsError = null;
+            });
+          }
+        } catch (_) {
+          if (mounted) {
+            setState(
+              () => metricsError =
+                  'Метрики недоступны. Проверьте связь и обновите сервер.',
+            );
+          }
+        }
+      }(),
+    ]);
+    if (mounted) setState(() => refreshing = false);
+  }
+
+  void manage(ServerOperation operation) {
+    Navigator.push(
+      context,
+      MaterialPageRoute<void>(
+        builder: (_) => InstallServerPage(operation: operation),
+      ),
+    ).then((_) {
       if (mounted) {
-        setState(() {
-          devices = result;
-          error = null;
-        });
+        setState(() {});
+        refresh();
       }
-    } on Object {
-      if (mounted) {
-        setState(
-          () => error =
-              'Не удалось получить список устройств. Локальные данные доступны.',
-        );
-      }
-    }
+    });
+  }
+
+  Widget metricsCard() {
+    String bytes(int n) => n >= 1073741824
+        ? '${(n / 1073741824).toStringAsFixed(1)} ГБ'
+        : '${(n / 1048576).toStringAsFixed(0)} МБ';
+    final m = metrics;
+    return settingsCard('Состояние VPS', [
+      Row(
+        children: [
+          Icon(
+            reachable == true
+                ? Icons.check_circle_outline_rounded
+                : Icons.cloud_off_rounded,
+            color: reachable == true ? context.accentColor : Palette.muted,
+            size: 20,
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              reachable == true
+                  ? 'Сервер доступен'
+                  : reachable == false
+                  ? 'Нет подключения'
+                  : 'Проверяем подключение…',
+            ),
+          ),
+          IconButton(
+            tooltip: 'Обновить метрики',
+            onPressed: refreshing ? null : refresh,
+            icon: const Icon(Icons.refresh_rounded),
+          ),
+        ],
+      ),
+      if (refreshing) const LinearProgressIndicator(),
+      if (m != null) ...[
+        ListTile(
+          contentPadding: EdgeInsets.zero,
+          leading: const Icon(Icons.speed_rounded),
+          title: const Text('CPU'),
+          trailing: Text(
+            m.cpuPercent == null ? '—' : '${m.cpuPercent!.toStringAsFixed(1)}%',
+          ),
+        ),
+        ListTile(
+          contentPadding: EdgeInsets.zero,
+          leading: const Icon(Icons.memory_rounded),
+          title: const Text('Память VPS'),
+          subtitle: Text('Yggvion: ${bytes(m.processMemory)}'),
+          trailing: Text('${bytes(m.memoryUsed)} / ${bytes(m.memoryTotal)}'),
+        ),
+        ListTile(
+          contentPadding: EdgeInsets.zero,
+          leading: const Icon(Icons.storage_rounded),
+          title: const Text('Диск VPS'),
+          subtitle: Text('Свободно ${bytes(m.diskAvailable)}'),
+          trailing: Text(
+            '${bytes(m.diskTotal - m.diskAvailable)} / ${bytes(m.diskTotal)}',
+          ),
+        ),
+        Text(
+          'Снимок ${DateFormat('HH:mm:ss').format(m.sampledAt.toLocal())} · обновление при открытии экрана',
+          style: const TextStyle(fontSize: 12, color: Palette.muted),
+        ),
+      ],
+      if (metricsError != null)
+        Text(metricsError!, style: const TextStyle(color: Palette.muted)),
+    ]);
   }
 
   Future<void> action(Future<void> Function() fn) async {
@@ -231,6 +346,7 @@ class _SynchronizationPageState extends ConsumerState<SynchronizationPage> {
             ],
           ],
         ),
+        if (sync.connected) metricsCard(),
         if (sync.connected)
           settingsCard('Устройства', [
             if (error != null) Text(error!),
@@ -261,6 +377,32 @@ class _SynchronizationPageState extends ConsumerState<SynchronizationPage> {
                               }),
                       ),
               ),
+          ]),
+        if (sync.connected)
+          settingsCard('Управление сервером', [
+            const Text(
+              'Обновление сохраняет базу, вложения, сертификат и подключённые устройства.',
+              style: TextStyle(color: Palette.muted, height: 1.5),
+            ),
+            const SizedBox(height: 12),
+            Wrap(
+              spacing: 12,
+              runSpacing: 8,
+              children: [
+                OutlinedButton.icon(
+                  onPressed: busy ? null : () => manage(ServerOperation.update),
+                  icon: const Icon(Icons.system_update_alt_rounded),
+                  label: const Text('Обновить / переустановить'),
+                ),
+                TextButton.icon(
+                  onPressed: busy
+                      ? null
+                      : () => manage(ServerOperation.uninstall),
+                  icon: const Icon(Icons.delete_outline_rounded),
+                  label: const Text('Удалить сервер'),
+                ),
+              ],
+            ),
           ]),
         settingsCard('Установить на VPS', [
           const Text(
@@ -385,7 +527,11 @@ class _InvitationScannerState extends State<InvitationScanner> {
 }
 
 class InstallServerPage extends ConsumerStatefulWidget {
-  const InstallServerPage({super.key});
+  const InstallServerPage({
+    super.key,
+    this.operation = ServerOperation.install,
+  });
+  final ServerOperation operation;
   @override
   ConsumerState<InstallServerPage> createState() => _InstallServerPageState();
 }
@@ -401,9 +547,16 @@ class _InstallServerPageState extends ConsumerState<InstallServerPage> {
   String? privateKey, keyName;
   String status = '';
   bool busy = false;
+  bool deleteData = false;
   @override
   void initState() {
     super.initState();
+    final address = ref.read(syncProvider).url;
+    if (address != null) {
+      final uri = Uri.parse(address);
+      host.text = uri.host;
+      httpsPort.text = '${uri.port}';
+    }
     installer = ServerInstaller(ref.read(syncProvider));
   }
 
@@ -418,9 +571,58 @@ class _InstallServerPageState extends ConsumerState<InstallServerPage> {
   }
 
   Future<void> install() async {
+    if (widget.operation == ServerOperation.uninstall) {
+      final confirm = TextEditingController();
+      final yes = await showDialog<bool>(
+        context: context,
+        builder: (dialog) => StatefulBuilder(
+          builder: (dialog, set) => AlertDialog(
+            title: Text(
+              deleteData
+                  ? 'Удалить сервер и все его данные?'
+                  : 'Удалить сервер?',
+            ),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  deleteData
+                      ? 'База, вложения, серверные резервные копии и ключи на VPS будут удалены. Данные на устройствах останутся. Введите IP сервера для подтверждения.'
+                      : 'Сервис и бинарник будут удалены. База, вложения и ключи останутся на VPS. Введите IP сервера для подтверждения.',
+                ),
+                const SizedBox(height: 16),
+                TextField(
+                  controller: confirm,
+                  onChanged: (_) => set(() {}),
+                  decoration: InputDecoration(hintText: host.text),
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialog, false),
+                child: const Text('Отмена'),
+              ),
+              FilledButton(
+                onPressed:
+                    confirm.text.trim() == host.text.trim() &&
+                        host.text.trim().isNotEmpty
+                    ? () => Navigator.pop(dialog, true)
+                    : null,
+                child: const Text('Удалить'),
+              ),
+            ],
+          ),
+        ),
+      );
+      Future<void>.delayed(const Duration(milliseconds: 300), confirm.dispose);
+      if (yes != true || !mounted) return;
+    }
     setState(() => busy = true);
     await guard(context, () async {
       await installer.install(
+        operation: widget.operation,
+        deleteData: deleteData,
         host: host.text.trim(),
         sshPort: int.tryParse(sshPort.text) ?? 0,
         httpsPort: int.tryParse(httpsPort.text) ?? 0,
@@ -450,11 +652,17 @@ class _InstallServerPageState extends ConsumerState<InstallServerPage> {
 
   @override
   Widget build(BuildContext context) => SettingsDetail(
-    title: 'Настроить VPS',
+    title: switch (widget.operation) {
+      ServerOperation.install => 'Настроить VPS',
+      ServerOperation.update => 'Обновить сервер',
+      ServerOperation.uninstall => 'Удалить сервер',
+    },
     children: [
       settingsCard('Подключение по SSH', [
-        const Text(
-          'Приложение установит отдельный сервис Yggvion, настроит HTTPS и резервные копии. Данные SSH не сохраняются.',
+        Text(
+          widget.operation == ServerOperation.install
+              ? 'Приложение установит отдельный сервис Yggvion, настроит HTTPS и резервные копии. Данные SSH не сохраняются.'
+              : 'Операция выполняется через SSH. Пароль и ключ не сохраняются.',
           style: TextStyle(color: Palette.muted, height: 1.5),
         ),
         const SizedBox(height: 20),
@@ -518,6 +726,15 @@ class _InstallServerPageState extends ConsumerState<InstallServerPage> {
           enabled: !busy,
           decoration: const InputDecoration(labelText: 'HTTPS-порт'),
         ),
+        if (widget.operation == ServerOperation.uninstall)
+          CheckboxListTile(
+            contentPadding: EdgeInsets.zero,
+            value: deleteData,
+            onChanged: busy ? null : (v) => setState(() => deleteData = v!),
+            title: const Text(
+              'Также удалить базу, вложения, бэкапы и ключи с VPS',
+            ),
+          ),
         const SizedBox(height: 20),
         if (busy) const LinearProgressIndicator(),
         if (status.isNotEmpty)
@@ -527,7 +744,11 @@ class _InstallServerPageState extends ConsumerState<InstallServerPage> {
           ),
         FilledButton(
           onPressed: busy ? null : install,
-          child: const Text('Установить и подключить'),
+          child: Text(switch (widget.operation) {
+            ServerOperation.install => 'Установить и подключить',
+            ServerOperation.update => 'Обновить сервер',
+            ServerOperation.uninstall => 'Удалить сервер',
+          }),
         ),
         if (busy)
           TextButton(
@@ -807,6 +1028,7 @@ class _BackupsPageState extends ConsumerState<BackupsPage> {
     return SettingsDetail(
       title: 'Резервное копирование',
       children: [
+        settingsCard('Копии на этом устройстве', [const LocalBackupsPanel()]),
         settingsCard('Ваши данные под защитой', [
           const Text(
             'Зашифрованные копии включают задачи, заметки, проекты, учёт времени и вложения, уже дошедшие до сервера. Незагруженные изменения остаются на устройствах.',

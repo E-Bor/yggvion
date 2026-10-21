@@ -170,8 +170,13 @@ void main() {
         matchesGoldenFile('goldens/compact_notes_1440.png'),
       );
       await tester.tap(
-        find.descendant(of: tile, matching: find.byTooltip('Удалить заметку')),
+        find.descendant(
+          of: tile,
+          matching: find.byTooltip('Действия с заметкой'),
+        ),
       );
+      await settle(tester);
+      await tester.tap(find.text('Удалить заметку'));
       await settle(tester);
       await tester.tap(find.text('Удалить').last);
       await settle(tester);

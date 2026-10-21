@@ -52,7 +52,7 @@ class LocalDatabase extends GeneratedDatabase {
   }
 
   @override
-  int get schemaVersion => 6;
+  int get schemaVersion => 7;
   @override
   Iterable<TableInfo<Table, Object?>> get allTables => const [];
   @override
@@ -96,7 +96,7 @@ class LocalDatabase extends GeneratedDatabase {
           'CREATE INDEX app_activity_end ON app_activity(end)',
         );
       }
-      if (from < 6) {
+      if (from < 7) {
         // Search is a derived index. Rebuild it from the unchanged records,
         // including the visible Markdown title of each note.
         await customStatement('DROP TABLE IF EXISTS search_terms');

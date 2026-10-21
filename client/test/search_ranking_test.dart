@@ -84,8 +84,12 @@ void main() {
           'title',
         );
         final result = await db.search('дру', maxTypos: 0);
-        expect(result.take(2).map((e) => e.id).toSet(), {'mixed', 'title'});
-        expect(result.skip(2).map((e) => e.id).toSet(), {'legacy', 'pinned'});
+        expect(result.take(3).map((e) => e.id).toSet(), {
+          'mixed',
+          'title',
+          'legacy',
+        });
+        expect(result.skip(3).map((e) => e.id).toSet(), {'pinned'});
         expect(
           (await db.search('д встрч', maxTypos: 1)).map((e) => e.id),
           contains('title'),

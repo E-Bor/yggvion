@@ -44,19 +44,24 @@ func Open(path string) (*Store, error) {
 	}
 	db.SetMaxOpenConns(1)
 	var schemaVersion int
-	if err = db.QueryRow("PRAGMA user_version").Scan(&schemaVersion); err != nil || schemaVersion > 2 {
+	if err = db.QueryRow("PRAGMA user_version").Scan(&schemaVersion); err != nil || schemaVersion > SchemaVersion {
 		db.Close()
 		if err != nil {
 			return nil, err
 		}
 		return nil, fmt.Errorf("unsupported database version %d", schemaVersion)
 	}
-	for _, query := range []string{"PRAGMA journal_mode=WAL", "PRAGMA busy_timeout=5000", "PRAGMA foreign_keys=ON", schema} {
+	for _, query := range []string{"PRAGMA journal_mode=WAL", "PRAGMA busy_timeout=5000", "PRAGMA foreign_keys=ON"} {
 		if _, err = db.Exec(query); err != nil {
 			db.Close()
 			return nil, err
 		}
 	}
+	if err = migrate(db, schemaVersion); err != nil {
+		db.Close()
+		return nil, err
+	}
+
 	if path != ":memory:" {
 		if err = os.Chmod(path, 0600); err != nil {
 			db.Close()

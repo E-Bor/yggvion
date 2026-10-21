@@ -28,6 +28,7 @@ dependencies:
   url_launcher: ^6.3.2
   open_filex: ^4.7.0
   crypto: ^3.0.6
+  archive: ^4.5.2
   intl: ^0.20.2
   collection: ^1.19.1
   super_clipboard: ^0.9.1

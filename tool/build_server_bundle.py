@@ -22,6 +22,7 @@ for arch in ("amd64", "arm64"):
         for chunk in iter(lambda: artifact.read(1024 * 1024), b""):
             digest.update(chunk)
     manifest[arch] = {"file": name, "sha256": digest.hexdigest()}
-shutil.copyfile(root / "deploy/install.sh", target / "install.sh")
+for script in ("install.sh", "uninstall.sh"):
+    shutil.copyfile(root / "deploy" / script, target / script)
 (target / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
 print("Server installer assets built for Linux amd64/arm64.")

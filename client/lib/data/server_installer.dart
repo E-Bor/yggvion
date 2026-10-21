@@ -5,6 +5,8 @@ import 'package:dartssh2/dartssh2.dart';
 import 'package:flutter/services.dart';
 import 'sync.dart';
 
+enum ServerOperation { install, update, uninstall }
+
 class ServerInstaller {
   ServerInstaller(this.sync);
   final SyncService sync;
@@ -19,6 +21,8 @@ class ServerInstaller {
   }
 
   Future<void> install({
+    ServerOperation operation = ServerOperation.install,
+    bool deleteData = false,
     required String host,
     required int sshPort,
     required int httpsPort,
@@ -87,21 +91,27 @@ class ServerInstaller {
         return utf8.decode(result.stdout).trim();
       }
 
-      onStatus('Определяем архитектуру VPS');
-      final arch = switch (await run('uname -m')) {
-        'x86_64' => 'amd64',
-        'aarch64' => 'arm64',
-        _ => throw StateError('Поддерживаются VPS x86_64 и ARM64'),
-      };
-      final manifest =
-          jsonDecode(await rootBundle.loadString('assets/server/manifest.json'))
-              as Map<String, dynamic>;
-      final artifact = manifest[arch] as Map<String, dynamic>;
-      final bytes = (await rootBundle.load(
-        'assets/server/${artifact['file']}',
-      )).buffer.asUint8List();
-      if (sha256.convert(bytes).toString() != artifact['sha256']) {
-        throw StateError('Установочный файл повреждён');
+      Map<String, dynamic>? artifact;
+      Uint8List? bytes;
+      if (operation != ServerOperation.uninstall) {
+        onStatus('Определяем архитектуру VPS');
+        final arch = switch (await run('uname -m')) {
+          'x86_64' => 'amd64',
+          'aarch64' => 'arm64',
+          _ => throw StateError('Поддерживаются VPS x86_64 и ARM64'),
+        };
+        final manifest =
+            jsonDecode(
+                  await rootBundle.loadString('assets/server/manifest.json'),
+                )
+                as Map<String, dynamic>;
+        artifact = manifest[arch] as Map<String, dynamic>;
+        bytes = (await rootBundle.load(
+          'assets/server/${artifact['file']}',
+        )).buffer.asUint8List();
+        if (sha256.convert(bytes).toString() != artifact['sha256']) {
+          throw StateError('Установочный файл повреждён');
+        }
       }
       temporary = await run('mktemp -d /tmp/yggvion-install.XXXXXXXX');
       if (!RegExp(
@@ -126,16 +136,24 @@ class ServerInstaller {
       }
 
       onStatus('Передаём сервер по защищённому соединению');
-      await upload('yggvion', bytes);
+      if (bytes != null) await upload('yggvion', bytes);
+      final script = operation == ServerOperation.uninstall
+          ? 'uninstall.sh'
+          : 'install.sh';
       await upload(
         'install.sh',
         Uint8List.fromList(
-          utf8.encode(await rootBundle.loadString('assets/server/install.sh')),
+          utf8.encode(await rootBundle.loadString('assets/server/$script')),
         ),
       );
-      onStatus('Устанавливаем сервис и сертификат');
-      final command =
-          'sh ${quote('$temporary/install.sh')} ${quote(host)} $httpsPort ${quote('$temporary/yggvion')} ${quote(artifact['sha256'] as String)}';
+      onStatus(switch (operation) {
+        ServerOperation.install => 'Устанавливаем сервис и сертификат',
+        ServerOperation.update => 'Обновляем сервер и применяем миграции',
+        ServerOperation.uninstall => 'Удаляем сервер',
+      });
+      final command = operation == ServerOperation.uninstall
+          ? 'sh ${quote('$temporary/install.sh')} ${deleteData ? 'purge DELETE-YGGVION' : 'keep-data'}'
+          : 'sh ${quote('$temporary/install.sh')} ${quote(host)} $httpsPort ${quote('$temporary/yggvion')} ${quote(artifact!['sha256'] as String)} ${operation.name}';
       String output;
       if (user == 'root') {
         output = await run(command);
@@ -151,10 +169,24 @@ class ServerInstaller {
         await session.done;
         if (session.exitCode != 0) {
           throw StateError(
-            'Установка через sudo не завершилась. Проверьте права пользователя и пароль.',
+            'Операция через sudo остановлена: ${outputs[1].trim()}',
           );
         }
         output = outputs.first;
+      }
+      if (operation == ServerOperation.uninstall) {
+        await sync.disconnect();
+        onStatus(
+          deleteData
+              ? 'Сервер и его данные удалены. Локальные данные сохранены.'
+              : 'Сервер удалён. База и файлы сохранены на VPS.',
+        );
+        return;
+      }
+      if (operation == ServerOperation.update) {
+        onStatus('Сервер обновлён. Данные и подключения сохранены.');
+        await sync.sync();
+        return;
       }
       final payload = output
           .split('\n')

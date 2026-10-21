@@ -27,6 +27,28 @@ func env(key, fallback string) string {
 	return fallback
 }
 func main() {
+	if len(os.Args) > 1 && (os.Args[1] == "migrate" || os.Args[1] == "snapshot-db") {
+		dir := env("YGGVION_DATA_DIR", "data")
+		var err error
+		if os.Args[1] == "snapshot-db" {
+			if len(os.Args) != 3 {
+				slog.Error("snapshot-db requires destination")
+				os.Exit(1)
+			}
+			err = store.SnapshotDatabase(filepath.Join(dir, "yggvion.db"), os.Args[2])
+		} else {
+			var db *store.Store
+			db, err = store.Open(filepath.Join(dir, "yggvion.db"))
+			if err == nil {
+				err = db.Close()
+			}
+		}
+		if err != nil {
+			slog.Error("database maintenance", "error", err)
+			os.Exit(1)
+		}
+		return
+	}
 	if len(os.Args) > 1 && os.Args[1] == "backup" {
 		dir := env("YGGVION_DATA_DIR", "data")
 		s, err := store.Open(filepath.Join(dir, "yggvion.db"))

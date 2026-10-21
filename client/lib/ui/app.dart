@@ -245,6 +245,28 @@ class _WorkspaceState extends ConsumerState<Workspace>
   @override
   Widget build(BuildContext context) {
     final repo = ref.watch(appProvider), size = MediaQuery.sizeOf(context);
+    ref.listen(openNoteProvider, (_, id) {
+      if (id == null) return;
+      final navigator = Navigator.of(context);
+      if (navigator.canPop()) {
+        // Keep an event editor (and its unsaved draft) underneath the note.
+        navigator.push<void>(
+          MaterialPageRoute(
+            builder: (_) => Scaffold(
+              appBar: AppBar(title: const Text('Заметка')),
+              body: NotesPage(initialId: id),
+            ),
+          ),
+        );
+      } else {
+        setState(() {
+          page = PageKind.notes;
+          selectedNote = id;
+          newNoteId = null;
+        });
+      }
+      ref.read(openNoteProvider.notifier).state = null;
+    });
     ref.listen(appProvider, (_, current) {
       if (projectId.isNotEmpty &&
           !current.snapshot.projects.any(

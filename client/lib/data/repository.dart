@@ -497,8 +497,12 @@ class Repository extends ChangeNotifier {
     await commit(changes);
   }
 
-  Future<Note> createNote() async {
-    final note = Note.create(newId(), 'Новая заметка');
+  Future<Note> createNote({String folderId = ''}) async {
+    final siblings = snapshot.notesInFolder(folderId);
+    final note = Note.create(newId(), 'Новая заметка').change({
+      'folder_id': folderId,
+      'sort_order': (siblings.lastOrNull?.sortOrder ?? 0) + 1024,
+    });
     await commit([note]);
     return Note(note);
   }
@@ -509,11 +513,108 @@ class Repository extends ChangeNotifier {
         if (entity == null || entity.deleted) return [];
         return [
           entity.change({
-            'title': title.trim().isEmpty ? 'Без названия' : title.trim(),
+            'title': title.trim().isEmpty ? 'Новая заметка' : title.trim(),
             'content': content,
           }),
         ];
       });
+
+  Future<void> renameNote(String id, String title) => commitComputed(() async {
+    if (utf8.encode(title.trim()).length > 1000) {
+      throw ArgumentError('Название слишком длинное');
+    }
+    final entity = await db.entity(id);
+    if (entity == null || entity.deleted || entity.kind != 'note') return [];
+    return [
+      entity.change({
+        'title': title.trim().isEmpty ? 'Новая заметка' : title.trim(),
+      }),
+    ];
+  });
+
+  Future<void> saveNoteContent(String id, String content) => commitComputed(
+    () async {
+      final entity = await db.entity(id);
+      if (entity == null || entity.deleted || entity.kind != 'note') return [];
+      return [
+        entity.change({'content': content}),
+      ];
+    },
+  );
+
+  Future<void> saveNoteFolder(String title, {NoteFolder? folder}) async {
+    if (title.trim().isEmpty || utf8.encode(title.trim()).length > 1000) {
+      throw ArgumentError('Введите название папки до 250 символов');
+    }
+    await commit([
+      folder?.entity.change({'title': title.trim()}) ??
+          Entity(
+            id: newId(),
+            kind: 'note_folder',
+            data: {
+              'title': title.trim(),
+              'sort_order':
+                  (snapshot.noteFolders.lastOrNull?.sortOrder ?? 0) + 1024,
+            },
+          ),
+    ]);
+  }
+
+  Future<void> deleteNoteFolder(NoteFolder folder) => commitComputed(
+    () async => [
+      for (final note in snapshot.notes.where((n) => n.folderId == folder.id))
+        note.entity.change({'folder_id': ''}),
+      folder.entity.tombstone(),
+    ],
+  );
+
+  Future<void> moveNote(String id, String folderId, {String? beforeId}) =>
+      commitComputed(() async {
+        final note = snapshot.note(id);
+        if (note == null || note.pinned.isNotEmpty) return [];
+        if (folderId.isNotEmpty &&
+            !snapshot.noteFolders.any((f) => f.id == folderId)) {
+          throw ArgumentError('Папка уже удалена');
+        }
+        final siblings = snapshot
+            .notesInFolder(folderId)
+            .where((n) => n.id != id)
+            .toList();
+        var index = beforeId == null
+            ? siblings.length
+            : siblings.indexWhere((n) => n.id == beforeId);
+        if (index < 0) index = siblings.length;
+        final lower = index == 0
+            ? (siblings.firstOrNull?.sortOrder ?? 0) - 2048
+            : siblings[index - 1].sortOrder;
+        final upper = index == siblings.length
+            ? lower + 2048
+            : siblings[index].sortOrder;
+        if (upper - lower > 1 && lower.abs() < 1000000000000) {
+          return [
+            note.entity.change({
+              'folder_id': folderId,
+              'sort_order': (lower + upper) ~/ 2,
+            }),
+          ];
+        }
+        siblings.insert(index, note);
+        return [
+          for (var i = 0; i < siblings.length; i++)
+            siblings[i].entity.change({
+              'folder_id': folderId,
+              'sort_order': (i + 1) * 1024,
+            }),
+        ];
+      });
+
+  Future<void> reorderNoteFolders(List<String> ids) => commitComputed(
+    () async => [
+      for (var i = 0; i < ids.length; i++)
+        for (final folder in snapshot.noteFolders.where((f) => f.id == ids[i]))
+          folder.entity.change({'sort_order': (i + 1) * 1024}),
+    ],
+  );
 
   Future<void> discardEmptyNotes(Iterable<String> noteIds) {
     final ids = noteIds.toSet();
@@ -524,7 +625,9 @@ class Repository extends ChangeNotifier {
         final entity = await db.entity(id);
         if (entity == null || entity.deleted || entity.kind != 'note') continue;
         final note = Note(entity);
-        if (note.pinned.isEmpty && note.content.trim().isEmpty) {
+        if (note.pinned.isEmpty &&
+            note.explicitTitle.isEmpty &&
+            note.content.trim().isEmpty) {
           changes.add(entity.tombstone());
         }
       }

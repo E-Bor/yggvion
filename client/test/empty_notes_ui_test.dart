@@ -30,7 +30,10 @@ void main() {
           findsOneWidget,
         );
         expect(find.byType(NotePanel), findsNothing);
-        expect(find.byType(TextField), findsNothing);
+        expect(
+          find.byWidgetPredicate((w) => w is TextField && w.maxLines == null),
+          findsNothing,
+        );
       } finally {
         gate.complete();
         await settle(tester);
@@ -39,7 +42,10 @@ void main() {
       expect(find.byType(NotesPage), findsOneWidget);
       expect(repo.snapshot.notes.where((n) => n.pinned.isEmpty), isEmpty);
       await command(tester, LogicalKeyboardKey.keyN, shift: true);
-      await tester.enterText(find.byType(TextField), 'Сохранить');
+      await tester.enterText(
+        find.byWidgetPredicate((w) => w is TextField && w.maxLines == null),
+        'Сохранить',
+      );
       await tester.tap(find.byKey(const ValueKey('mobile-nav-today')));
       await settle(tester);
       expect(
@@ -79,7 +85,9 @@ void main() {
           ' \n🌱  ',
         ]) {
           await command(tester, LogicalKeyboardKey.keyN, shift: true);
-          final field = find.byType(TextField);
+          final field = find.byWidgetPredicate(
+            (w) => w is TextField && w.maxLines == null,
+          );
           expect(field, findsOneWidget);
           final id = tester
               .widget<NotePanel>(
@@ -122,7 +130,10 @@ void main() {
           await tester.tap(text);
         }
         await settle(tester);
-        await tester.enterText(find.byType(TextField), '  \n\n ');
+        await tester.enterText(
+          find.byWidgetPredicate((w) => w is TextField && w.maxLines == null),
+          '  \n\n ',
+        );
         await leaveAndReturn();
         saved.removeWhere((id, content) => content.contains('🌱'));
         expect({

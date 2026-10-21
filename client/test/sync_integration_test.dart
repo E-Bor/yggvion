@@ -104,6 +104,35 @@ void main() {
       expect(b.snapshot.settings.accentColor, 0xffb7a6e8);
       expect(b.snapshot.taskColor(b.snapshot.task(task.id)!), 0xff80adee);
       expect(await a.db.customSelect('SELECT * FROM outbox').get(), isEmpty);
+      // Folder metadata, manual ranks, titles and note links cross the same API.
+      await a.saveNoteFolder('Library');
+      final folderId = a.snapshot.noteFolders.single.id;
+      final noteA = await a.createNote(folderId: folderId);
+      final noteB = await a.createNote(folderId: folderId);
+      await a.saveNote(noteA.id, 'Plan', '# Meeting');
+      await a.saveNote(noteB.id, '', '# Resources\n\n[Plan](note:${noteA.id})');
+      await a.moveNote(noteB.id, folderId, beforeId: noteA.id);
+      await a.updateTask(
+        a.snapshot.task(task.id)!,
+        description: '[Resources](note:${noteB.id})',
+      );
+      await sa.sync();
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+      await sb.sync();
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+      expect(a.syncError, isNull);
+      expect(b.syncError, isNull);
+      expect(b.snapshot.noteFolders.single.title, 'Library');
+      expect(b.snapshot.notesInFolder(folderId).map((n) => n.id), [
+        noteB.id,
+        noteA.id,
+      ]);
+      expect(b.snapshot.note(noteA.id)!.displayLabel, 'Plan');
+      expect(b.snapshot.note(noteB.id)!.displayLabel, 'Resources');
+      expect(
+        b.snapshot.task(task.id)!.description,
+        contains('note:${noteB.id}'),
+      );
       await b.updateTask(
         b.snapshot.task(task.id)!,
         description: 'Edited from phone',

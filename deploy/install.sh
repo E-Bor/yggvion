@@ -2,10 +2,15 @@
 # Called through a verified SSH connection. Arguments contain no credentials.
 set -eu
 test "$(id -u)" = 0 || { echo 'Требуется root или sudo.' >&2; exit 1; }
+umask 077
+exec 9>/run/yggvion-maintenance.lock
+flock -n 9 || { echo 'Другая операция с сервером уже выполняется.' >&2; exit 1; }
 host=$1
 port=$2
 binary=$3
 expected=$4
+action=${5:-install}
+case "$action" in install|update) ;; *) echo 'Unknown installation action' >&2; exit 1;; esac
 case "$port" in ''|*[!0-9]*) exit 1;; esac
 test "$port" -ge 1 && test "$port" -le 65535
 . /etc/os-release
@@ -23,6 +28,11 @@ if test -n "$listeners"; then
     exit 1
   fi
 fi
+if test "$action" = update; then
+  test -x /opt/yggvion/yggvion && test -f /var/lib/yggvion/server.json || {
+    echo 'Сервер ещё не установлен.' >&2; exit 1;
+  }
+fi
 if ! id yggvion >/dev/null 2>&1; then
   useradd --system --home-dir /var/lib/yggvion --shell /usr/sbin/nologin yggvion
 fi
@@ -31,17 +41,23 @@ install -d -m 0700 -o yggvion -g yggvion /var/lib/yggvion
 # Reinstalling keeps the current identity, database and backups.
 install -m 0755 "$binary" /opt/yggvion/yggvion.next
 if test -x /opt/yggvion/yggvion; then
-  runuser -u yggvion -- env YGGVION_DATA_DIR=/var/lib/yggvion /opt/yggvion/yggvion.next backup
   cp /opt/yggvion/yggvion /opt/yggvion/yggvion.previous
   cp -p /etc/systemd/system/yggvion.service /opt/yggvion/service.previous
   cp -p /var/lib/yggvion/server.json /opt/yggvion/server.previous.json
 fi
 # Roll back the configuration as well as the executable if any installation
 # step fails. This also covers systemctl restart returning nonzero immediately.
+snapshot_ready=false
 rollback() {
   trap - EXIT
   set +e
   if test -x /opt/yggvion/yggvion.previous; then
+    systemctl stop yggvion
+    if test "$snapshot_ready" = true; then
+      rm -f /var/lib/yggvion/yggvion.db-wal /var/lib/yggvion/yggvion.db-shm
+      mv /var/lib/yggvion/upgrade.previous.sqlite /var/lib/yggvion/yggvion.db
+      chown yggvion:yggvion /var/lib/yggvion/yggvion.db
+    fi
     mv /opt/yggvion/yggvion.previous /opt/yggvion/yggvion
     cp -p /opt/yggvion/service.previous /etc/systemd/system/yggvion.service
     cp -p /opt/yggvion/server.previous.json /var/lib/yggvion/server.json
@@ -57,6 +73,13 @@ rollback() {
   exit 1
 }
 trap rollback EXIT
+if test -x /opt/yggvion/yggvion.previous; then
+  systemctl stop yggvion
+  rm -f /var/lib/yggvion/upgrade.previous.sqlite /var/lib/yggvion/upgrade.pending.sqlite
+  runuser -u yggvion -- env YGGVION_DATA_DIR=/var/lib/yggvion /opt/yggvion/yggvion.next snapshot-db /var/lib/yggvion/upgrade.pending.sqlite
+  mv /var/lib/yggvion/upgrade.pending.sqlite /var/lib/yggvion/upgrade.previous.sqlite
+  snapshot_ready=true
+fi
 mv /opt/yggvion/yggvion.next /opt/yggvion/yggvion
 cat > /etc/systemd/system/yggvion.service <<'UNIT'
 [Unit]
@@ -90,7 +113,12 @@ ReadWritePaths=/var/lib/yggvion
 [Install]
 WantedBy=multi-user.target
 UNIT
-runuser -u yggvion -- /opt/yggvion/yggvion bootstrap --data-dir /var/lib/yggvion --host "$host" --port "$port"
+if test "$action" = update; then
+  test -f /var/lib/yggvion/server.json
+  runuser -u yggvion -- env YGGVION_DATA_DIR=/var/lib/yggvion /opt/yggvion/yggvion migrate
+else
+  runuser -u yggvion -- /opt/yggvion/yggvion bootstrap --data-dir /var/lib/yggvion --host "$host" --port "$port"
+fi
 systemctl daemon-reload
 systemctl enable yggvion >/dev/null
 systemctl restart yggvion
@@ -102,3 +130,4 @@ if ! systemctl is-active --quiet yggvion; then
   exit 1
 fi
 trap - EXIT
+rm -f /var/lib/yggvion/upgrade.previous.sqlite /opt/yggvion/yggvion.previous /opt/yggvion/service.previous /opt/yggvion/server.previous.json

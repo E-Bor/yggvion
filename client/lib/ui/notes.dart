@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../domain/models.dart';
 import 'markdown_editor.dart';
@@ -23,12 +24,16 @@ class NotePanel extends ConsumerStatefulWidget {
 
 class _NotePanelState extends ConsumerState<NotePanel> {
   final editorKey = GlobalKey<LiveMarkdownEditorState>();
+  final titleController = TextEditingController();
+  final titleFocus = FocusNode();
   bool editing = false;
   String? saveError;
 
   @override
   void initState() {
     super.initState();
+    titleController.text =
+        ref.read(appProvider).snapshot.note(widget.noteId)?.explicitTitle ?? '';
     if (widget.autofocus) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
@@ -38,9 +43,16 @@ class _NotePanelState extends ConsumerState<NotePanel> {
     }
   }
 
+  @override
+  void dispose() {
+    titleController.dispose();
+    titleFocus.dispose();
+    super.dispose();
+  }
+
   Future<void> save(Note note, String content) async {
     try {
-      await ref.read(appProvider).saveNote(note.id, note.title, content);
+      await ref.read(appProvider).saveNoteContent(note.id, content);
       if (mounted && saveError != null) setState(() => saveError = null);
     } catch (e) {
       if (mounted) setState(() => saveError = 'Не удалось сохранить: $e');
@@ -56,6 +68,9 @@ class _NotePanelState extends ConsumerState<NotePanel> {
         .where((n) => n.id == widget.noteId)
         .firstOrNull;
     if (note == null) return const SizedBox.shrink();
+    if (!titleFocus.hasFocus && titleController.text != note.explicitTitle) {
+      titleController.text = note.explicitTitle;
+    }
     final mobile = MediaQuery.sizeOf(context).width < 800;
     final readOnly = !mobile && note.pinned == 'reference' && !editing;
     final editor = LiveMarkdownEditor(
@@ -120,6 +135,36 @@ class _NotePanelState extends ConsumerState<NotePanel> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            if (note.pinned.isEmpty) ...[
+              TextField(
+                key: ValueKey('note-title-${note.id}'),
+                controller: titleController,
+                focusNode: titleFocus,
+                maxLength: 250,
+                style: const TextStyle(
+                  fontSize: 21,
+                  fontWeight: FontWeight.w600,
+                  height: 1.3,
+                ),
+                decoration: const InputDecoration(
+                  hintText: 'Название · необязательно',
+                  counterText: '',
+                  filled: false,
+                  border: InputBorder.none,
+                  enabledBorder: InputBorder.none,
+                  focusedBorder: InputBorder.none,
+                  contentPadding: EdgeInsets.symmetric(vertical: 12),
+                ),
+                onTapOutside: (_) => titleFocus.unfocus(),
+                onSubmitted: (_) => editorKey.currentState?.focusEditor(),
+                onChanged: (value) => guard(
+                  context,
+                  () => ref.read(appProvider).renameNote(note.id, value),
+                ),
+              ),
+              const Divider(height: 1),
+              const SizedBox(height: 10),
+            ],
             if (widget.fill)
               Expanded(child: SingleChildScrollView(child: editor))
             else
@@ -156,7 +201,11 @@ class _NotesPageState extends ConsumerState<NotesPage> {
   @override
   Widget build(BuildContext context) {
     final repo = ref.watch(appProvider);
-    final regular = repo.snapshot.notes.where((n) => n.pinned.isEmpty).toList();
+    final regular = [
+      ...repo.snapshot.notesInFolder(''),
+      for (final folder in repo.snapshot.noteFolders)
+        ...repo.snapshot.notesInFolder(folder.id),
+    ];
     final mobile = MediaQuery.sizeOf(context).width < 800;
     if (mobile) {
       final opened = regular.where((note) => note.id == selected).firstOrNull;
@@ -184,9 +233,35 @@ class _NotesPageState extends ConsumerState<NotesPage> {
           const SizedBox(height: 14),
           const NotePanel(noteId: 'reference'),
           const SizedBox(height: 18),
-          const Text(
-            'Заметки',
-            style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
+          Row(
+            children: [
+              const Expanded(
+                child: Text(
+                  'Заметки',
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
+                ),
+              ),
+              TextButton.icon(
+                icon: const Icon(Icons.folder_outlined, size: 18),
+                label: const Text('Папки и порядок'),
+                onPressed: () => showModalBottomSheet<void>(
+                  context: context,
+                  isScrollControlled: true,
+                  builder: (sheet) => SizedBox(
+                    height: MediaQuery.sizeOf(sheet).height * .75,
+                    child: SafeArea(
+                      child: NoteLibrary(
+                        selected: selected,
+                        onSelect: (id) {
+                          Navigator.pop(sheet);
+                          setState(() => selected = id);
+                        },
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ],
           ),
           const SizedBox(height: 12),
           for (final note in regular.where(
@@ -205,93 +280,10 @@ class _NotesPageState extends ConsumerState<NotesPage> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         SizedBox(
-          width: 232,
-          child: ListView(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 16),
-            children: [
-              for (final note in [
-                ...repo.snapshot.notes.where((n) => n.pinned.isNotEmpty),
-                ...regular,
-              ])
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 2),
-                  child: Tooltip(
-                    message: note.displayLabel,
-                    waitDuration: const Duration(milliseconds: 600),
-                    child: ListTile(
-                      key: ValueKey('note-list-${note.id}'),
-                      dense: true,
-                      minTileHeight: 40,
-                      minVerticalPadding: 0,
-                      minLeadingWidth: 18,
-                      horizontalTitleGap: 8,
-                      contentPadding: const EdgeInsets.only(left: 10, right: 4),
-                      visualDensity: VisualDensity.compact,
-                      selected: id == note.id,
-                      selectedTileColor: context.accentColor.withValues(
-                        alpha: .08,
-                      ),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      leading: Icon(
-                        note.pinned.isEmpty
-                            ? Icons.description_outlined
-                            : Icons.push_pin_outlined,
-                        size: 17,
-                      ),
-                      title: Text(
-                        note.displayLabel,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(fontSize: 13, height: 1.2),
-                      ),
-                      onTap: () => setState(() => selected = note.id),
-                      trailing: note.pinned.isEmpty
-                          ? IconButton(
-                              padding: EdgeInsets.zero,
-                              constraints: const BoxConstraints(
-                                minWidth: 32,
-                                minHeight: 32,
-                              ),
-                              visualDensity: VisualDensity.compact,
-                              tooltip: 'Удалить заметку',
-                              icon: const Icon(
-                                Icons.delete_outline_rounded,
-                                size: 16,
-                              ),
-                              onPressed: () => guard(context, () async {
-                                final yes = await showDialog<bool>(
-                                  context: context,
-                                  builder: (c) => AlertDialog(
-                                    title: const Text('Удалить заметку?'),
-                                    content: Text(note.displayLabel),
-                                    actions: [
-                                      TextButton(
-                                        onPressed: () =>
-                                            Navigator.pop(c, false),
-                                        child: const Text('Отмена'),
-                                      ),
-                                      FilledButton(
-                                        onPressed: () => Navigator.pop(c, true),
-                                        child: const Text('Удалить'),
-                                      ),
-                                    ],
-                                  ),
-                                );
-                                if (yes == true) {
-                                  await repo.deleteEntity(note.entity);
-                                  if (mounted) {
-                                    setState(() => selected = null);
-                                  }
-                                }
-                              }),
-                            )
-                          : null,
-                    ),
-                  ),
-                ),
-            ],
+          width: 256,
+          child: NoteLibrary(
+            selected: id,
+            onSelect: (value) => setState(() => selected = value),
           ),
         ),
         const VerticalDivider(width: 1),
@@ -304,6 +296,320 @@ class _NotesPageState extends ConsumerState<NotesPage> {
               autofocus: pendingEdit == id,
               onAutofocus: () => setState(() => pendingEdit = null),
             ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class NoteLibrary extends ConsumerStatefulWidget {
+  const NoteLibrary({super.key, this.selected, required this.onSelect});
+  final String? selected;
+  final ValueChanged<String> onSelect;
+  @override
+  ConsumerState<NoteLibrary> createState() => _NoteLibraryState();
+}
+
+class _NoteLibraryState extends ConsumerState<NoteLibrary> {
+  final collapsed = <String>{};
+
+  Future<void> editFolder([NoteFolder? folder]) async {
+    final controller = TextEditingController(text: folder?.title ?? '');
+    final value = await showDialog<String>(
+      context: context,
+      builder: (dialog) => AlertDialog(
+        title: Text(folder == null ? 'Новая папка' : 'Название папки'),
+        content: TextField(
+          autofocus: true,
+          controller: controller,
+          maxLength: 250,
+          decoration: const InputDecoration(hintText: 'Например, Работа'),
+          onSubmitted: (value) => Navigator.pop(dialog, value),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialog),
+            child: const Text('Отмена'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialog, controller.text),
+            child: const Text('Сохранить'),
+          ),
+        ],
+      ),
+    );
+    // The route's exit animation may still use its controller.
+    Future<void>.delayed(const Duration(milliseconds: 300), controller.dispose);
+    if (value != null && mounted) {
+      await guard(
+        context,
+        () => ref.read(appProvider).saveNoteFolder(value, folder: folder),
+      );
+    }
+  }
+
+  Future<void> noteAction(String action, Note note) => guard(context, () async {
+    final repo = ref.read(appProvider);
+    if (action.startsWith('folder:')) {
+      await repo.moveNote(note.id, action.substring(7));
+    } else if (action == 'copy') {
+      final label = note.displayLabel.replaceAll(RegExp(r'[\[\]\\\r\n]'), ' ');
+      await Clipboard.setData(ClipboardData(text: '[$label](note:${note.id})'));
+    } else if (action == 'delete') {
+      final yes = await showDialog<bool>(
+        context: context,
+        builder: (dialog) => AlertDialog(
+          title: const Text('Удалить заметку?'),
+          content: Text(note.displayLabel),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialog, false),
+              child: const Text('Отмена'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(dialog, true),
+              child: const Text('Удалить'),
+            ),
+          ],
+        ),
+      );
+      if (yes == true) await repo.deleteEntity(note.entity);
+    }
+  });
+
+  Widget tile(Note note, {int? index}) => ListTile(
+    key: ValueKey('note-list-${note.id}'),
+    dense: true,
+    minTileHeight: 42,
+    minVerticalPadding: 0,
+    minLeadingWidth: 18,
+    horizontalTitleGap: 8,
+    contentPadding: const EdgeInsets.only(left: 8, right: 0),
+    selected: widget.selected == note.id,
+    selectedTileColor: context.accentColor.withValues(alpha: .10),
+    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+    leading: index == null
+        ? const Icon(Icons.push_pin_outlined, size: 17)
+        : ReorderableDragStartListener(
+            index: index,
+            child: MouseRegion(
+              cursor: SystemMouseCursors.grab,
+              child: const Padding(
+                padding: EdgeInsets.symmetric(vertical: 8),
+                child: Icon(
+                  Icons.drag_indicator_rounded,
+                  size: 18,
+                  color: Palette.muted,
+                ),
+              ),
+            ),
+          ),
+    title: Tooltip(
+      message: note.displayLabel,
+      child: Text(
+        note.displayLabel,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: const TextStyle(fontSize: 13, height: 1.2),
+      ),
+    ),
+    onTap: () => widget.onSelect(note.id),
+    trailing: PopupMenuButton<String>(
+      tooltip: 'Действия с заметкой',
+      padding: EdgeInsets.zero,
+      iconSize: 18,
+      onSelected: (action) => noteAction(action, note),
+      itemBuilder: (_) => [
+        const PopupMenuItem(value: 'copy', child: Text('Скопировать ссылку')),
+        if (note.pinned.isEmpty) ...[
+          const PopupMenuDivider(),
+          const PopupMenuItem(
+            value: 'folder:',
+            child: Text('Переместить → Без папки'),
+          ),
+          for (final folder in ref.read(appProvider).snapshot.noteFolders)
+            PopupMenuItem(
+              value: 'folder:${folder.id}',
+              child: Text('Переместить → ${folder.title}'),
+            ),
+          const PopupMenuDivider(),
+          const PopupMenuItem(value: 'delete', child: Text('Удалить заметку')),
+        ],
+      ],
+    ),
+  );
+
+  Widget group(String id, String title, {NoteFolder? folder}) {
+    final repo = ref.read(appProvider);
+    final notes = repo.snapshot.notesInFolder(id);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        ListTile(
+          dense: true,
+          minTileHeight: 42,
+          contentPadding: const EdgeInsets.only(left: 4),
+          leading: Icon(
+            collapsed.contains(id)
+                ? Icons.chevron_right_rounded
+                : Icons.expand_more_rounded,
+            size: 18,
+          ),
+          minLeadingWidth: 18,
+          horizontalTitleGap: 4,
+          title: Text(
+            title,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+          ),
+          subtitle: collapsed.contains(id)
+              ? Text(
+                  '${notes.length} заметок',
+                  style: const TextStyle(fontSize: 11),
+                )
+              : null,
+          onTap: () => setState(
+            () => collapsed.contains(id)
+                ? collapsed.remove(id)
+                : collapsed.add(id),
+          ),
+          trailing: folder == null
+              ? null
+              : PopupMenuButton<String>(
+                  iconSize: 17,
+                  tooltip: 'Действия с папкой',
+                  onSelected: (action) => guard(context, () async {
+                    if (action == 'rename') {
+                      await editFolder(folder);
+                      return;
+                    }
+                    if (action == 'delete') {
+                      final yes = await showDialog<bool>(
+                        context: context,
+                        builder: (dialog) => AlertDialog(
+                          title: const Text('Удалить папку?'),
+                          content: const Text(
+                            'Заметки останутся в разделе «Без папки».',
+                          ),
+                          actions: [
+                            TextButton(
+                              onPressed: () => Navigator.pop(dialog, false),
+                              child: const Text('Отмена'),
+                            ),
+                            FilledButton(
+                              onPressed: () => Navigator.pop(dialog, true),
+                              child: const Text('Удалить папку'),
+                            ),
+                          ],
+                        ),
+                      );
+                      if (yes == true) await repo.deleteNoteFolder(folder);
+                      return;
+                    }
+                    final ids = repo.snapshot.noteFolders
+                        .map((f) => f.id)
+                        .toList();
+                    final index = ids.indexOf(id),
+                        next = action == 'up'
+                            ? ids.indexOf(id) - 1
+                            : ids.indexOf(id) + 1;
+                    if (next < 0 || next >= ids.length) return;
+                    ids[index] = ids[next];
+                    ids[next] = id;
+                    await repo.reorderNoteFolders(ids);
+                  }),
+                  itemBuilder: (_) => const [
+                    PopupMenuItem(
+                      value: 'rename',
+                      child: Text('Переименовать'),
+                    ),
+                    PopupMenuItem(value: 'up', child: Text('Поднять')),
+                    PopupMenuItem(value: 'down', child: Text('Опустить')),
+                    PopupMenuItem(
+                      value: 'delete',
+                      child: Text('Удалить папку'),
+                    ),
+                  ],
+                ),
+        ),
+        if (!collapsed.contains(id))
+          if (notes.isEmpty)
+            const Padding(
+              padding: EdgeInsets.only(left: 26, bottom: 12),
+              child: Text(
+                'Пока пусто',
+                style: TextStyle(color: Palette.muted, fontSize: 12),
+              ),
+            )
+          else
+            ReorderableListView(
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              buildDefaultDragHandles: false,
+              onReorder: (old, next) {
+                final moved = [...notes];
+                if (next > old) next--;
+                final note = moved.removeAt(old);
+                moved.insert(next, note);
+                guard(
+                  context,
+                  () => repo.moveNote(
+                    note.id,
+                    id,
+                    beforeId: next + 1 < moved.length
+                        ? moved[next + 1].id
+                        : null,
+                  ),
+                );
+              },
+              children: [
+                for (var i = 0; i < notes.length; i++) tile(notes[i], index: i),
+              ],
+            ),
+      ],
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final snapshot = ref.watch(appProvider).snapshot;
+    return ListView(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 16),
+      children: [
+        Row(
+          children: [
+            const SizedBox(width: 8),
+            const Expanded(
+              child: Text(
+                'БИБЛИОТЕКА',
+                style: TextStyle(
+                  color: Palette.muted,
+                  fontSize: 10,
+                  letterSpacing: 1.5,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+            IconButton(
+              onPressed: editFolder,
+              tooltip: 'Создать папку',
+              icon: const Icon(Icons.create_new_folder_outlined, size: 19),
+            ),
+          ],
+        ),
+        for (final note in snapshot.notes.where((n) => n.pinned.isNotEmpty))
+          tile(note),
+        const Divider(height: 24),
+        group('', 'Без папки'),
+        for (final folder in snapshot.noteFolders)
+          group(folder.id, folder.title, folder: folder),
+        const Padding(
+          padding: EdgeInsets.all(8),
+          child: Text(
+            'Перетащите значок слева, чтобы изменить порядок',
+            style: TextStyle(fontSize: 11, color: Palette.muted, height: 1.5),
           ),
         ),
       ],

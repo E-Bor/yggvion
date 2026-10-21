@@ -235,17 +235,39 @@ class Note {
   String get title => entity.data['title'] as String;
   String get content => entity.data['content'] as String? ?? '';
   String get pinned => entity.data['pinned'] as String? ?? '';
-  // Titles remain on the wire for compatibility. The UI identifies regular
-  // notes by their content, without a separate editable title.
+  String get explicitTitle =>
+      title == 'Новая заметка' || title == 'Без названия' ? '' : title.trim();
+  String get folderId => entity.data['folder_id'] as String? ?? '';
+  int get sortOrder => entity.data['sort_order'] as int? ?? 0;
   String get displayLabel {
     if (pinned.isNotEmpty) return title;
+    if (explicitTitle.isNotEmpty) return explicitTitle;
+    String? fence;
+    String? previous;
+    for (final line in const LineSplitter().convert(content)) {
+      final text = line.trim();
+      final marker = RegExp(r'^(`{3,}|~{3,})').firstMatch(text);
+      if (marker != null) {
+        final char = marker[1]![0];
+        fence = fence == char ? null : fence ?? char;
+        previous = null;
+        continue;
+      }
+      if (fence != null) continue;
+      final heading = RegExp(r'^#{1,6}\s+(.+?)\s*#*\s*$').firstMatch(text);
+      if (heading != null) return heading[1]!;
+      if (previous != null && RegExp(r'^(={3,}|-{3,})$').hasMatch(text)) {
+        return previous;
+      }
+      previous = text.isEmpty ? null : text;
+    }
     final firstLine = const LineSplitter()
         .convert(content)
         .map((line) => line.trim())
         .where((line) => line.isNotEmpty)
         .firstOrNull;
     if (firstLine == null) {
-      return title == 'Новая заметка' ? 'Пустая заметка' : title;
+      return 'Пустая заметка';
     }
     return firstLine.replaceFirst(RegExp(r'^#{1,6}\s+'), '');
   }
@@ -260,6 +282,14 @@ class Note {
     kind: 'note',
     data: {'title': title, 'content': content, 'pinned': pinned},
   );
+}
+
+class NoteFolder {
+  const NoteFolder(this.entity);
+  final Entity entity;
+  String get id => entity.id;
+  String get title => entity.data['title'] as String;
+  int get sortOrder => entity.data['sort_order'] as int? ?? 0;
 }
 
 class Project {
@@ -380,6 +410,33 @@ class Snapshot {
       .where((e) => e.kind == 'note')
       .map(Note.new)
       .toList();
+  late final noteFolders =
+      entities
+          .where((e) => e.kind == 'note_folder')
+          .map(NoteFolder.new)
+          .toList()
+        ..sort(
+          (a, b) => a.sortOrder != b.sortOrder
+              ? a.sortOrder.compareTo(b.sortOrder)
+              : a.id.compareTo(b.id),
+        );
+  Note? note(String id) => notes.where((n) => n.id == id).firstOrNull;
+  List<Note> notesInFolder(String folderId) {
+    final folders = noteFolders.map((f) => f.id).toSet();
+    return notes
+        .where(
+          (n) =>
+              n.pinned.isEmpty &&
+              (folders.contains(n.folderId) ? n.folderId : '') == folderId,
+        )
+        .toList()
+      ..sort(
+        (a, b) => a.sortOrder != b.sortOrder
+            ? a.sortOrder.compareTo(b.sortOrder)
+            : a.id.compareTo(b.id),
+      );
+  }
+
   late final projects = entities
       .where((e) => e.kind == 'project')
       .map(Project.new)

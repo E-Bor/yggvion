@@ -28,13 +28,14 @@ void main() {
       'Прежнее название',
       content: '\n\n## План\n\nТекст',
     );
-    expect(Note(old).displayLabel, 'План');
+    expect(Note(old).displayLabel, 'Прежнее название');
+    expect(Note(old.change({'title': ''})).displayLabel, 'План');
     expect(Note(old).title, 'Прежнее название');
     expect(
       Note(
         old.change({'content': 'config_name: true\nother: false'}),
       ).displayLabel,
-      'config_name: true',
+      'Прежнее название',
     );
     expect(
       Note(old.change({'content': '   '})).displayLabel,

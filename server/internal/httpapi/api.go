@@ -21,6 +21,7 @@ import (
 
 	"yggvion/server/internal/backup"
 	"yggvion/server/internal/domain"
+	"yggvion/server/internal/metrics"
 	"yggvion/server/internal/store"
 )
 
@@ -32,6 +33,7 @@ type API struct {
 	Backups      *backup.Manager
 	Lifetime     context.Context
 	CAPEM        string
+	Metrics      *metrics.Collector
 	pairWindow   time.Time
 	pairAttempts int
 	mu           sync.Mutex
@@ -40,7 +42,7 @@ type API struct {
 type deviceKey struct{}
 
 func New(s *store.Store, key, files string) *API {
-	return &API{Store: s, PairingKey: key, Files: files, Lifetime: context.Background(), subscribers: make(map[chan struct{}]struct{})}
+	return &API{Store: s, PairingKey: key, Files: files, Lifetime: context.Background(), Metrics: metrics.New(filepath.Dir(files)), subscribers: make(map[chan struct{}]struct{})}
 }
 func (a *API) Handler() http.Handler {
 	mux := http.NewServeMux()
@@ -55,6 +57,14 @@ func (a *API) Handler() http.Handler {
 	mux.Handle("GET /api/v1/attachments/{id}", a.auth(a.current(http.HandlerFunc(a.download))))
 	mux.Handle("GET /api/v1/state", a.auth(http.HandlerFunc(a.state)))
 	mux.Handle("POST /api/v1/invitations", a.auth(http.HandlerFunc(a.invite)))
+	mux.Handle("GET /api/v1/metrics", a.auth(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		snapshot, err := a.Metrics.Read(r.Context())
+		if err != nil {
+			fail(w, 503, "metrics_unavailable")
+			return
+		}
+		write(w, 200, snapshot)
+	})))
 	a.backupRoutes(mux)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Content-Type-Options", "nosniff")

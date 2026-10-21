@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:open_filex/open_filex.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../data/clipboard.dart';
+import '../domain/models.dart';
 import 'providers.dart';
 import 'theme.dart';
 
@@ -18,70 +19,141 @@ class MarkdownPreview extends ConsumerWidget {
   final String text;
   final bool selectable;
   @override
-  Widget build(BuildContext context, WidgetRef ref) => MarkdownBody(
-    data: text,
-    selectable: selectable,
-    styleSheet: MarkdownStyleSheet.fromTheme(Theme.of(context)).copyWith(
-      p: const TextStyle(height: 1.65, color: Palette.text),
-      code: TextStyle(
-        fontFamily: 'monospace',
-        fontSize: 12,
-        color: context.accentColor,
-      ),
-      blockquoteDecoration: BoxDecoration(
-        border: Border(left: BorderSide(color: context.accentColor, width: 2)),
-      ),
-    ),
-    onTapLink: (label, href, title) {
-      if (href == null) return;
-      guard(context, () async {
-        final uri = Uri.parse(href);
-        if (uri.scheme == 'attachment') {
-          final path = await ref.read(appProvider).attachmentPath(uri.path);
-          if (path == null) {
-            throw StateError('Вложение ещё не загружено на это устройство');
-          }
-          final result = await OpenFilex.open(path);
-          if (result.type != ResultType.done) throw StateError(result.message);
-        } else if (['https', 'http', 'mailto'].contains(uri.scheme)) {
-          if (!await launchUrl(uri, mode: LaunchMode.externalApplication)) {
-            throw StateError('Не удалось открыть ссылку');
-          }
-        }
-      });
-    },
-    imageBuilder: (uri, title, alt) {
-      if (uri.scheme == 'attachment') {
-        return FutureBuilder<String?>(
-          future: ref.read(appProvider).attachmentPath(uri.path),
-          builder: (context, snapshot) {
-            if (snapshot.data == null) {
-              return Container(
-                padding: const EdgeInsets.all(14),
-                decoration: BoxDecoration(
-                  color: Palette.raised,
-                  borderRadius: BorderRadius.circular(10),
+  Widget build(BuildContext context, WidgetRef ref) {
+    final match = RegExp(
+      r'^\[([^\]]*)\]\(note:([a-zA-Z0-9_-]+)\)$',
+    ).firstMatch(text.trim());
+    if (match != null) {
+      final note = ref.watch(appProvider).snapshot.note(match[2]!);
+      return Material(
+        color: Palette.raised,
+        borderRadius: BorderRadius.circular(12),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(12),
+          onTap: () => showNotePreview(context, match[2]!),
+          child: Padding(
+            padding: const EdgeInsets.all(14),
+            child: Row(
+              children: [
+                Icon(
+                  Icons.description_outlined,
+                  color: context.accentColor,
+                  size: 22,
                 ),
-                child: Text(alt ?? 'Изображение ожидает синхронизации'),
-              );
-            }
-            return ClipRRect(
-              borderRadius: BorderRadius.circular(10),
-              child: Image.file(
-                File(snapshot.data!),
-                fit: BoxFit.contain,
-                errorBuilder: (_, error, stack) =>
-                    const Text('Не удалось прочитать изображение'),
-              ),
-            );
-          },
-        );
-      }
-      return const Text(
-        'Внешнее изображение: откройте ссылку или добавьте файл',
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        note?.displayLabel ?? match[1]!,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(fontWeight: FontWeight.w600),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        note == null
+                            ? 'Заметка недоступна'
+                            : note.content.replaceAll('\n', ' '),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontSize: 12,
+                          color: Palette.muted,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const Icon(
+                  Icons.north_east_rounded,
+                  size: 16,
+                  color: Palette.muted,
+                ),
+              ],
+            ),
+          ),
+        ),
       );
-    },
-  );
+    }
+    return MarkdownBody(
+      data: text,
+      selectable: selectable,
+      styleSheet: MarkdownStyleSheet.fromTheme(Theme.of(context)).copyWith(
+        p: const TextStyle(height: 1.65, color: Palette.text),
+        code: TextStyle(
+          fontFamily: 'monospace',
+          fontSize: 12,
+          color: context.accentColor,
+        ),
+        blockquoteDecoration: BoxDecoration(
+          border: Border(
+            left: BorderSide(color: context.accentColor, width: 2),
+          ),
+        ),
+      ),
+      onTapLink: (label, href, title) {
+        if (href == null) return;
+        guard(context, () async {
+          final uri = Uri.parse(href);
+          if (uri.scheme == 'note' ||
+              (uri.scheme == 'yggvion' && uri.host == 'note')) {
+            await showNotePreview(
+              context,
+              uri.path.replaceFirst(RegExp(r'^/'), ''),
+            );
+          } else if (uri.scheme == 'attachment') {
+            final path = await ref.read(appProvider).attachmentPath(uri.path);
+            if (path == null) {
+              throw StateError('Вложение ещё не загружено на это устройство');
+            }
+            final result = await OpenFilex.open(path);
+            if (result.type != ResultType.done) {
+              throw StateError(result.message);
+            }
+          } else if (['https', 'http', 'mailto'].contains(uri.scheme)) {
+            if (!await launchUrl(uri, mode: LaunchMode.externalApplication)) {
+              throw StateError('Не удалось открыть ссылку');
+            }
+          } else {
+            throw StateError('Этот тип ссылки пока не поддерживается');
+          }
+        });
+      },
+      imageBuilder: (uri, title, alt) {
+        if (uri.scheme == 'attachment') {
+          return FutureBuilder<String?>(
+            future: ref.read(appProvider).attachmentPath(uri.path),
+            builder: (context, snapshot) {
+              if (snapshot.data == null) {
+                return Container(
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: Palette.raised,
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Text(alt ?? 'Изображение ожидает синхронизации'),
+                );
+              }
+              return ClipRRect(
+                borderRadius: BorderRadius.circular(10),
+                child: Image.file(
+                  File(snapshot.data!),
+                  fit: BoxFit.contain,
+                  errorBuilder: (_, error, stack) =>
+                      const Text('Не удалось прочитать изображение'),
+                ),
+              );
+            },
+          );
+        }
+        return const Text(
+          'Внешнее изображение: откройте ссылку или добавьте файл',
+        );
+      },
+    );
+  }
 }
 
 /// The focused Markdown block exposes source; other blocks render immediately.
@@ -299,6 +371,17 @@ class LiveMarkdownEditorState extends ConsumerState<LiveMarkdownEditor> {
     return ClipboardPaste(links.join('\n\n'), hasAttachments: true);
   });
 
+  Future<void> _linkNote() async {
+    final selection = _selection;
+    final note = await pickNote(context);
+    if (note == null || !mounted || widget.readOnly) return;
+    final label = note.displayLabel.replaceAll(RegExp(r'[\[\]\\\r\n]'), ' ');
+    _insert(
+      ClipboardPaste('[$label](note:${note.id})', hasAttachments: false),
+      selection,
+    );
+  }
+
   void _insert(ClipboardPaste content, TextSelection selection) {
     final start = selection.start.clamp(0, _last.length);
     final end = selection.end.clamp(start, _last.length);
@@ -391,6 +474,11 @@ class LiveMarkdownEditorState extends ConsumerState<LiveMarkdownEditor> {
                   ),
                 const Spacer(),
                 if (_showToolbarActions) ...[
+                  IconButton(
+                    tooltip: 'Ссылка на заметку',
+                    onPressed: _pasting ? null : _linkNote,
+                    icon: const Icon(Icons.add_link_rounded, size: 19),
+                  ),
                   IconButton(
                     tooltip: 'Прикрепить изображение или файл',
                     onPressed: _pasting ? null : _attach,
@@ -539,3 +627,134 @@ class LiveMarkdownEditorState extends ConsumerState<LiveMarkdownEditor> {
     ),
   );
 }
+
+Future<Note?> pickNote(BuildContext context) =>
+    showDialog<Note>(context: context, builder: (_) => const _NotePicker());
+
+class _NotePicker extends ConsumerStatefulWidget {
+  const _NotePicker();
+  @override
+  ConsumerState<_NotePicker> createState() => _NotePickerState();
+}
+
+class _NotePickerState extends ConsumerState<_NotePicker> {
+  String query = '';
+  @override
+  Widget build(BuildContext context) {
+    final notes = ref
+        .watch(appProvider)
+        .snapshot
+        .notes
+        .where(
+          (n) => n.displayLabel.toLowerCase().contains(query.toLowerCase()),
+        )
+        .take(100)
+        .toList();
+    return AlertDialog(
+      title: const Text('Ссылка на заметку'),
+      content: SizedBox(
+        width: 480,
+        height: 380,
+        child: Column(
+          children: [
+            TextField(
+              autofocus: true,
+              decoration: const InputDecoration(
+                hintText: 'Найти заметку',
+                prefixIcon: Icon(Icons.search_rounded),
+              ),
+              onChanged: (v) => setState(() => query = v),
+            ),
+            const SizedBox(height: 12),
+            Expanded(
+              child: notes.isEmpty
+                  ? const Center(child: Text('Заметок не найдено'))
+                  : ListView.builder(
+                      itemCount: notes.length,
+                      itemBuilder: (_, i) {
+                        final note = notes[i];
+                        return ListTile(
+                          leading: const Icon(Icons.description_outlined),
+                          title: Text(
+                            note.displayLabel,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          subtitle: Text(
+                            note.content.replaceAll('\n', ' '),
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          onTap: () => Navigator.pop(context, note),
+                        );
+                      },
+                    ),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Отмена'),
+        ),
+      ],
+    );
+  }
+}
+
+Future<void> showNotePreview(
+  BuildContext context,
+  String id,
+) => showDialog<void>(
+  context: context,
+  builder: (_) => Consumer(
+    builder: (context, ref, _) {
+      final note = ref.watch(appProvider).snapshot.note(id);
+      return AlertDialog(
+        title: Row(
+          children: [
+            const Icon(Icons.description_outlined, size: 22),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                note?.displayLabel ?? 'Заметка недоступна',
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ],
+        ),
+        content: SizedBox(
+          width: 560,
+          child: ConstrainedBox(
+            constraints: BoxConstraints(
+              maxHeight: MediaQuery.sizeOf(context).height * .55,
+            ),
+            child: SingleChildScrollView(
+              child: note == null
+                  ? const Text('Заметка удалена или ещё не синхронизирована.')
+                  : MarkdownPreview(
+                      text: note.content.isEmpty ? 'Пока пусто' : note.content,
+                    ),
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Закрыть'),
+          ),
+          if (note != null)
+            FilledButton(
+              onPressed: () {
+                Navigator.pop(context);
+                ref.read(openNoteProvider.notifier).state = id;
+              },
+              child: const Text('Открыть заметку'),
+            ),
+        ],
+      );
+    },
+  ),
+);

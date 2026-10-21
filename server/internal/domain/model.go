@@ -62,9 +62,15 @@ type Session struct {
 }
 
 type Note struct {
-	Title   string `json:"title"`
-	Content string `json:"content"`
-	Pinned  string `json:"pinned"`
+	Title     string `json:"title"`
+	Content   string `json:"content"`
+	Pinned    string `json:"pinned"`
+	FolderID  string `json:"folder_id,omitempty"`
+	SortOrder int64  `json:"sort_order,omitempty"`
+}
+type NoteFolder struct {
+	Title     string `json:"title"`
+	SortOrder int64  `json:"sort_order,omitempty"`
 }
 
 type Project struct {
@@ -182,9 +188,16 @@ func Validate(r Record) error {
 			return errors.New("invalid note")
 		}
 		valid = title(n.Title) && (n.Pinned == "" || n.Pinned == "scratchpad" || n.Pinned == "reference")
+		valid = valid && (n.FolderID == "" || ValidID(n.FolderID)) && n.SortOrder >= -10000000000000 && n.SortOrder <= 10000000000000
 		if n.Pinned != "" {
 			valid = valid && r.ID == n.Pinned && !r.Deleted
 		}
+	case "note_folder":
+		var f NoteFolder
+		if err := json.Unmarshal(r.Data, &f); err != nil {
+			return errors.New("invalid note folder")
+		}
+		valid = title(f.Title) && f.SortOrder >= -10000000000000 && f.SortOrder <= 10000000000000
 	case "project":
 		var p Project
 		if err := json.Unmarshal(r.Data, &p); err != nil {

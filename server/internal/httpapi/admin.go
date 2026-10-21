@@ -38,7 +38,7 @@ func (a *API) state(w http.ResponseWriter, r *http.Request) {
 		fail(w, 500, "storage_error")
 		return
 	}
-	write(w, 200, map[string]any{"generation": generation, "generation_required": required, "protocol": 2, "private_ca": a.CAPEM, "backups": a.Backups != nil})
+	write(w, 200, map[string]any{"generation": generation, "generation_required": required, "protocol": 2, "note_folders": true, "server_schema": 3, "private_ca": a.CAPEM, "backups": a.Backups != nil})
 }
 func (a *API) invite(w http.ResponseWriter, r *http.Request) {
 	code, err := a.Store.Invite(r.Context(), r.Context().Value(deviceKey{}).(string))

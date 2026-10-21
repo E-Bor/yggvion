@@ -13,6 +13,7 @@ import 'package:yggvion/ui/theme.dart';
 
 class AdminFixture extends SyncService {
   AdminFixture(super.repo);
+  int metricRequests = 0;
   @override
   bool get connected => true;
   @override
@@ -24,12 +25,27 @@ class AdminFixture extends SyncService {
     String method,
     String path, {
     Object? data,
-  }) async => {
-    'config': {'every_hours': 24, 'keep_daily': 7, 'keep_weekly': 4},
-    'status': {'running': false},
-    'backups': <Object>[],
-    'remote': {'kind': 'disabled'},
-  };
+  }) async {
+    if (path == '/api/v1/metrics') {
+      metricRequests++;
+      return {
+        'sampled_at': '2026-10-21T10:00:00Z',
+        'cpu_percent': 12.5,
+        'memory_total_bytes': 4294967296,
+        'memory_used_bytes': 1073741824,
+        'process_memory_bytes': 67108864,
+        'disk_total_bytes': 42949672960,
+        'disk_available_bytes': 21474836480,
+        'uptime_seconds': 3600,
+      };
+    }
+    return {
+      'config': {'every_hours': 24, 'keep_daily': 7, 'keep_weekly': 4},
+      'status': {'running': false},
+      'backups': <Object>[],
+      'remote': {'kind': 'disabled'},
+    };
+  }
 }
 
 void main() {
@@ -78,6 +94,23 @@ void main() {
           isNull,
           reason: '${page.runtimeType} initial layout',
         );
+        if (page is SynchronizationPage) {
+          expect(find.text('Сервер доступен'), findsOneWidget);
+          expect(find.text('12.5%'), findsOneWidget);
+          expect(sync.metricRequests, 1);
+          await tester.pump(const Duration(minutes: 5));
+          expect(
+            sync.metricRequests,
+            1,
+            reason: 'No background metrics polling',
+          );
+          await sync.metrics();
+          expect(
+            sync.metricRequests,
+            1,
+            reason: 'Immediate refresh uses cache',
+          );
+        }
         await tester.drag(find.byType(ListView).first, const Offset(0, -700));
         await tester.pumpAndSettle();
         expect(

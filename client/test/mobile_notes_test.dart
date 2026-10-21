@@ -87,7 +87,9 @@ void main() {
       final id = repo.snapshot.notes
           .singleWhere((note) => note.pinned.isEmpty)
           .id;
-      final field = find.byType(TextField);
+      final field = find.byWidgetPredicate(
+        (w) => w is TextField && w.maxLines == null,
+      );
       expect(tester.widget<TextField>(field).focusNode!.hasFocus, isTrue);
       tester.view.viewInsets = const FakeViewPadding(bottom: 280);
       addTearDown(tester.view.resetViewInsets);
@@ -107,7 +109,10 @@ void main() {
       await settle(tester);
       await tester.tap(find.byKey(const ValueKey('mobile-nav-notes')));
       await settle(tester);
-      expect(find.byType(TextField), findsNothing);
+      expect(
+        find.byWidgetPredicate((w) => w is TextField && w.maxLines == null),
+        findsNothing,
+      );
       expect(tester.testTextInput.isVisible, isFalse);
       expect(find.text('Новая идея', findRichText: true), findsOneWidget);
       expect(
@@ -150,13 +155,18 @@ void main() {
         );
         await tester.tap(second);
         await settle(tester);
-        expect(find.byType(TextField), findsNothing);
+        expect(
+          find.byWidgetPredicate((w) => w is TextField && w.maxLines == null),
+          findsNothing,
+        );
         expect(tester.testTextInput.isVisible, isFalse);
         expect(find.byTooltip('Вставить из буфера обмена'), findsNothing);
 
         await tester.longPress(second);
         await settle(tester);
-        var field = find.byType(TextField);
+        var field = find.byWidgetPredicate(
+          (w) => w is TextField && w.maxLines == null,
+        );
         expect(field, findsOneWidget);
         expect(
           tester.widget<TextField>(field).controller!.text,
@@ -177,7 +187,10 @@ void main() {
 
         await tester.tap(find.text('Первый абзац', findRichText: true));
         await settle(tester);
-        expect(find.byType(TextField), findsNothing);
+        expect(
+          find.byWidgetPredicate((w) => w is TextField && w.maxLines == null),
+          findsNothing,
+        );
         expect(tester.testTextInput.isVisible, isFalse);
 
         await tester.longPress(
@@ -193,7 +206,10 @@ void main() {
               const Offset(12, 8),
         );
         await settle(tester);
-        expect(find.byType(TextField), findsNothing);
+        expect(
+          find.byWidgetPredicate((w) => w is TextField && w.maxLines == null),
+          findsNothing,
+        );
         expect(tester.testTextInput.isVisible, isFalse);
 
         await tester.longPress(
@@ -202,7 +218,10 @@ void main() {
         await settle(tester);
         await tester.tap(find.byKey(ValueKey('finish-note-$id')));
         await settle(tester);
-        expect(find.byType(TextField), findsNothing);
+        expect(
+          find.byWidgetPredicate((w) => w is TextField && w.maxLines == null),
+          findsNothing,
+        );
         expect(tester.testTextInput.isVisible, isFalse);
         await tester.runAsync(repo.reload);
         expect(
@@ -246,14 +265,20 @@ void main() {
       await settle(tester);
       expect(find.byTooltip('Live Preview'), findsOneWidget);
       expect(tester.testTextInput.isVisible, isTrue);
-      await tester.enterText(find.byType(TextField), '# Заголовок\n\nТекст');
+      await tester.enterText(
+        find.byWidgetPredicate((w) => w is TextField && w.maxLines == null),
+        '# Заголовок\n\nТекст',
+      );
       await settle(tester);
       await tester.tapAt(
         tester.getTopLeft(find.byKey(const ValueKey('workspace-header'))) +
             const Offset(16, 16),
       );
       await settle(tester);
-      expect(find.byType(TextField), findsNothing);
+      expect(
+        find.byWidgetPredicate((w) => w is TextField && w.maxLines == null),
+        findsNothing,
+      );
       expect(tester.testTextInput.isVisible, isFalse);
       expect(
         repo.snapshot.notes.singleWhere((n) => n.id == 'scratchpad').content,

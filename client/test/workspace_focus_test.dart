@@ -49,12 +49,14 @@ void main() {
       );
       await tester.pump(const Duration(milliseconds: 200));
       await settleSearch(tester);
-      expect(find.text('План поездки'), findsOneWidget);
-      expect(find.text('Прежнее название'), findsNothing);
-      await tester.tap(find.text('План поездки'));
+      expect(find.text('Прежнее название'), findsOneWidget);
+      await tester.tap(find.text('Прежнее название'));
       await settle(tester);
       expect(find.byType(NotesPage), findsOneWidget);
-      expect(find.byType(TextField), findsNothing);
+      expect(
+        find.byWidgetPredicate((w) => w is TextField && w.maxLines == null),
+        findsNothing,
+      );
       // Disposing a focused note while switching sections also retains shortcuts.
       await tester.tap(find.text('Список вещей', findRichText: true));
       await settle(tester);

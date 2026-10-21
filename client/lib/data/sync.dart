@@ -9,6 +9,7 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import '../domain/models.dart';
+import '../domain/server_metrics.dart';
 import 'repository.dart';
 
 class SyncService {
@@ -45,9 +46,84 @@ class SyncService {
   bool _pairing = false;
   String? _url, _token;
   String? _generation, _privateCA;
+  ServerMetrics? _metrics;
+  DateTime? _metricsFetched;
+  Future<ServerMetrics> metrics() async {
+    if (_metrics != null &&
+        _metricsFetched != null &&
+        DateTime.now().difference(_metricsFetched!) <
+            const Duration(seconds: 30)) {
+      return _metrics!;
+    }
+    final value = ServerMetrics.fromJson(
+      await request('GET', '/api/v1/metrics'),
+    );
+    _metrics = value;
+    _metricsFetched = DateTime.now();
+    return value;
+  }
+
   String? get privateCA => _privateCA;
   String? get url => _url;
   bool get connected => _url != null && _token != null;
+  Future<void> disconnect() async {
+    if (_pairing) throw StateError('Дождитесь завершения подключения');
+    _pairing = true;
+    try {
+      final deadline = DateTime.now().add(const Duration(minutes: 2));
+      while (_busy) {
+        if (DateTime.now().isAfter(deadline)) {
+          throw StateError('Синхронизация ещё выполняется');
+        }
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+      }
+      _url = null;
+      _token = null;
+      _generation = null;
+      if (_privateCA != null) {
+        client.httpClientAdapter.close(force: true);
+        client.httpClientAdapter = IOHttpClientAdapter();
+      }
+      _privateCA = null;
+      _metrics = null;
+      _metricsFetched = null;
+      _eventRetry?.cancel();
+      _eventCancel?.cancel();
+      await _events?.cancel();
+      _listening = false;
+      await secure.delete(key: 'server_token');
+      await secure.delete(key: 'server_ca');
+      await repo.serial(() async {
+        await repo.db.transaction(() async {
+          await repo.db.customStatement(
+            "DELETE FROM metadata WHERE key IN ('server_url','server_generation','sync_cursor')",
+          );
+          // A future connection may target a fresh server. Re-send local records
+          // and files; the server resolves equal IDs without losing edits.
+          final records = await repo.db.entities(includeDeleted: true);
+          await repo.db.customStatement('DELETE FROM outbox');
+          var ordinal = 0;
+          for (final old in records) {
+            final record = old.withVersion(0);
+            await repo.db.put(record);
+            await repo.db.customStatement(
+              'INSERT INTO outbox VALUES(?,?,?,?)',
+              [record.id, repo.newId(), record.encoded, ++ordinal],
+            );
+          }
+          await repo.db.customStatement('UPDATE files SET uploaded=0');
+          await repo.db.setMeta('ordinal', '$ordinal');
+        });
+        await repo.reload();
+      });
+      repo.syncStatus = 'Локально';
+      repo.syncError = null;
+      repo.publish();
+    } finally {
+      _pairing = false;
+    }
+  }
+
   Future<void> initialize() async {
     _url = await repo.db.meta('server_url');
     _token = _url == null ? null : await secure.read(key: 'server_token');
@@ -371,7 +447,7 @@ class SyncService {
         final pending = await repo.serial(
           () => repo.db
               .customSelect(
-                "SELECT * FROM outbox ORDER BY CASE json_extract(payload,'\$.kind') WHEN 'project' THEN 0 WHEN 'series' THEN 1 WHEN 'task' THEN 2 ELSE 3 END, ordinal LIMIT 100",
+                "SELECT * FROM outbox ORDER BY CASE json_extract(payload,'\$.kind') WHEN 'project' THEN 0 WHEN 'note_folder' THEN 0 WHEN 'series' THEN 1 WHEN 'task' THEN 2 ELSE 3 END, ordinal LIMIT 100",
               )
               .get(),
         );

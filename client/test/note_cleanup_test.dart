@@ -26,7 +26,7 @@ void main() {
       final kept = <String, String>{};
       for (final content in ['', '   ', '\n\n', ' \n\t\r\n\u00a0 ']) {
         final note = await repo.createNote();
-        await repo.saveNote(note.id, 'Удаляемая заметка', content);
+        await repo.saveNote(note.id, '', content);
         emptyIds.add(note.id);
       }
       for (final content in [
