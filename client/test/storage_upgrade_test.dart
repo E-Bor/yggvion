@@ -49,6 +49,8 @@ void main() {
 
         // Reproduce the real pre-upgrade schema, including the reverted v3 cache.
         final old = sqlite.sqlite3.open(file.path);
+        old.execute('DROP TABLE search_terms');
+        old.execute('DROP TABLE app_activity');
         if (version == 1) old.execute('DROP TABLE recovery_snapshots');
         if (version == 3) {
           old.execute(
@@ -99,7 +101,7 @@ void main() {
           expect(
             (await db.customSelect('PRAGMA user_version').getSingle())
                 .read<int>('user_version'),
-            4,
+            5,
           );
         } finally {
           await db.close();
@@ -116,6 +118,8 @@ void main() {
       await db.setMeta('ai_enabled', 'true');
       await db.close();
       final old = sqlite.sqlite3.open(file.path);
+      old.execute('DROP TABLE search_terms');
+      old.execute('DROP TABLE app_activity');
       old.execute('DROP TABLE recovery_snapshots');
       // A malformed cache must fail explicitly instead of reporting a successful
       // migration after deleting only part of the legacy data.

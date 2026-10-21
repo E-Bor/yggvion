@@ -6,6 +6,7 @@ import 'package:intl/date_symbol_data_local.dart';
 import 'package:timezone/data/latest.dart' as timezone;
 import 'data/database.dart';
 import 'data/app_icon.dart';
+import 'data/activity.dart';
 import 'data/reminders.dart';
 import 'data/repository.dart';
 import 'data/sync.dart';
@@ -26,6 +27,7 @@ Future<void> main() async {
     final reminders = ReminderService(repo);
     await reminders.initialize();
     final appIcons = AppIconService(repo)..start();
+    final activity = ApplicationActivity(repo.db)..start();
     runApp(
       ProviderScope(
         overrides: [
@@ -33,6 +35,7 @@ Future<void> main() async {
           syncProvider.overrideWithValue(sync),
           remindersProvider.overrideWithValue(reminders),
           appIconProvider.overrideWith((ref) => appIcons),
+          activityProvider.overrideWith((ref) => activity),
           invitationLinksProvider.overrideWithValue(AppLinks().uriLinkStream),
         ],
         child: const YggvionApp(),

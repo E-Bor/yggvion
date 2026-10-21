@@ -280,6 +280,7 @@ class AppSettings {
   // Keep the existing wire key so saved settings and older servers still work.
   int get accentColor =>
       entity.data['task_color'] as int? ?? defaultAccentColor;
+  int get searchTypos => (entity.data['search_typos'] as int? ?? 1).clamp(0, 2);
 }
 
 class Birthday {

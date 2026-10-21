@@ -205,7 +205,7 @@ class _NotesPageState extends ConsumerState<NotesPage> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         SizedBox(
-          width: 245,
+          width: 232,
           child: ListView(
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 16),
             children: [
@@ -214,62 +214,81 @@ class _NotesPageState extends ConsumerState<NotesPage> {
                 ...regular,
               ])
                 Padding(
-                  padding: const EdgeInsets.only(bottom: 4),
-                  child: ListTile(
-                    dense: true,
-                    selected: id == note.id,
-                    selectedTileColor: context.accentColor.withValues(
-                      alpha: .08,
-                    ),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                    leading: Icon(
-                      note.pinned.isEmpty
-                          ? Icons.description_outlined
-                          : Icons.push_pin_outlined,
-                      size: 17,
-                    ),
-                    title: Text(
-                      note.displayLabel,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    onTap: () => setState(() => selected = note.id),
-                    trailing: note.pinned.isEmpty
-                        ? IconButton(
-                            tooltip: 'Удалить заметку',
-                            icon: const Icon(
-                              Icons.delete_outline_rounded,
-                              size: 16,
-                            ),
-                            onPressed: () => guard(context, () async {
-                              final yes = await showDialog<bool>(
-                                context: context,
-                                builder: (c) => AlertDialog(
-                                  title: const Text('Удалить заметку?'),
-                                  content: Text(note.displayLabel),
-                                  actions: [
-                                    TextButton(
-                                      onPressed: () => Navigator.pop(c, false),
-                                      child: const Text('Отмена'),
-                                    ),
-                                    FilledButton(
-                                      onPressed: () => Navigator.pop(c, true),
-                                      child: const Text('Удалить'),
-                                    ),
-                                  ],
-                                ),
-                              );
-                              if (yes == true) {
-                                await repo.deleteEntity(note.entity);
-                                if (mounted) {
-                                  setState(() => selected = null);
+                  padding: const EdgeInsets.only(bottom: 2),
+                  child: Tooltip(
+                    message: note.displayLabel,
+                    waitDuration: const Duration(milliseconds: 600),
+                    child: ListTile(
+                      key: ValueKey('note-list-${note.id}'),
+                      dense: true,
+                      minTileHeight: 40,
+                      minVerticalPadding: 0,
+                      minLeadingWidth: 18,
+                      horizontalTitleGap: 8,
+                      contentPadding: const EdgeInsets.only(left: 10, right: 4),
+                      visualDensity: VisualDensity.compact,
+                      selected: id == note.id,
+                      selectedTileColor: context.accentColor.withValues(
+                        alpha: .08,
+                      ),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      leading: Icon(
+                        note.pinned.isEmpty
+                            ? Icons.description_outlined
+                            : Icons.push_pin_outlined,
+                        size: 17,
+                      ),
+                      title: Text(
+                        note.displayLabel,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(fontSize: 13, height: 1.2),
+                      ),
+                      onTap: () => setState(() => selected = note.id),
+                      trailing: note.pinned.isEmpty
+                          ? IconButton(
+                              padding: EdgeInsets.zero,
+                              constraints: const BoxConstraints(
+                                minWidth: 32,
+                                minHeight: 32,
+                              ),
+                              visualDensity: VisualDensity.compact,
+                              tooltip: 'Удалить заметку',
+                              icon: const Icon(
+                                Icons.delete_outline_rounded,
+                                size: 16,
+                              ),
+                              onPressed: () => guard(context, () async {
+                                final yes = await showDialog<bool>(
+                                  context: context,
+                                  builder: (c) => AlertDialog(
+                                    title: const Text('Удалить заметку?'),
+                                    content: Text(note.displayLabel),
+                                    actions: [
+                                      TextButton(
+                                        onPressed: () =>
+                                            Navigator.pop(c, false),
+                                        child: const Text('Отмена'),
+                                      ),
+                                      FilledButton(
+                                        onPressed: () => Navigator.pop(c, true),
+                                        child: const Text('Удалить'),
+                                      ),
+                                    ],
+                                  ),
+                                );
+                                if (yes == true) {
+                                  await repo.deleteEntity(note.entity);
+                                  if (mounted) {
+                                    setState(() => selected = null);
+                                  }
                                 }
-                              }
-                            }),
-                          )
-                        : null,
+                              }),
+                            )
+                          : null,
+                    ),
                   ),
                 ),
             ],

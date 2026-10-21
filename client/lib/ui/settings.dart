@@ -11,6 +11,7 @@ import 'task_editor.dart';
 import 'theme.dart';
 import 'birthdays.dart';
 import 'server_settings.dart';
+import 'statistics.dart';
 
 class SettingsPage extends ConsumerStatefulWidget {
   const SettingsPage({super.key, required this.onOpenBirthdays});
@@ -24,6 +25,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
   late String zone;
   late List<int> reminders;
   int? pendingAccentColor;
+  int? pendingSearchTypos;
   late int defaultMinutes;
   String? minutesError, saveError;
   int saveVersion = 0;
@@ -40,8 +42,9 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
     defaultMinutes = repo.snapshot.settings.defaultMinutes;
   }
 
-  Future<void> saveSettings({int? accentColor}) async {
+  Future<void> saveSettings({int? accentColor, int? searchTypos}) async {
     if (accentColor != null) pendingAccentColor = accentColor;
+    if (searchTypos != null) pendingSearchTypos = searchTypos;
     final version = ++saveVersion;
     setState(() {
       savingSettings = true;
@@ -55,8 +58,12 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
             [...reminders],
             zone,
             accentColor: pendingAccentColor,
+            searchTypos: pendingSearchTypos,
           );
-      if (version == saveVersion) pendingAccentColor = null;
+      if (version == saveVersion) {
+        pendingAccentColor = null;
+        pendingSearchTypos = null;
+      }
     } catch (error) {
       if (mounted && version == saveVersion) {
         setState(() => saveError = 'Не удалось сохранить настройки: $error');
@@ -284,6 +291,31 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 24),
+                  child: Card(
+                    child: ListTile(
+                      key: const ValueKey('open-statistics'),
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 24,
+                        vertical: 8,
+                      ),
+                      leading: Icon(
+                        Icons.insights_rounded,
+                        color: context.accentColor,
+                      ),
+                      title: const Text('Статистика'),
+                      subtitle: const Text('План, факт и привычки'),
+                      trailing: const Icon(Icons.chevron_right_rounded),
+                      onTap: () => Navigator.push(
+                        context,
+                        MaterialPageRoute<void>(
+                          builder: (_) => const StatisticsPage(),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
                 section(
                   'Планирование',
                   Column(
@@ -360,6 +392,31 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                             ),
                           ],
                         ),
+                      const SizedBox(height: 12),
+                      const Divider(),
+                      const SizedBox(height: 12),
+                      const Text('Точность поиска'),
+                      const SizedBox(height: 10),
+                      SegmentedButton<int>(
+                        key: const ValueKey('search-typos'),
+                        segments: const [
+                          ButtonSegment(value: 0, label: Text('Точно')),
+                          ButtonSegment(value: 1, label: Text('1 ошибка')),
+                          ButtonSegment(value: 2, label: Text('2 ошибки')),
+                        ],
+                        selected: {
+                          pendingSearchTypos ??
+                              repo.snapshot.settings.searchTypos,
+                        },
+                        showSelectedIcon: false,
+                        onSelectionChanged: (values) =>
+                            saveSettings(searchTypos: values.single),
+                      ),
+                      const SizedBox(height: 8),
+                      const Text(
+                        'Допуск на каждое слово от 3 символов: пропуск, лишняя буква, замена или перестановка соседних букв. Точные совпадения — первыми.',
+                        style: TextStyle(color: Palette.muted, fontSize: 12),
+                      ),
                       const SizedBox(height: 12),
                       Text(
                         saveError ??
@@ -539,7 +596,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                   ),
                 ),
                 section(
-                  'Подключение и помощник',
+                  'Подключение',
                   Column(
                     children: [
                       ListTile(
@@ -618,6 +675,7 @@ class ConflictsPanel extends ConsumerWidget {
       'default_minutes': 'Блок по умолчанию, мин',
       'reminders': 'Напоминания, мин до начала',
       'task_color': 'Акцентный цвет',
+      'search_typos': 'Допуск опечаток',
     };
     return labels.entries
         .where((e) => data.containsKey(e.key))

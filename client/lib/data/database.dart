@@ -1,12 +1,15 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:isolate';
+import 'dart:math' as math;
 import 'package:drift/drift.dart';
 import 'package:drift/native.dart';
 import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import '../domain/models.dart';
+import '../domain/fuzzy_search.dart';
 
 class LocalDatabase extends GeneratedDatabase {
   LocalDatabase(super.executor);
@@ -47,7 +50,7 @@ class LocalDatabase extends GeneratedDatabase {
   }
 
   @override
-  int get schemaVersion => 4;
+  int get schemaVersion => 5;
   @override
   Iterable<TableInfo<Table, Object?>> get allTables => const [];
   @override
@@ -64,6 +67,9 @@ class LocalDatabase extends GeneratedDatabase {
         'CREATE TABLE files(id TEXT PRIMARY KEY, name TEXT NOT NULL, path TEXT NOT NULL, uploaded INTEGER NOT NULL DEFAULT 0)',
         'CREATE TABLE recovery_snapshots(id TEXT PRIMARY KEY, created TEXT NOT NULL, payload TEXT NOT NULL)',
         "CREATE VIRTUAL TABLE search_index USING fts5(id UNINDEXED, content, tokenize='unicode61')",
+        "CREATE VIRTUAL TABLE search_terms USING fts5vocab(search_index, 'row')",
+        'CREATE TABLE app_activity(id INTEGER PRIMARY KEY, start INTEGER NOT NULL, end INTEGER NOT NULL)',
+        'CREATE INDEX app_activity_end ON app_activity(end)',
       ]) {
         await customStatement(sql);
       }
@@ -79,6 +85,17 @@ class LocalDatabase extends GeneratedDatabase {
         // Its vectors and AI metadata are disposable, unlike accepted tasks.
         await customStatement('DROP TABLE IF EXISTS semantic_vectors');
         await customStatement("DELETE FROM metadata WHERE key GLOB 'ai_*'");
+      }
+      if (from < 5) {
+        await customStatement(
+          "CREATE VIRTUAL TABLE search_terms USING fts5vocab(search_index, 'row')",
+        );
+        await customStatement(
+          'CREATE TABLE app_activity(id INTEGER PRIMARY KEY, start INTEGER NOT NULL, end INTEGER NOT NULL)',
+        );
+        await customStatement(
+          'CREATE INDEX app_activity_end ON app_activity(end)',
+        );
       }
     }),
     beforeOpen: (details) async {
@@ -146,15 +163,49 @@ class LocalDatabase extends GeneratedDatabase {
 
   Future<void> releaseReminder(String key) =>
       customStatement('DELETE FROM metadata WHERE key=?', [key]);
-  Future<List<Entity>> search(String query) async {
-    final words = RegExp(
-      r'[\p{L}\p{N}_]+',
-      unicode: true,
-    ).allMatches(query).map((m) => '"${m[0]}"*').take(20).join(' AND ');
+  Future<List<Entity>> search(String query, {int maxTypos = 0}) async {
+    if (maxTypos < 0 || maxTypos > 2) {
+      throw ArgumentError.value(maxTypos, 'maxTypos', 'Expected 0, 1 or 2');
+    }
+    final words = searchWords(query);
     if (words.isEmpty) return [];
+    final results = await _searchMatches(prefixSearchQuery(words));
+    if (maxTypos == 0 || results.length >= 100) return results;
+    final lengths = words
+        .map((word) => word.runes.length)
+        .where((length) => length >= 3 && length <= 64)
+        .toList();
+    if (lengths.isEmpty) return results;
+    final terms = await customSelect(
+      'SELECT term, doc FROM search_terms WHERE length(term) BETWEEN ? AND ?',
+      variables: [
+        Variable(math.max(1, lengths.reduce(math.min) - maxTypos)),
+        Variable(lengths.reduce(math.max) + maxTypos),
+      ],
+    ).get();
+    final vocabulary = terms
+        .map(
+          (row) =>
+              (word: row.read<String>('term'), documents: row.read<int>('doc')),
+        )
+        .toList();
+    final expansions = await Isolate.run(
+      () => expandedSearchQueries(words, vocabulary, maxTypos),
+    );
+    final ids = results.map((e) => e.id).toSet();
+    for (final expansion in expansions) {
+      for (final result in await _searchMatches(expansion)) {
+        if (ids.add(result.id)) results.add(result);
+        if (results.length >= 100) return results;
+      }
+    }
+    return results;
+  }
+
+  Future<List<Entity>> _searchMatches(String expression) async {
     final rows = await customSelect(
-      'SELECT r.payload FROM search_index s JOIN records r ON r.id=s.id WHERE search_index MATCH ? AND r.deleted=0 ORDER BY rank LIMIT 100',
-      variables: [Variable(words)],
+      "SELECT r.payload FROM search_index s JOIN records r ON r.id=s.id WHERE search_index MATCH ? AND r.deleted=0 AND r.kind IN ('task','note') ORDER BY rank LIMIT 100",
+      variables: [Variable(expression)],
     ).get();
     return rows
         .map(
@@ -163,5 +214,50 @@ class LocalDatabase extends GeneratedDatabase {
           ),
         )
         .toList();
+  }
+
+  Future<int> beginActivity(DateTime time) => customInsert(
+    'INSERT INTO app_activity(start,end) VALUES (?,?)',
+    variables: [
+      Variable(time.microsecondsSinceEpoch),
+      Variable(time.microsecondsSinceEpoch),
+    ],
+  );
+
+  Future<void> endActivity(int id, DateTime time) => customStatement(
+    'UPDATE app_activity SET end=? WHERE id=? AND end<?',
+    [time.microsecondsSinceEpoch, id, time.microsecondsSinceEpoch],
+  );
+
+  Future<List<TimeRange>> activity(DateTime start, DateTime end) async =>
+      (await customSelect(
+            'SELECT start,end FROM app_activity WHERE end>=? AND start<? ORDER BY start',
+            variables: [
+              Variable(start.microsecondsSinceEpoch),
+              Variable(end.microsecondsSinceEpoch),
+            ],
+          ).get())
+          .map(
+            (row) => TimeRange(
+              DateTime.fromMicrosecondsSinceEpoch(
+                row.read<int>('start'),
+                isUtc: true,
+              ),
+              DateTime.fromMicrosecondsSinceEpoch(
+                row.read<int>('end'),
+                isUtc: true,
+              ),
+            ),
+          )
+          .toList();
+
+  Future<DateTime?> get activityStarted async {
+    final row = await customSelect(
+      'SELECT min(start) AS first FROM app_activity',
+    ).getSingle();
+    final value = row.readNullable<int>('first');
+    return value == null
+        ? null
+        : DateTime.fromMicrosecondsSinceEpoch(value, isUtc: true);
   }
 }

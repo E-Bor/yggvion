@@ -603,6 +603,7 @@ class Repository extends ChangeNotifier {
     List<int> reminders,
     String timezone, {
     int? accentColor,
+    int? searchTypos,
   }) async {
     if (minutes < 5 || minutes > 1440) {
       throw ArgumentError('Длительность: от 5 до 1440 минут');
@@ -610,6 +611,9 @@ class Repository extends ChangeNotifier {
     if (accentColor != null &&
         (accentColor < 0xff000000 || accentColor > 0xffffffff)) {
       throw ArgumentError('Выберите непрозрачный акцентный цвет');
+    }
+    if (searchTypos != null && (searchTypos < 0 || searchTypos > 2)) {
+      throw ArgumentError('Допустимо от 0 до 2 опечаток');
     }
     await commitComputed(() async {
       final current = await db.entity('settings');
@@ -622,6 +626,7 @@ class Repository extends ChangeNotifier {
           'reminders': reminders,
           'timezone': timezone,
           'task_color': ?accentColor,
+          'search_typos': ?searchTypos,
         }),
       ];
     });

@@ -1,0 +1,173 @@
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:intl/date_symbol_data_local.dart';
+import 'package:timezone/data/latest.dart' as tz;
+import 'package:yggvion/data/repository.dart';
+import 'package:yggvion/domain/models.dart';
+import 'package:yggvion/ui/app.dart';
+import 'package:yggvion/ui/statistics.dart';
+import 'package:yggvion/ui/task_editor.dart';
+import 'interaction_test.dart' show workspace, settle, command, testInteraction;
+
+Future<void> statisticsFixture(Repository repo) async {
+  await repo.saveProject('Разработка', 0xff9cb9ff);
+  final project = repo.snapshot.projects.single;
+  for (var i = 0; i < 7; i++) {
+    final start = DateTime.utc(2026, 10, 13 + i, 9);
+    final task = await repo.createTask(
+      [
+        'Проектирование интерфейса',
+        'Работа над проектом',
+        'Разобрать заметки',
+      ][i % 3],
+      projectId: i.isEven ? project.id : '',
+      start: start,
+      end: start.add(Duration(minutes: 90 + (i % 3) * 30)),
+    );
+    await repo.saveSession(
+      task.id,
+      start,
+      start.add(Duration(minutes: 50 + i * 14)),
+    );
+    if (i.isEven) {
+      await repo.status(repo.snapshot.task(task.id)!, TaskStatus.done);
+    }
+    final activity = await repo.db.beginActivity(start);
+    await repo.db.endActivity(
+      activity,
+      start.add(Duration(minutes: 10 + i * 4)),
+    );
+  }
+}
+
+void main() {
+  setUpAll(() async {
+    tz.initializeTimeZones();
+    await initializeDateFormatting('ru');
+    await (FontLoader(
+      'Inter',
+    )..addFont(rootBundle.load('assets/fonts/Inter.ttf'))).load();
+    await (FontLoader(
+      'MaterialIcons',
+    )..addFont(rootBundle.load('fonts/MaterialIcons-Regular.otf'))).load();
+  });
+
+  testInteraction(
+    'search tolerance autosaves and fuzzy results open the matching task',
+    (tester) async {
+      final repo = await workspace(
+        tester,
+        prepare: (repo) async {
+          await repo.createTask('Стоматолог');
+        },
+      );
+      await command(tester, LogicalKeyboardKey.digit5);
+      await tester.ensureVisible(find.byKey(const ValueKey('search-typos')));
+      await tester.tap(find.text('2 ошибки'));
+      await settle(tester);
+      expect(repo.snapshot.settings.searchTypos, 2);
+      await command(tester, LogicalKeyboardKey.keyF);
+      final input = find.descendant(
+        of: find.byType(SearchDialog),
+        matching: find.byType(TextField),
+      );
+      await tester.enterText(input, 'стаматалог');
+      await tester.pump(const Duration(milliseconds: 200));
+      await settle(tester);
+      expect(find.text('Допуск: 2 опечатки в слове'), findsOneWidget);
+      expect(find.text('Стоматолог'), findsOneWidget);
+      await tester.tap(find.text('Стоматолог'));
+      await settle(tester);
+      expect(find.byType(TaskEditor), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  for (final mobile in [false, true]) {
+    testInteraction(
+      'statistics chart, period navigation and empty state fit mobile=$mobile',
+      (tester) async {
+        await workspace(tester, mobile: mobile, prepare: statisticsFixture);
+        await command(tester, LogicalKeyboardKey.digit5);
+        await tester.tap(find.byKey(const ValueKey('open-statistics')));
+        await tester.pump();
+        await settle(tester);
+        expect(find.byType(StatisticsPage), findsOneWidget);
+        expect(
+          find.textContaining('Не удалось рассчитать'),
+          findsNothing,
+          reason: tester
+              .widgetList<Text>(find.textContaining('Не удалось рассчитать'))
+              .map((w) => w.data)
+              .join('\n'),
+        );
+        expect(find.text('План и факт'), findsOneWidget);
+        await expectLater(
+          find.byType(StatisticsPage),
+          matchesGoldenFile('goldens/statistics_${mobile ? 390 : 1440}.png'),
+        );
+        await tester.ensureVisible(find.byKey(const ValueKey('work-bar-6')));
+        await tester.tap(find.byKey(const ValueKey('work-bar-6')));
+        await settle(tester);
+        expect(tester.takeException(), isNull);
+        await tester.ensureVisible(
+          find.byKey(const ValueKey('statistics-period')),
+        );
+        await tester.tap(find.text('30 дней'));
+        await settle(tester);
+        expect(find.byKey(const ValueKey('work-bar-29')), findsOneWidget);
+        await tester.tap(find.text('90 дней'));
+        await settle(tester);
+        expect(find.byKey(const ValueKey('work-bar-12')), findsOneWidget);
+        expect(find.byKey(const ValueKey('work-bar-13')), findsNothing);
+        await tester.tap(find.byTooltip('Предыдущий период'));
+        await settle(tester);
+        expect(find.text('За этот период пока нет данных.'), findsWidgets);
+        expect(tester.takeException(), isNull);
+        await tester.tap(find.byType(BackButton));
+        await settle(tester);
+        expect(find.byType(StatisticsPage), findsNothing);
+      },
+    );
+  }
+
+  testInteraction(
+    'desktop note list is compact and keeps selection and deletion usable',
+    (tester) async {
+      final repo = await workspace(
+        tester,
+        prepare: (repo) async {
+          for (var i = 0; i < 10; i++) {
+            final note = await repo.createNote();
+            await repo.saveNote(
+              note.id,
+              '',
+              '# Заметка $i с очень длинным названием, которое не должно увеличивать карточку',
+            );
+          }
+        },
+      );
+      await command(tester, LogicalKeyboardKey.digit4);
+      final note = repo.snapshot.notes.firstWhere((n) => n.pinned.isEmpty);
+      final tile = find.byKey(ValueKey('note-list-${note.id}'));
+      expect(tester.getSize(tile).height, lessThanOrEqualTo(44));
+      expect(tester.getSize(tile).height, greaterThanOrEqualTo(32));
+      await tester.tap(tile);
+      await settle(tester);
+      expect(tester.widget<ListTile>(tile).selected, isTrue);
+      await expectLater(
+        find.byType(YggvionApp),
+        matchesGoldenFile('goldens/compact_notes_1440.png'),
+      );
+      await tester.tap(
+        find.descendant(of: tile, matching: find.byTooltip('Удалить заметку')),
+      );
+      await settle(tester);
+      await tester.tap(find.text('Удалить').last);
+      await settle(tester);
+      expect(repo.snapshot.notes.any((n) => n.id == note.id), isFalse);
+      expect(tester.takeException(), isNull);
+    },
+  );
+}

@@ -37,6 +37,16 @@ class YggvionApp extends ConsumerWidget {
     locale: const Locale('ru'),
     supportedLocales: const [Locale('ru'), Locale('en')],
     localizationsDelegates: GlobalMaterialLocalizations.delegates,
+    builder: (context, child) => Listener(
+      behavior: HitTestBehavior.translucent,
+      onPointerDown: (_) => ref.read(activityProvider)?.interact(),
+      onPointerMove: (_) => ref.read(activityProvider)?.interact(),
+      onPointerHover: (_) => ref.read(activityProvider)?.interact(),
+      onPointerSignal: (_) => ref.read(activityProvider)?.interact(),
+      onPointerPanZoomStart: (_) => ref.read(activityProvider)?.interact(),
+      onPointerPanZoomUpdate: (_) => ref.read(activityProvider)?.interact(),
+      child: child!,
+    ),
     home: const Workspace(),
   );
 }
@@ -1307,15 +1317,26 @@ class _SearchDialogState extends ConsumerState<SearchDialog> {
   List<Entity> results = [];
   bool busy = false;
   String? error;
+  String query = '';
   Timer? debounce;
   int generation = 0;
   void find(String value) {
     debounce?.cancel();
+    query = value;
     final current = ++generation;
-    setState(() => busy = true);
+    setState(() {
+      busy = value.trim().isNotEmpty;
+      error = null;
+      results = [];
+    });
+    if (value.trim().isEmpty) return;
     debounce = Timer(const Duration(milliseconds: 140), () async {
       try {
-        final next = await ref.read(appProvider).db.search(value);
+        final repo = ref.read(appProvider);
+        final next = await repo.db.search(
+          value,
+          maxTypos: repo.snapshot.settings.searchTypos,
+        );
         if (mounted && current == generation) {
           setState(() {
             results = next;
@@ -1359,16 +1380,36 @@ class _SearchDialogState extends ConsumerState<SearchDialog> {
             ),
           ),
           if (busy) const LinearProgressIndicator(minHeight: 1),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(24, 0, 24, 10),
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: Text(switch (ref
+                  .watch(appProvider)
+                  .snapshot
+                  .settings
+                  .searchTypos) {
+                0 => 'Точное совпадение · настройки → точность поиска',
+                1 => 'Допуск: 1 опечатка в слове',
+                _ => 'Допуск: 2 опечатки в слове',
+              }, style: const TextStyle(color: Palette.muted, fontSize: 12)),
+            ),
+          ),
           const Divider(),
           Expanded(
             child: error != null
                 ? Center(child: Text(error!))
                 : results.isEmpty
-                ? const EmptyState(
+                ? EmptyState(
                     icon: Icons.search_rounded,
-                    title: 'Найдётся даже прошлое',
-                    subtitle:
-                        'Введите слово или начало слова.\nПоиск работает без интернета.',
+                    title: busy
+                        ? 'Ищем…'
+                        : query.trim().isEmpty
+                        ? 'Найдётся даже прошлое'
+                        : 'Ничего не найдено',
+                    subtitle: query.trim().isEmpty
+                        ? 'Введите слово или начало слова.\nПоиск работает без интернета.'
+                        : 'Попробуйте другое слово или увеличьте\nдопуск ошибок в настройках.',
                   )
                 : ListView.builder(
                     itemCount: results.length,
