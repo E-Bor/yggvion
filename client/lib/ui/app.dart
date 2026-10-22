@@ -487,11 +487,11 @@ class _WorkspaceState extends ConsumerState<Workspace>
                         ),
                       ],
                       child: Container(
-                        width: 54,
-                        height: 54,
+                        width: 64,
+                        height: 64,
                         decoration: BoxDecoration(
                           color: context.accentColor,
-                          borderRadius: BorderRadius.circular(18),
+                          borderRadius: BorderRadius.circular(20),
                           boxShadow: [
                             BoxShadow(
                               color: Colors.black.withValues(alpha: .25),
@@ -502,6 +502,7 @@ class _WorkspaceState extends ConsumerState<Workspace>
                         ),
                         child: Icon(
                           Icons.add_rounded,
+                          size: 28,
                           color: context.palette.background,
                         ),
                       ),
