@@ -273,7 +273,7 @@ class Repository extends ChangeNotifier {
 
   Future<void> status(Task task, TaskStatus status) async {
     final changes = [
-      task.entity.change({'status': status.wire}),
+      task.entity.change({'status': status.wire, 'completed_at': status == TaskStatus.done ? wireTime(now()) : null}),
     ];
     if (status == TaskStatus.done || status == TaskStatus.waiting) {
       for (final s in snapshot.sessions.where(

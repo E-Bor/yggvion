@@ -36,13 +36,6 @@ void main() {
       expect(bootstrap.exitCode, 0, reason: '${bootstrap.stderr}');
       final identity =
           jsonDecode('${bootstrap.stdout}') as Map<String, dynamic>;
-      // An installation can have a backup before the first device connects.
-      final emptyBackup = await Process.run(
-        binary,
-        ['backup'],
-        environment: {...Platform.environment, 'YGGVION_DATA_DIR': dir.path},
-      );
-      expect(emptyBackup.exitCode, 0, reason: '${emptyBackup.stderr}');
       final process = await Process.start(
         binary,
         [],
@@ -51,18 +44,24 @@ void main() {
       process.stdout.drain<void>();
       process.stderr.drain<void>();
       final a = Repository(LocalDatabase(NativeDatabase.memory())),
-          b = Repository(LocalDatabase(NativeDatabase.memory()));
+          b = Repository(LocalDatabase(NativeDatabase.memory())),
+          c = Repository(LocalDatabase(NativeDatabase.memory()));
       await a.initialize();
       await b.initialize();
+      await c.initialize();
       final sa = SyncService(a, realtime: false),
-          sb = SyncService(b, realtime: false);
+          sb = SyncService(b, realtime: false),
+          sc = SyncService(c, realtime: false);
       addTearDown(() async {
         sa.dispose();
         sb.dispose();
+        sc.dispose();
         await a.db.close();
         await b.db.close();
+        await c.db.close();
         a.dispose();
         b.dispose();
+        c.dispose();
         process.kill();
         await process.exitCode;
         await dir.delete(recursive: true);
@@ -89,6 +88,7 @@ void main() {
         throwsA(isA<DioException>()),
       );
       untrusted.close();
+      await sa.setEncryptionPassword('Integration password 42');
       await sa.pair(
         url,
         identity['code'] as String,
@@ -96,6 +96,13 @@ void main() {
         privateCA: identity['private_ca'] as String,
       );
       expect(a.syncError, isNull);
+      // The empty workspace backup already carries its password envelope.
+      final emptyBackup = await Process.run(
+        binary,
+        ['backup'],
+        environment: {...Platform.environment, 'YGGVION_DATA_DIR': dir.path},
+      );
+      expect(emptyBackup.exitCode, 0, reason: '${emptyBackup.stderr}');
       final invite = await sa.createInvitation();
       await sb.pairInvitation(invite, 'iPhone');
       expect(b.syncError, isNull);
@@ -104,6 +111,8 @@ void main() {
         throwsA(isA<DioException>()),
       );
       final task = await a.createTask('Before backup');
+      await a.toggleTimer(task);
+      final oldSessionId = a.snapshot.sessions.single.id;
       await sa.sync();
       await sb.sync();
       await sa.request('POST', '/api/v1/backups');
@@ -138,6 +147,23 @@ void main() {
         data: {'confirm': 'restore'},
       );
       await waitJob();
+      final restoredState = await sa.request('GET', '/api/v1/state');
+      expect(restoredState['snapshot_cursor'], greaterThan(0));
+      // A newly connected device also closes a timer from the archive, even
+      // without a previously stored generation. Later live timers must survive.
+      await sc.pairInvitation(await sa.createInvitation(), 'Fresh device');
+      expect(c.syncError, isNull);
+      expect(
+        c.snapshot.sessions.singleWhere((s) => s.id == oldSessionId).end,
+        DateTime.parse(restoredState['snapshot_created'] as String),
+      );
+      final liveTask = await c.createTask('Started after restore');
+      await c.toggleTimer(liveTask);
+      await sc.sync();
+      expect(c.syncError, isNull);
+      final liveSessionId = c.snapshot.sessions
+          .singleWhere((s) => s.running)
+          .id;
       var interruptDownload = true;
       final interruption = InterceptorsWrapper(
         onRequest: (options, handler) {
@@ -171,6 +197,10 @@ void main() {
       await sb.sync();
       expect(b.syncError, isNull);
       expect(b.snapshot.task(task.id)!.title, 'Before backup');
+      expect(
+        b.snapshot.sessions.singleWhere((s) => s.id == liveSessionId).running,
+        isTrue,
+      );
       final quarantine = await b.db
           .customSelect('SELECT payload FROM recovery_snapshots')
           .get();
@@ -183,7 +213,7 @@ void main() {
       await sa.sync();
       expect(a.snapshot.task(task.id)!.title, 'Before backup');
       final devices = await sa.devices();
-      expect(devices, hasLength(2));
+      expect(devices, hasLength(3));
       await sa.request(
         'POST',
         '/api/v1/backups/$emptyId/restore',
@@ -198,7 +228,7 @@ void main() {
       expect(b.snapshot.tasks, isEmpty);
       expect(a.snapshot.notes.where((n) => n.pinned.isNotEmpty), hasLength(2));
       expect(b.snapshot.settings.defaultMinutes, 30);
-      expect(await sa.devices(), hasLength(2));
+      expect(await sa.devices(), hasLength(3));
     },
     skip: binary == null
         ? 'Set YGGVION_TEST_SERVER to run real TLS/restore integration'

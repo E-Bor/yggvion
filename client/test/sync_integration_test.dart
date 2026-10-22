@@ -72,6 +72,7 @@ void main() {
         }
       }
       expect(ready, isTrue);
+      await sa.setEncryptionPassword('Integration password 42');
       await sa.pair(base, pairingKey, 'Desktop');
       await sb.pair(base, pairingKey, 'Phone');
       await Future<void>.delayed(const Duration(milliseconds: 100));

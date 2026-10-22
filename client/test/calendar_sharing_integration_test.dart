@@ -75,6 +75,7 @@ void main() {
       });
       await a.initialize();
       await b.initialize();
+      await sa.setEncryptionPassword('Integration password 42');
       await sa.pair(base, key, 'Desktop');
       await sb.pair(base, key, 'Phone');
       final private = await a.createTask(

@@ -87,7 +87,7 @@ func TestRestoreRejectsStaleClientsAndPreservesRevocations(t *testing.T) {
 	device, _ := s.Authorize(ctx, token)
 	revoked, revokedToken, _ := s.Pair(ctx, "revoked")
 	results := decodeResults(t, push(t, h, token, domain.Mutation{OperationID: "initial", Record: task("one", "before")}))
-	oldGeneration, _, _ := s.Generation(ctx)
+	oldGeneration, _ := s.Generation(ctx)
 	entry, err := m.Create(ctx, "manual")
 	if err != nil {
 		t.Fatal(err)

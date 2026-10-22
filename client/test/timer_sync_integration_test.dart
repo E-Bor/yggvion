@@ -82,6 +82,7 @@ void main() {
       });
       await a.initialize();
       await b.initialize();
+      await sa.setEncryptionPassword('Integration password 42');
       await sa.pair(base, key, 'Desktop');
       await sb.pair(base, key, 'Phone');
       // These clients synchronize only when requested: no SSE or callbacks.

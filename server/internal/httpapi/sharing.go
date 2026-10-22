@@ -125,9 +125,13 @@ func (a *API) publicCalendarRoutes(mux *http.ServeMux) {
 func (a *API) createCalendarShare(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	var input struct {
-		Days int `json:"days"`
+		Days     int                 `json:"days"`
+		Snapshot *store.Availability `json:"snapshot,omitempty"`
 	}
-	if smallJSON(w, r, &input) != nil || input.Days < 1 || input.Days > 30 {
+	r.Body = http.MaxBytesReader(w, r.Body, 1024*1024)
+	decoder := json.NewDecoder(r.Body)
+	decoder.DisallowUnknownFields()
+	if decoder.Decode(&input) != nil || decoder.Decode(new(any)) != io.EOF || input.Days < 1 || input.Days > 30 || input.Snapshot == nil {
 		fail(w, 400, "invalid_range")
 		return
 	}
@@ -145,7 +149,7 @@ func (a *API) createCalendarShare(w http.ResponseWriter, r *http.Request) {
 		fail(w, 503, "public_https_unavailable")
 		return
 	}
-	share, token, err := a.Store.CreateCalendarShare(r.Context(), r.Context().Value(deviceKey{}).(string), input.Days, a.shareNow())
+	share, token, err := a.Store.CreateCalendarShare(r.Context(), r.Context().Value(deviceKey{}).(string), input.Days, a.shareNow(), *input.Snapshot)
 	if err != nil {
 		shareError(w, err)
 		return

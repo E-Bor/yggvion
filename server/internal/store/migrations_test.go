@@ -3,61 +3,72 @@ package store
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"path/filepath"
 	"testing"
 )
 
-func TestUpgradePreservesDataIdentityAndCanBeReopened(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "old.db")
-	old, err := sql.Open("sqlite", path)
+func TestOldSchemasAreRejectedWithoutChangingData(t *testing.T) {
+	for _, version := range []int{0, 1, 2, 3, 4, 5, 999} {
+		t.Run(fmt.Sprint(version), func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "old.db")
+			old, err := sql.Open("sqlite", path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err = old.Exec("CREATE TABLE sentinel(value TEXT); INSERT INTO sentinel VALUES('keep');"); err != nil {
+				t.Fatal(err)
+			}
+			if _, err = old.Exec(fmt.Sprintf("PRAGMA user_version=%d", version)); err != nil {
+				t.Fatal(err)
+			}
+			old.Close()
+			if _, err = Open(path); err == nil {
+				t.Fatal("old schema accepted")
+			}
+			check, err := sql.Open("sqlite", path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer check.Close()
+			var gotVersion int
+			var value string
+			check.QueryRow("PRAGMA user_version").Scan(&gotVersion)
+			check.QueryRow("SELECT value FROM sentinel").Scan(&value)
+			if gotVersion != version || value != "keep" {
+				t.Fatal("old database changed", gotVersion, value)
+			}
+		})
+	}
+}
+func TestCurrentSchemaReopensAndSafetySnapshotKeepsIdentity(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "current.db")
+	s, err := Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = old.Exec(schema); err != nil {
+	generation, _ := s.Generation(context.Background())
+	device, token, err := s.Pair(context.Background(), "Phone")
+	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = old.Exec(`INSERT INTO records VALUES('note','note',4,0,'{"title":"Title","content":"body","pinned":""}',1);
- INSERT INTO devices VALUES('device','phone','tokenhash',1);
- INSERT INTO server_meta VALUES('generation','same-generation');`); err != nil {
-		t.Fatal(err)
-	}
-	old.Close()
+	s.Close()
 	if err = SnapshotDatabase(path, path+".safety"); err != nil {
 		t.Fatal(err)
 	}
-	for range 2 {
-		db, err := Open(path)
+	for _, name := range []string{path, path + ".safety"} {
+		reopened, err := Open(name)
 		if err != nil {
 			t.Fatal(err)
 		}
-		var version int
-		db.DB.QueryRow("PRAGMA user_version").Scan(&version)
-		if version != SchemaVersion {
-			t.Fatal(version)
+		got, err := reopened.Generation(context.Background())
+		if err != nil || got != generation {
+			t.Fatal("generation", err)
 		}
-		snapshot, err := db.Export(context.Background())
-		if err != nil || len(snapshot.Records) != 1 || snapshot.Records[0].Version != 4 {
-			t.Fatal(snapshot, err)
+		id, err := reopened.Authorize(context.Background(), token)
+		if err != nil || id != device {
+			t.Fatal("identity", err)
 		}
-		var revoked int
-		db.DB.QueryRow("SELECT revoked FROM devices WHERE id='device'").Scan(&revoked)
-		generation, _, err := db.Generation(context.Background())
-		if revoked != 1 || generation != "same-generation" || err != nil {
-			t.Fatal(revoked, generation, err)
-		}
-		db.Close()
-	}
-	previous, _ := sql.Open("sqlite", path+".safety")
-	defer previous.Close()
-	var version int
-	previous.QueryRow("PRAGMA user_version").Scan(&version)
-	if version != 2 {
-		t.Fatal("safety snapshot was migrated")
-	}
-	future, _ := sql.Open("sqlite", path)
-	future.Exec("PRAGMA user_version=999")
-	future.Close()
-	if _, err := Open(path); err == nil {
-		t.Fatal("future schema accepted")
+		reopened.Close()
 	}
 }

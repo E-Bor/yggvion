@@ -52,7 +52,7 @@ class LocalDatabase extends GeneratedDatabase {
   }
 
   @override
-  int get schemaVersion => 7;
+  int get schemaVersion => 8;
   @override
   Iterable<TableInfo<Table, Object?>> get allTables => const [];
   @override
@@ -68,6 +68,8 @@ class LocalDatabase extends GeneratedDatabase {
         'CREATE TABLE conflicts(id TEXT PRIMARY KEY, local TEXT NOT NULL, remote TEXT NOT NULL)',
         'CREATE TABLE files(id TEXT PRIMARY KEY, name TEXT NOT NULL, path TEXT NOT NULL, uploaded INTEGER NOT NULL DEFAULT 0)',
         'CREATE TABLE recovery_snapshots(id TEXT PRIMARY KEY, created TEXT NOT NULL, payload TEXT NOT NULL)',
+        'CREATE TABLE IF NOT EXISTS encrypted_outbox(operation_id TEXT PRIMARY KEY, source TEXT NOT NULL, payload TEXT NOT NULL)',
+        'CREATE TABLE IF NOT EXISTS encrypted_files(key_id TEXT NOT NULL, id TEXT NOT NULL, cipher_id TEXT NOT NULL, PRIMARY KEY(key_id,id))',
         _searchSchema,
         _vocabularySchema,
         'CREATE TABLE app_activity(id INTEGER PRIMARY KEY, start INTEGER NOT NULL, end INTEGER NOT NULL)',
@@ -77,6 +79,14 @@ class LocalDatabase extends GeneratedDatabase {
       }
     },
     onUpgrade: (m, from, to) => transaction(() async {
+      if (from < 8) {
+        await customStatement(
+          'CREATE TABLE IF NOT EXISTS encrypted_outbox(operation_id TEXT PRIMARY KEY, source TEXT NOT NULL, payload TEXT NOT NULL)',
+        );
+        await customStatement(
+          'CREATE TABLE IF NOT EXISTS encrypted_files(key_id TEXT NOT NULL, id TEXT NOT NULL, cipher_id TEXT NOT NULL, PRIMARY KEY(key_id,id))',
+        );
+      }
       if (from < 2) {
         await customStatement(
           'CREATE TABLE recovery_snapshots(id TEXT PRIMARY KEY, created TEXT NOT NULL, payload TEXT NOT NULL)',

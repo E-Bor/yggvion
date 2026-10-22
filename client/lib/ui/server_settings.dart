@@ -12,9 +12,11 @@ import 'package:path_provider/path_provider.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:share_plus/share_plus.dart';
 import '../data/server_installer.dart';
+import '../data/sync.dart';
 import '../domain/models.dart';
 import 'providers.dart';
 import 'local_backups.dart';
+import 'encryption_settings.dart';
 import '../domain/server_metrics.dart';
 import 'settings.dart';
 import 'theme.dart';
@@ -253,7 +255,15 @@ class _SynchronizationPageState extends ConsumerState<SynchronizationPage> {
 
   Future<void> action(Future<void> Function() fn) async {
     setState(() => busy = true);
-    await guard(context, fn);
+    await guard(context, () async {
+      await fn();
+      final sync = ref.read(syncProvider);
+      if (mounted &&
+          sync.connected &&
+          (sync.needsEncryptionKey || !sync.passwordConfigured)) {
+        await ensureEncryptionPassword(context, ref);
+      }
+    });
     if (mounted) {
       setState(() => busy = false);
       await refresh();
@@ -349,6 +359,7 @@ class _SynchronizationPageState extends ConsumerState<SynchronizationPage> {
           ],
         ),
         if (sync.connected) metricsCard(),
+        const EncryptionSettings(),
         if (sync.connected)
           settingsCard('Устройства', [
             if (error != null) Text(error!),
@@ -573,6 +584,13 @@ class _InstallServerPageState extends ConsumerState<InstallServerPage> {
   }
 
   Future<void> install() async {
+    if (widget.operation == ServerOperation.install) {
+      var ready = false;
+      await guard(context, () async {
+        ready = await ensureEncryptionPassword(context, ref);
+      });
+      if (!ready || !mounted) return;
+    }
     if (widget.operation == ServerOperation.uninstall) {
       final confirm = TextEditingController();
       final yes = await showDialog<bool>(
@@ -648,6 +666,12 @@ class _InstallServerPageState extends ConsumerState<InstallServerPage> {
       password.clear();
       passphrase.clear();
       privateKey = null;
+      final sync = ref.read(syncProvider);
+      if (mounted &&
+          sync.connected &&
+          (sync.needsEncryptionKey || !sync.passwordConfigured)) {
+        await ensureEncryptionPassword(context, ref);
+      }
     });
     if (mounted) setState(() => busy = false);
   }
@@ -847,13 +871,13 @@ class _BackupsPageState extends ConsumerState<BackupsPage> {
     await showDialog<void>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Ключ восстановления'),
+        title: const Text('Ключ серверного архива'),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const Text(
-              'Сохраните ключ отдельно от VPS — например, в менеджере паролей. Он понадобится для восстановления на новом сервере.',
+              'Этот ключ нужен для импорта серверного архива на новый VPS. Для открытия личных данных на устройстве понадобится ваш пароль шифрования. Локальные копии .ygglocal восстанавливаются только по паролю, без этого ключа.',
             ),
             const SizedBox(height: 16),
             SelectableText(result['key'] as String),
@@ -1031,6 +1055,7 @@ class _BackupsPageState extends ConsumerState<BackupsPage> {
       title: 'Резервное копирование',
       children: [
         settingsCard('Копии на этом устройстве', [const LocalBackupsPanel()]),
+        const EncryptionSettings(),
         settingsCard('Ваши данные под защитой', [
           Text(
             'Зашифрованные копии включают задачи, заметки, проекты, учёт времени и вложения, уже дошедшие до сервера. Незагруженные изменения остаются на устройствах.',
@@ -1076,7 +1101,7 @@ class _BackupsPageState extends ConsumerState<BackupsPage> {
                     ? null
                     : () => action(recoveryKey),
                 icon: const Icon(Icons.key_outlined),
-                label: const Text('Ключ восстановления'),
+                label: const Text('Ключ серверного архива'),
               ),
             ],
           ),
@@ -1342,7 +1367,7 @@ class _RemoteBackupsPageState extends ConsumerState<RemoteBackupsPage> {
           mainAxisSize: MainAxisSize.min,
           children: [
             const Text(
-              'На прежнем сервере оставьте поле пустым. Для нового VPS укажите сохранённый ключ восстановления.',
+              'На прежнем сервере оставьте поле пустым. Для нового VPS укажите сохранённый ключ серверного архива.',
             ),
             const SizedBox(height: 16),
             TextField(

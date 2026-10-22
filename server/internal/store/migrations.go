@@ -5,42 +5,31 @@ import (
 	"fmt"
 )
 
-const SchemaVersion = 4
+const SchemaVersion = 6
 
-// Each migration runs once, in the same transaction as its version marker.
-// Future changes append a step; existing migrations remain immutable.
+// Schema 6 is the password-E2EE baseline. Earlier databases are not migrated.
+// Creating the schema and its version marker is atomic.
 func migrate(db *sql.DB, version int) error {
+	if version == SchemaVersion {
+		return nil
+	}
+	if version != 0 {
+		return fmt.Errorf("unsupported database version %d; create a fresh server data directory", version)
+	}
 	tx, err := db.Begin()
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
-	if version < 2 {
-		if _, err = tx.Exec(schema); err != nil {
-			return fmt.Errorf("schema 2: %w", err)
-		}
+	var tables int
+	if err = tx.QueryRow("SELECT count(*) FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'").Scan(&tables); err != nil {
+		return err
 	}
-	if version < 3 {
-		if _, err = tx.Exec(`CREATE INDEX IF NOT EXISTS records_kind ON records(kind,deleted);
-   CREATE INDEX IF NOT EXISTS invitations_expires ON invitations(expires);
-   PRAGMA user_version=3;`); err != nil {
-			return fmt.Errorf("schema 3: %w", err)
-		}
+	if tables != 0 {
+		return fmt.Errorf("unversioned non-empty database is unsupported; create a fresh server data directory")
 	}
-	if version < 4 {
-		if _, err = tx.Exec(`CREATE TABLE calendar_shares (
-      id TEXT PRIMARY KEY, token_hash TEXT UNIQUE NOT NULL, issuer TEXT NOT NULL,
-      expires INTEGER NOT NULL, start TEXT NOT NULL, end TEXT NOT NULL, timezone TEXT NOT NULL
-    );
-    CREATE INDEX calendar_shares_expires ON calendar_shares(expires);
-    CREATE TABLE calendar_proposals (
-      share_id TEXT NOT NULL REFERENCES calendar_shares(id) ON DELETE CASCADE,
-      nonce TEXT NOT NULL, fingerprint TEXT NOT NULL, task_id TEXT NOT NULL,
-      PRIMARY KEY(share_id,nonce)
-    );
-    PRAGMA user_version=4;`); err != nil {
-			return fmt.Errorf("schema 4: %w", err)
-		}
+	if _, err = tx.Exec(schema); err != nil {
+		return fmt.Errorf("initialize schema %d: %w", SchemaVersion, err)
 	}
 	return tx.Commit()
 }

@@ -69,6 +69,7 @@ func (a *API) Handler() http.Handler {
 		}
 		write(w, 200, snapshot)
 	})))
+	a.encryptionRoutes(mux)
 	a.backupRoutes(mux)
 	a.calendarShareRoutes(mux)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -153,7 +154,7 @@ func (a *API) pair(w http.ResponseWriter, r *http.Request) {
 		fail(w, 500, "storage_error")
 		return
 	}
-	write(w, 201, map[string]string{"device_id": id, "token": token})
+	write(w, 201, map[string]any{"device_id": id, "token": token, "protocol": 5})
 }
 func (a *API) push(w http.ResponseWriter, r *http.Request) {
 	var input struct {
@@ -266,11 +267,22 @@ const maxAttachmentBytes = 300 << 20
 
 func (a *API) upload(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
+	keyID, err := a.Store.EncryptionKey(r.Context())
+	if err != nil {
+		fail(w, 500, "storage_error")
+		return
+	}
+	uploadedKey := r.Header.Get("X-Yggvion-Encryption")
+	if !domain.ValidHash(keyID) || uploadedKey != keyID {
+		fail(w, 400, "encryption_required")
+		return
+	}
+	limit := int64(maxAttachmentBytes + 1024*1024)
 	if !attachmentID(id) {
 		fail(w, 400, "invalid_hash")
 		return
 	}
-	if r.ContentLength > maxAttachmentBytes {
+	if r.ContentLength > limit {
 		fail(w, 413, "file_too_large_or_incomplete")
 		return
 	}
@@ -291,7 +303,7 @@ func (a *API) upload(w http.ResponseWriter, r *http.Request) {
 	defer os.Remove(f.Name())
 	defer f.Close()
 	h := sha256.New()
-	r.Body = http.MaxBytesReader(w, r.Body, maxAttachmentBytes)
+	r.Body = http.MaxBytesReader(w, r.Body, limit)
 	n, e := io.Copy(io.MultiWriter(f, h), r.Body)
 	if e != nil {
 		fail(w, 413, "file_too_large_or_incomplete")
@@ -313,16 +325,13 @@ func (a *API) upload(w http.ResponseWriter, r *http.Request) {
 		fail(w, 500, "storage_error")
 		return
 	}
-	name := r.Header.Get("X-File-Name")
-	if len(name) > 512 {
-		name = "attachment"
-	}
-	mediaType := r.Header.Get("Content-Type")
-	if len(mediaType) > 200 {
-		mediaType = "application/octet-stream"
-	}
+	name, mediaType := "encrypted", "application/octet-stream"
 	_, e = a.Store.DB.ExecContext(r.Context(), "INSERT INTO attachments(id,name,size,media_type) VALUES(?,?,?,?) ON CONFLICT(id) DO NOTHING", id, name, n, mediaType)
 	if e != nil {
+		fail(w, 500, "storage_error")
+		return
+	}
+	if _, e = a.Store.DB.ExecContext(r.Context(), "INSERT INTO encrypted_uploads VALUES(?,?) ON CONFLICT(id) DO UPDATE SET key_id=excluded.key_id", id, uploadedKey); e != nil {
 		fail(w, 500, "storage_error")
 		return
 	}

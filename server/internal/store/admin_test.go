@@ -4,68 +4,52 @@ import (
 	"context"
 	"encoding/json"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"yggvion/server/internal/domain"
 )
 
-func TestRestoreClosesRunningTimerAtSnapshotAndRejectsFutureStartAtomically(t *testing.T) {
-	s, err := Open(filepath.Join(t.TempDir(), "test.db"))
+func TestRestoreRejectsLegacySnapshotsAndPreservesCiphertext(t *testing.T) {
+	s, err := Open(":memory:")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer s.Close()
 	ctx := context.Background()
-	device, _, err := s.Pair(ctx, "test")
-	if err != nil {
-		t.Fatal(err)
-	}
-	created := time.Now().UTC().Add(-time.Hour)
-	task, _ := json.Marshal(domain.Task{Title: "Test", Status: "todo"})
-	session, _ := json.Marshal(domain.Session{TaskID: "task1", DeviceID: device, Start: created.Add(-time.Hour)})
-	snapshot := Snapshot{Format: 1, Created: created, Records: []domain.Record{
-		{ID: "task1", Kind: "task", Data: task},
-		{ID: "session1", Kind: "session", Data: session},
-	}}
+	key := strings.Repeat("a", 64)
+	password := passwordFixture(key, 1)
+	snapshot := Snapshot{Format: 2, Created: time.Now().UTC().Add(-time.Hour),
+		EncryptionKeyID: key, PasswordEnvelope: &password,
+		Records: []domain.Record{sealedRecord("session", "session", key)}}
 	if err = s.Restore(ctx, snapshot); err != nil {
 		t.Fatal(err)
 	}
 	got, err := s.Export(ctx)
-	if err != nil {
-		t.Fatal(err)
+	if err != nil || len(got.Records) != 1 || string(got.Records[0].Data) != string(snapshot.Records[0].Data) {
+		t.Fatal("ciphertext changed", err)
 	}
-	for _, r := range got.Records {
-		if r.Kind == "session" {
-			var timer domain.Session
-			if err = json.Unmarshal(r.Data, &timer); err != nil {
-				t.Fatal(err)
+	generation, _ := s.Generation(ctx)
+	for name, mutate := range map[string]func(*Snapshot){
+		"legacy format": func(v *Snapshot) { v.Format = 1 },
+		"no password":   func(v *Snapshot) { v.PasswordEnvelope = nil },
+		"no key":        func(v *Snapshot) { v.EncryptionKeyID = "" },
+		"plaintext": func(v *Snapshot) {
+			v.Records = []domain.Record{{ID: "note", Kind: "note", Data: json.RawMessage(`{"title":"old"}`)}}
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			bad := snapshot
+			mutate(&bad)
+			if err := s.Restore(ctx, bad); err == nil {
+				t.Fatal("legacy snapshot accepted")
 			}
-			if timer.End == nil || !timer.End.Equal(created) {
-				t.Fatal("timer not stopped at snapshot time")
+			after, _ := s.Generation(ctx)
+			if after != generation {
+				t.Fatal("failed restore changed live data")
 			}
-		}
-	}
-	generation, _, err := s.Generation(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	snapshot.Records[1].Data, _ = json.Marshal(domain.Session{TaskID: "task1", DeviceID: device, Start: created.Add(time.Hour)})
-	if err = s.Restore(ctx, snapshot); err == nil {
-		t.Fatal("future timer accepted")
-	}
-	unchanged, _, err := s.Generation(ctx)
-	if err != nil || generation != unchanged {
-		t.Fatal("failed restore changed generation", err)
-	}
-	after, err := s.Export(ctx)
-	if err != nil || len(after.Records) != len(got.Records) {
-		t.Fatal("failed restore lost records", err)
-	}
-	for i := range got.Records {
-		if string(got.Records[i].Data) != string(after.Records[i].Data) {
-			t.Fatal("failed restore changed data")
-		}
+		})
 	}
 }
 

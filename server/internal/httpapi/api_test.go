@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"net/http"
@@ -12,24 +13,59 @@ import (
 	"strings"
 	"sync"
 	"testing"
-	"time"
 
 	"yggvion/server/internal/domain"
 	"yggvion/server/internal/store"
 )
 
-func setup(t *testing.T) (*store.Store, http.Handler, string) {
+func setupEmpty(t *testing.T) (*store.Store, http.Handler, string) {
 	t.Helper()
-	s, e := store.Open(filepath.Join(t.TempDir(), "test.db"))
-	if e != nil {
-		t.Fatal(e)
+	s, err := store.Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatal(err)
 	}
 	t.Cleanup(func() { s.Close() })
-	_, token, e := s.Pair(context.Background(), "Test device")
-	if e != nil {
-		t.Fatal(e)
+	_, token, err := s.Pair(context.Background(), "Test device")
+	if err != nil {
+		t.Fatal(err)
 	}
 	return s, New(s, strings.Repeat("test", 8), t.TempDir()).Handler(), token
+}
+
+const testKeyID = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+
+func encryptedRecord(id, kind, content string) domain.Record {
+	// Opaque deterministic test bytes: crypto is exercised by Flutter integration tests.
+	box := sha256.Sum256([]byte(content))
+	data, _ := json.Marshal(domain.Envelope{E2EE: 1, KeyID: testKeyID,
+		Nonce: base64.StdEncoding.EncodeToString(make([]byte, 12)),
+		Box:   base64.StdEncoding.EncodeToString(box[:]), Files: []string{}})
+	return domain.Record{ID: id, Kind: kind, Data: data}
+}
+func authorizeTestRequest(t *testing.T, h http.Handler, r *http.Request, token string) {
+	t.Helper()
+	r.Header.Set("Authorization", "Bearer "+token)
+	state := httptest.NewRequest("GET", "/api/v1/state", nil)
+	state.Header.Set("Authorization", "Bearer "+token)
+	response := httptest.NewRecorder()
+	h.ServeHTTP(response, state)
+	var data struct{ Generation string }
+	if response.Code == 200 {
+		if err := json.Unmarshal(response.Body.Bytes(), &data); err != nil {
+			t.Fatal(err)
+		}
+		r.Header.Set("X-Yggvion-Generation", data.Generation)
+	}
+	r.Header.Set("X-Yggvion-Encryption", testKeyID)
+}
+
+func setup(t *testing.T) (*store.Store, http.Handler, string) {
+	t.Helper()
+	s, h, token := setupEmpty(t)
+	if err := s.EnableEncryption(context.Background(), testKeyID, testPasswordEnvelope(testKeyID, 1)); err != nil {
+		t.Fatal(err)
+	}
+	return s, h, token
 }
 func request(t *testing.T, h http.Handler, method, path, token string, body any) *httptest.ResponseRecorder {
 	t.Helper()
@@ -43,14 +79,14 @@ func request(t *testing.T, h http.Handler, method, path, token string, body any)
 	}
 	r := httptest.NewRequest(method, path, bytes.NewReader(b))
 	if token != "" {
-		r.Header.Set("Authorization", "Bearer "+token)
+		authorizeTestRequest(t, h, r, token)
 	}
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, r)
 	return w
 }
 func task(id, title string) domain.Record {
-	return domain.Record{ID: id, Kind: "task", Data: json.RawMessage(`{"title":"` + title + `","description":"","project_id":"","status":"todo"}`)}
+	return encryptedRecord(id, "task", title)
 }
 func push(t *testing.T, h http.Handler, token string, mutations ...domain.Mutation) *httptest.ResponseRecorder {
 	return request(t, h, "POST", "/api/v1/sync", token, map[string]any{"mutations": mutations})
@@ -150,18 +186,43 @@ func TestAtomicInvalidBatch(t *testing.T) {
 
 func TestValidation(t *testing.T) {
 	_, h, token := setup(t)
-	cases := []domain.Record{
-		{ID: "bad-cutoff", Kind: "series", Data: json.RawMessage(`{"title":"Series","start":"2026-10-19T09:00:00Z","minutes":30,"timezone":"UTC","rule":"FREQ=DAILY","cancelled_from":"not-a-date"}`)},
-		{ID: "../bad", Kind: "task", Data: json.RawMessage(`{"title":"x","status":"todo"}`)},
-		{ID: "empty", Kind: "task", Data: json.RawMessage(`{"title":" ","status":"todo"}`)},
-		{ID: "status", Kind: "task", Data: json.RawMessage(`{"title":"x","status":"review"}`)},
-		{ID: "backwards", Kind: "block", Data: json.RawMessage(`{"task_id":"t","start":"2026-10-19T10:00:00Z","end":"2026-10-19T09:00:00Z","timezone":"UTC"}`)},
-		{ID: "zone", Kind: "block", Data: json.RawMessage(`{"task_id":"t","start":"2026-10-19T09:00:00Z","end":"2026-10-19T10:00:00Z","timezone":"Invalid/Zone"}`)},
+	valid := task("valid", "Task")
+	for name, record := range map[string]domain.Record{
+		"plaintext": {ID: "plain", Kind: "task", Data: json.RawMessage(`{"title":"private","status":"todo"}`)},
+		"id":        {ID: "../bad", Kind: valid.Kind, Data: valid.Data},
+		"kind":      {ID: "bad-kind", Kind: "unknown", Data: valid.Data},
+		"version":   {ID: "bad-version", Kind: valid.Kind, Version: -1, Data: valid.Data},
+		"payload":   {ID: "bad-box", Kind: valid.Kind, Data: json.RawMessage(`{"e2ee":1}`)},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if w := push(t, h, token, domain.Mutation{OperationID: name, Record: record}); w.Code != 400 {
+				t.Fatal(w.Code, w.Body)
+			}
+		})
 	}
-	for i, r := range cases {
-		w := push(t, h, token, domain.Mutation{OperationID: "invalid", Record: r})
-		if w.Code != 400 {
-			t.Fatalf("case %d accepted", i)
+}
+func TestEncryptedKindsRoundTripWithoutServerSideRewrites(t *testing.T) {
+	s, h, token := setup(t)
+	var mutations []domain.Mutation
+	for _, kind := range []string{"task", "block", "session", "note", "note_folder", "project", "settings", "series", "snooze"} {
+		mutations = append(mutations, domain.Mutation{OperationID: kind, Record: encryptedRecord(kind, kind, "opaque "+kind)})
+	}
+	results := decodeResults(t, push(t, h, token, mutations...))
+	records, _, err := s.Changes(context.Background(), 0, 100)
+	if err != nil || len(records) != len(mutations) {
+		t.Fatal(records, err)
+	}
+	for i, record := range records {
+		if !bytes.Equal(record.Data, mutations[i].Record.Data) {
+			t.Fatal("server changed opaque payload", record.Kind)
+		}
+		results[i].Record.Deleted = true
+		mutations[i] = domain.Mutation{OperationID: "delete-" + record.Kind, Record: results[i].Record}
+	}
+	deleted := decodeResults(t, push(t, h, token, mutations...))
+	for _, result := range deleted {
+		if !result.Record.Deleted || result.Record.Version != 2 {
+			t.Fatal(result)
 		}
 	}
 }
@@ -204,73 +265,10 @@ func TestConcurrentDevices(t *testing.T) {
 	}
 }
 
-func TestOnlineTimerStopsPrevious(t *testing.T) {
-	s, h, token := setup(t)
-	deviceID, e := s.Authorize(context.Background(), token)
-	if e != nil {
-		t.Fatal(e)
-	}
-	decodeResults(t, push(t, h, token, domain.Mutation{OperationID: "create", Record: task("task", "Timer")}))
-	start := time.Date(2026, 10, 19, 9, 0, 0, 0, time.UTC)
-	for i, id := range []string{"s1", "s2"} {
-		data, _ := json.Marshal(domain.Session{TaskID: "task", DeviceID: deviceID, Start: start.Add(time.Duration(i) * time.Hour)})
-		decodeResults(t, push(t, h, token, domain.Mutation{OperationID: id, Record: domain.Record{ID: id, Kind: "session", Data: data}}))
-	}
-	var count int
-	if e = s.DB.QueryRow(`SELECT count(*) FROM records WHERE kind='session' AND json_extract(data,'$.end') IS NULL`).Scan(&count); e != nil {
-		t.Fatal(e)
-	}
-	if count != 1 {
-		t.Fatal("multiple active timers", count)
-	}
-}
-
-func TestAnotherDeviceCanStopTimerWithoutChangingItsOrigin(t *testing.T) {
-	s, h, firstToken := setup(t)
-	firstDevice, err := s.Authorize(context.Background(), firstToken)
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, secondToken, err := s.Pair(context.Background(), "Second device")
-	if err != nil {
-		t.Fatal(err)
-	}
-	decodeResults(t, push(t, h, firstToken, domain.Mutation{OperationID: "create-task", Record: task("task", "Shared timer")}))
-	start := time.Now().UTC().Add(-time.Hour)
-	data, err := json.Marshal(domain.Session{TaskID: "task", DeviceID: firstDevice, Start: start})
-	if err != nil {
-		t.Fatal(err)
-	}
-	started := decodeResults(t, push(t, h, firstToken, domain.Mutation{OperationID: "start", Record: domain.Record{ID: "session", Kind: "session", Data: data}}))[0].Record
-	end := start.Add(25 * time.Minute)
-	started.Data, err = json.Marshal(domain.Session{TaskID: "task", DeviceID: firstDevice, Start: start, End: &end})
-	if err != nil {
-		t.Fatal(err)
-	}
-	stop := domain.Mutation{OperationID: "stop-from-second-device", Record: started}
-	if response := push(t, h, "invalid-token", stop); response.Code != http.StatusUnauthorized {
-		t.Fatalf("unauthenticated stop: %d", response.Code)
-	}
-	// Retrying the same stop is safe and retains the originating device and interval.
-	for range 2 {
-		result := decodeResults(t, push(t, h, secondToken, stop))[0]
-		if result.Status != "applied" || result.Record.Version != started.Version+1 {
-			t.Fatalf("unexpected stop result: %+v", result)
-		}
-		var session domain.Session
-		if err = json.Unmarshal(result.Record.Data, &session); err != nil {
-			t.Fatal(err)
-		}
-		if session.DeviceID != firstDevice || !session.Start.Equal(start) || session.End == nil || !session.End.Equal(end) {
-			t.Fatalf("changed timer origin or interval: %+v", session)
-		}
-	}
-}
-
 func TestAttachmentValidation(t *testing.T) {
 	_, h, token := setup(t)
 	r := httptest.NewRequest("PUT", "/api/v1/attachments/"+strings.Repeat("0", 64), strings.NewReader("not the expected hash"))
-	r.Header.Set("Authorization", "Bearer "+token)
+	authorizeTestRequest(t, h, r, token)
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, r)
 	if w.Code != 400 {
@@ -287,7 +285,7 @@ func TestClipboardAttachmentRoundTrip(t *testing.T) {
 		hash := sha256.Sum256(content)
 		path := "/api/v1/attachments/" + hex.EncodeToString(hash[:])
 		r := httptest.NewRequest("PUT", path, bytes.NewReader(content))
-		r.Header.Set("Authorization", "Bearer "+token)
+		authorizeTestRequest(t, h, r, token)
 		r.Header.Set("Content-Type", "application/octet-stream")
 		r.Header.Set("X-File-Name", "clipboard.custom")
 		w := httptest.NewRecorder()
@@ -299,177 +297,5 @@ func TestClipboardAttachmentRoundTrip(t *testing.T) {
 		if w.Code != http.StatusOK || !bytes.Equal(w.Body.Bytes(), content) {
 			t.Fatalf("download: %d %x", w.Code, w.Body.Bytes())
 		}
-	}
-}
-
-func TestUnknownOfflineTimerKeepsOverlapAndCompletionStopsIt(t *testing.T) {
-	s, h, token := setup(t)
-	firstDevice, e := s.Authorize(context.Background(), token)
-	if e != nil {
-		t.Fatal(e)
-	}
-	secondDevice, secondToken, e := s.Pair(context.Background(), "Second device")
-	if e != nil {
-		t.Fatal(e)
-	}
-	current := decodeResults(t, push(t, h, token, domain.Mutation{OperationID: "task-create", Record: task("t", "Time")}))[0].Record
-	firstStart := time.Now().UTC().Add(-2 * time.Hour)
-	secondStart := firstStart.Add(time.Hour)
-	for _, v := range []struct {
-		id, device, token string
-		start             time.Time
-	}{{"first", firstDevice, token, firstStart}, {"second", secondDevice, secondToken, secondStart}} {
-		data, _ := json.Marshal(domain.Session{TaskID: "t", DeviceID: v.device, Start: v.start})
-		decodeResults(t, push(t, h, v.token, domain.Mutation{OperationID: v.id, Record: domain.Record{ID: v.id, Kind: "session", Data: data}}))
-	}
-	var data string
-	if e = s.DB.QueryRow("SELECT data FROM records WHERE id='first'").Scan(&data); e != nil {
-		t.Fatal(e)
-	}
-	var session domain.Session
-	json.Unmarshal([]byte(data), &session)
-	if session.End == nil || !session.End.After(secondStart) {
-		t.Fatal("lost offline overlap", session)
-	}
-	var completed domain.Task
-	json.Unmarshal(current.Data, &completed)
-	completed.Status = "done"
-	current.Data, _ = json.Marshal(completed)
-	decodeResults(t, push(t, h, token, domain.Mutation{OperationID: "done", Record: current}))
-	var active int
-	if e = s.DB.QueryRow("SELECT count(*) FROM records WHERE kind='session' AND json_extract(data,'$.end') IS NULL").Scan(&active); e != nil {
-		t.Fatal(e)
-	}
-	if active != 0 {
-		t.Fatal("completed task timer remained active")
-	}
-}
-
-func TestUnscheduleAndSeriesDeletionContract(t *testing.T) {
-	s, h, token := setup(t)
-	record := func(id, kind string, data any) domain.Record {
-		t.Helper()
-		body, err := json.Marshal(data)
-		if err != nil {
-			t.Fatal(err)
-		}
-		return domain.Record{ID: id, Kind: kind, Data: body}
-	}
-	series := record("repeat-plan", "series", map[string]any{
-		"title": "Recurring task", "description": "", "project_id": "", "start": "2026-10-19T09:00:00Z",
-		"minutes": 60, "timezone": "UTC", "rule": "FREQ=WEEKLY;INTERVAL=2;BYDAY=MO,WE", "reminders": []int{30240},
-	})
-	item := record("repeat-task", "task", map[string]any{"title": "Recurring task", "status": "todo", "series_id": series.ID, "occurrence": "2026-10-19T09:00:00Z"})
-	block := record("repeat-block", "block", map[string]any{"task_id": item.ID, "start": "2026-10-19T09:00:00Z", "end": "2026-10-19T10:00:00Z", "timezone": "UTC", "reminders": []int{30240}})
-	session := record("repeat-time", "session", map[string]any{"task_id": item.ID, "device_id": "test-device", "start": "2026-10-18T09:00:00Z", "end": "2026-10-18T09:20:00Z"})
-	created := decodeResults(t, push(t, h, token,
-		domain.Mutation{OperationID: "new-series", Record: series}, domain.Mutation{OperationID: "new-task", Record: item},
-		domain.Mutation{OperationID: "new-block", Record: block}, domain.Mutation{OperationID: "new-session", Record: session}))
-	series, item, block, session = created[0].Record, created[1].Record, created[2].Record, created[3].Record
-	block.Deleted = true
-	removed := decodeResults(t, push(t, h, token, domain.Mutation{OperationID: "unschedule", Record: block}))[0]
-	if !removed.Record.Deleted || removed.Status != "applied" {
-		t.Fatal(removed)
-	}
-	all, _, err := s.Changes(context.Background(), 0, 100)
-	if err != nil {
-		t.Fatal(err)
-	}
-	latest := map[string]domain.Record{}
-	for _, r := range all {
-		latest[r.ID] = r
-	}
-	if latest[item.ID].Deleted || latest[session.ID].Deleted || !latest[block.ID].Deleted {
-		t.Fatal("unscheduling must preserve the task and tracked time")
-	}
-	series.Deleted, item.Deleted, session.Deleted = true, true, true
-	deleted := decodeResults(t, push(t, h, token, domain.Mutation{OperationID: "delete-series", Record: series}, domain.Mutation{OperationID: "delete-task", Record: item}, domain.Mutation{OperationID: "delete-time", Record: session}))
-	for _, result := range deleted {
-		if result.Status != "applied" || !result.Record.Deleted {
-			t.Fatal(result)
-		}
-	}
-	block.ID, block.Version, block.Deleted = "stale-new-block", 0, false
-	late := decodeResults(t, push(t, h, token, domain.Mutation{OperationID: "stale-offline-plan", Record: block}))[0]
-	if !late.Record.Deleted {
-		t.Fatal("late recurring block must be acknowledged as deleted")
-	}
-}
-
-func TestLateOfflineOccurrencesRespectCancellation(t *testing.T) {
-	for _, name := range []string{"deleted", "following", "exception", "active", "split"} {
-		t.Run(name, func(t *testing.T) {
-			s, h, token := setup(t)
-			series := domain.Series{Title: "Series", Start: time.Date(2026, 10, 19, 9, 0, 0, 0, time.UTC), Minutes: 30, Timezone: "UTC", Rule: "FREQ=DAILY"}
-			if name == "split" {
-				series.Rule += ";UNTIL=20261020T235959Z"
-			}
-			if name == "following" {
-				series.Rule += ";UNTIL=20261020T235959Z"
-				series.CancelledFrom = "2026-10-21T00:00:00Z"
-			}
-			if name == "exception" {
-				series.Exceptions = []string{"2026-10-21T09:00:00.000Z"}
-			}
-			data, _ := json.Marshal(series)
-			master := domain.Record{ID: "series", Kind: "series", Deleted: name == "deleted", Data: data}
-			decodeResults(t, push(t, h, token, domain.Mutation{OperationID: "series-op", Record: master}))
-			item := domain.Record{ID: "offline-instance", Kind: "task", Data: json.RawMessage(`{"title":"Late offline occurrence","status":"todo","series_id":"series","occurrence":"2026-10-21T09:00:00Z"}`)}
-			decodeResults(t, push(t, h, token, domain.Mutation{OperationID: "task-op", Record: item}))
-			block := domain.Record{ID: "offline-block", Kind: "block", Data: json.RawMessage(`{"task_id":"offline-instance","start":"2026-10-21T09:00:00Z","end":"2026-10-21T09:30:00Z","timezone":"UTC","reminders":[0]}`)}
-			decodeResults(t, push(t, h, token, domain.Mutation{OperationID: "block-op", Record: block}))
-			all, _, err := s.Changes(context.Background(), 0, 100)
-			if err != nil {
-				t.Fatal(err)
-			}
-			latest := map[string]domain.Record{}
-			for _, r := range all {
-				latest[r.ID] = r
-			}
-			for _, id := range []string{item.ID, block.ID} {
-				if latest[id].Deleted != (name != "active" && name != "split") {
-					t.Fatalf("%s deleted = %v", id, latest[id].Deleted)
-				}
-			}
-		})
-	}
-}
-
-func TestSettingsAccentColorContract(t *testing.T) {
-	for _, tc := range []struct {
-		name  string
-		color string
-		valid bool
-	}{
-		{"legacy", "", true},
-		{"default", `,"task_color":null`, true},
-		{"opaque", `,"task_color":4288461311`, true},
-		{"transparent", `,"task_color":2157754879`, false},
-		{"negative", `,"task_color":-1`, false},
-		{"overflow", `,"task_color":4294967296`, false},
-		{"fraction", `,"task_color":4288461311.5`, false},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			_, h, token := setup(t)
-			data := json.RawMessage(`{"default_minutes":30,"reminders":[15],"timezone":"UTC"` + tc.color + `}`)
-			response := push(t, h, token, domain.Mutation{OperationID: "settings-color", Record: domain.Record{ID: "settings", Kind: "settings", Data: data}})
-			if !tc.valid {
-				if response.Code != http.StatusBadRequest {
-					t.Fatalf("invalid color accepted: %d", response.Code)
-				}
-				return
-			}
-			result := decodeResults(t, response)[0].Record
-			var settings domain.Settings
-			if err := json.Unmarshal(result.Data, &settings); err != nil {
-				t.Fatal(err)
-			}
-			if (tc.color == "" || tc.name == "default") && settings.AccentColor != nil {
-				t.Fatal("legacy default unexpectedly changed")
-			}
-			if tc.name == "opaque" && (settings.AccentColor == nil || *settings.AccentColor != 4288461311) {
-				t.Fatal("color did not roundtrip")
-			}
-		})
 	}
 }

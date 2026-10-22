@@ -1,14 +1,16 @@
 openapi: 3.1.0
 info:
   title: Yggvion personal sync API
-  version: 1.3.0
+  version: 3.0.0
   description: >-
     One owner, device tokens, optimistic record versions. UTC RFC3339 timestamps;
     IANA timezone retained on blocks/series. Mutations in a batch are atomic.
     Version conflicts are returned per record without overwriting either side.
-    Protocol 2 clients read /state before pushing and send X-Yggvion-Generation
-    on sync, changes and attachment requests. Missing generations are accepted
-    until the first restore; stale or subsequently missing generations return
+    Protocol 5 clients initialize password-protected E2EE before the first upload, encrypt Record.data
+    and attachments on-device, and read /state before pushing. Keys never reach
+    the server in plaintext. Only an authenticated password wrapping of the random
+    workspace key is stored on the server. Private record IDs are keyed HMAC identifiers. Clients send X-Yggvion-Generation
+    on sync, changes and attachment requests. Missing or stale generations return
     409 generation_changed. Clients quarantine local records/outbox/conflicts,
     reset the cursor and fetch the restored dataset before sending new writes.
 servers:
@@ -16,7 +18,109 @@ servers:
 security:
   - deviceToken: []
 paths:
+  /encryption:
+    post:
+      summary: Initialize an empty workspace with a key fingerprint and password wrapping
+      description: Idempotent for the same fingerprint. Refuses a different key or an existing plaintext dataset. No old-client migration is provided.
+      parameters: [{$ref: '#/components/parameters/Generation'}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [key_id, password_envelope]
+              properties:
+                key_id: {type: string, pattern: '^[a-f0-9]{64}$'}
+                password_envelope: {$ref: '#/components/schemas/PasswordEnvelope'}
+      responses:
+        '200': {description: Fingerprint installed or already identical}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+  /encryption/password:
+    put:
+      summary: Replace the password wrapping without re-encrypting personal records
+      description: Compare-and-swap on expected_revision. The next revision must equal expected_revision + 1. An identical successful retry is accepted; a concurrent different change returns 409 password_changed. Passwords and derived password keys are never sent. A current generation header is always required, including before the first restore.
+      parameters:
+        - in: header
+          name: X-Yggvion-Generation
+          required: true
+          schema: {type: string}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [key_id, expected_revision, password_envelope]
+              properties:
+                key_id: {type: string, pattern: '^[a-f0-9]{64}$'}
+                expected_revision: {type: integer, minimum: 1, maximum: 2147483646}
+                password_envelope: {$ref: '#/components/schemas/PasswordEnvelope'}
+      responses:
+        '200':
+          description: Wrapping stored or retry already applied
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [revision]
+                properties:
+                  revision: {type: integer, minimum: 1, maximum: 2147483647}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+  /guest-proposals:
+    get:
+      summary: Receive up to 100 unencrypted guest proposals for client validation and encryption
+      description: Proposals are held separately from personal records. A successful encrypted mutation with the same guest_ ID acknowledges and deletes the inbox item. Expiry of a share does not delete received proposals.
+      parameters: [{$ref: '#/components/parameters/Generation'}]
+      responses:
+        '200':
+          description: Pending guest input; never treat this input as an authenticated personal record
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  records:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: {type: string, pattern: '^guest_[a-f0-9]{64}$'}
+                        kind: {const: task}
+                        version: {const: 0}
+                        deleted: {const: false}
+                        seq: {const: 0}
+                        data: {$ref: '#/components/schemas/Task'}
+        '401': {$ref: '#/components/responses/Error'}
+  /calendar-shares/{id}/availability:
+    put:
+      summary: Refresh a published anonymous availability snapshot from an owner device
+      parameters:
+        - {$ref: '#/components/parameters/Generation'}
+        - {in: path, name: id, required: true, schema: {type: string}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/Availability'}
+      responses:
+        '200': {description: Replaced within the original share window; expiry is unchanged}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
   /calendar-shares:
+    get:
+      summary: List active share windows without secrets, for snapshot refresh
+      parameters: [{$ref: '#/components/parameters/Generation'}]
+      responses:
+        '200': {description: 'shares array with id, expires, start, end, timezone'}
+        '401': {$ref: '#/components/responses/Error'}
     post:
       summary: Share anonymous availability for exactly one hour
       description: >-
@@ -32,9 +136,10 @@ paths:
             schema:
               type: object
               additionalProperties: false
-              required: [days]
+              required: [days, snapshot]
               properties:
                 days: {type: integer, minimum: 1, maximum: 30}
+                snapshot: {$ref: '#/components/schemas/Availability'}
       responses:
         '201':
           description: N days starting today in the owner's timezone
@@ -112,7 +217,8 @@ paths:
         the shared window and currently free. Minute precision, duration at most
         24 hours. Repeating a nonce with identical content is idempotent; changed
         content is rejected. Maximum JSON body 16 KiB, description 8000 UTF-8 bytes.
-        Owners receive an ordinary task through sync/SSE, without a calendar block.
+        The plaintext suggestion is held in a separate inbox until an owner client
+        validates it and uploads an encrypted task without a calendar block.
       security: [{calendarShare: []}]
       requestBody:
         required: true
@@ -145,14 +251,22 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [generation, generation_required, protocol, private_ca, backups]
+                required: [generation, protocol, private_ca, backups]
                 properties:
                   generation: {type: string}
-                  generation_required: {type: boolean}
-                  protocol: {type: integer, const: 2}
+                  protocol: {type: integer, const: 5}
+                  e2ee: {type: boolean, const: true}
+                  encryption_key_id: {type: string, description: Empty before initial setup; otherwise SHA256 of the random workspace key}
+                  password_envelope:
+                    oneOf:
+                      - {$ref: '#/components/schemas/PasswordEnvelope'}
+                      - {type: 'null'}
+                    description: Authenticated devices fetch this public wrapping and unlock on-device. Null before setup. Restoring a snapshot of the same workspace preserves its current wrapping.
+                  snapshot_created: {type: string, description: Snapshot timestamp after restore; client closes restored running timers at this instant}
+                  snapshot_cursor: {type: integer, format: int64, description: Last restored record sequence; only running sessions with a positive sequence at or below this boundary are closed at snapshot_created. Later sessions remain active.}
+                  generation_reason: {type: string}
                   private_ca: {type: string, description: 'Public PEM CA, empty for public HTTPS'}
                   backups: {type: boolean}
-                  note_folders: {type: boolean, description: Supports note_folder records and note folder/order metadata}
                   server_schema: {type: integer}
         '401': {$ref: '#/components/responses/Error'}
   /metrics:
@@ -170,7 +284,13 @@ paths:
   /invitations:
     post:
       summary: Create a single-use invitation valid for ten minutes
-      description: Revoking the issuing device invalidates its unused invitations. Maximum 32 live invitations.
+      description: Revoking the issuing device invalidates its unused invitations. Maximum 32 live invitations. Protocol 5 connection links contain exactly version (1), url, code, ca and expires_at; a newly connected device enters the encryption password to unlock /state.password_envelope locally. Previous link formats are rejected.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
       responses:
         '201':
           description: Transfer code and CA only via a trusted QR/link channel
@@ -208,6 +328,7 @@ paths:
         '401': {$ref: '#/components/responses/Error'}
     post:
       summary: Start an encrypted user-data and attachments snapshot; replicate if configured
+      description: Requires a configured password-protected workspace. Snapshot format 2 contains an obligatory password_envelope, encryption_key_id, encrypted records and encrypted attachments. Plaintext snapshots, format 1 and key-only archives are unsupported. The age outer archive layer is independent of the on-device encryption password.
       responses:
         '202': {description: Job accepted; poll GET /backups for completion}
         '409': {$ref: '#/components/responses/Error'}
@@ -334,7 +455,7 @@ paths:
   /pair:
     post:
       security: []
-      summary: Exchange a single-use invitation or legacy pairing key for a device token
+      summary: Exchange a single-use invitation or explicitly configured bootstrap key for a device token
       requestBody:
         required: true
         content:
@@ -353,17 +474,18 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [device_id, token]
+                required: [device_id, token, protocol]
                 properties:
                   device_id: {type: string}
                   token: {type: string}
+                  protocol: {type: integer, const: 5}
         '401': {$ref: '#/components/responses/Error'}
         '429': {$ref: '#/components/responses/Error'}
   /sync:
     parameters:
       - {$ref: '#/components/parameters/Generation'}
     post:
-      summary: Apply 1–100 ordered mutations with idempotent operation IDs
+      summary: Apply 1–100 encrypted mutations with idempotent operation IDs (maximum 8 MiB request)
       requestBody:
         required: true
         content:
@@ -473,8 +595,14 @@ paths:
         required: true
         schema: {type: string, pattern: '^[a-f0-9]{64}$'}
     put:
-      summary: Upload at most 300 MiB, ID must equal SHA-256 of the body
-      description: Maximum body size is 314572800 bytes, inclusive. Larger uploads return 413, including streamed requests without Content-Length.
+      summary: Upload ciphertext (up to 301 MiB including encryption overhead), ID equals SHA-256 of the body
+      description: User files are limited to 314572800 bytes before encryption. The transport permits 315621376 bytes including authenticated ciphertext overhead. Larger uploads return 413, including streamed requests without Content-Length. Original names and content hashes remain inside encrypted records.
+      parameters:
+        - in: header
+          name: X-Yggvion-Encryption
+          required: true
+          schema: {type: string, pattern: '^[a-f0-9]{64}$'}
+          description: Workspace key fingerprint; must match /state.
       requestBody:
         required: true
         content:
@@ -502,8 +630,9 @@ components:
     Generation:
       in: header
       name: X-Yggvion-Generation
+      required: true
       schema: {type: string}
-      description: Required after any restore; mismatches return 409 generation_changed
+      description: Always required; missing values or mismatches return 409 generation_changed
   securitySchemes:
     deviceToken: {type: http, scheme: bearer}
     calendarShare: {type: http, scheme: bearer, description: 256-bit share secret; one-hour lifetime}
@@ -571,17 +700,54 @@ components:
         version: {type: integer, minimum: 0, description: '0 for creation, server increments on accepted change'}
         deleted: {type: boolean}
         seq: {type: integer, minimum: 0, description: Server change cursor}
-        data:
-          oneOf:
-            - {$ref: '#/components/schemas/Task'}
-            - {$ref: '#/components/schemas/Block'}
-            - {$ref: '#/components/schemas/Session'}
-            - {$ref: '#/components/schemas/Note'}
-            - {$ref: '#/components/schemas/NoteFolder'}
-            - {$ref: '#/components/schemas/Project'}
-            - {$ref: '#/components/schemas/Settings'}
-            - {$ref: '#/components/schemas/Series'}
-            - {$ref: '#/components/schemas/Snooze'}
+        data: {$ref: '#/components/schemas/EncryptedEnvelope'}
+    PasswordEnvelope:
+      type: object
+      additionalProperties: false
+      required: [v, key_id, revision, kdf, memory, iterations, parallelism, salt, nonce, box, mac]
+      description: Argon2id derives a 32-byte wrapping key from the user password and salt. AES-256-GCM wraps the random 32-byte workspace key. AAD binds the context, key fingerprint, revision, KDF parameters and salt; HMAC-SHA256 with the workspace key authenticates the complete wrapping for existing devices. Clients reject unsupported or excessive KDF parameters before deriving. Offline password guessing remains possible; use a strong passphrase.
+      properties:
+        v: {type: integer, const: 1}
+        key_id: {type: string, pattern: '^[a-f0-9]{64}$'}
+        revision: {type: integer, minimum: 1, maximum: 2147483647}
+        kdf: {type: string, const: argon2id}
+        memory: {type: integer, const: 19456, description: KiB}
+        iterations: {type: integer, const: 2}
+        parallelism: {type: integer, const: 1}
+        salt: {type: string, maxLength: 128, description: Base64 of 16 random bytes}
+        nonce: {type: string, maxLength: 128, description: Base64 of 12 random bytes}
+        box: {type: string, maxLength: 128, description: Base64 of 32 ciphertext bytes and 16-byte GCM tag}
+        mac: {type: string, maxLength: 128, description: Base64 of 32-byte HMAC}
+    EncryptedEnvelope:
+      type: object
+      additionalProperties: false
+      required: [e2ee, key_id, nonce, box, files]
+      properties:
+        e2ee: {type: integer, const: 1}
+        key_id: {type: string, pattern: '^[a-f0-9]{64}$'}
+        nonce: {type: string, description: Base64 of 12 random bytes}
+        box: {type: string, description: Base64 AES-256-GCM ciphertext followed by 16-byte tag; authenticated payload contains local ID, data and attachment mapping}
+        files:
+          type: array
+          maxItems: 10000
+          items: {type: string, pattern: '^[a-f0-9]{64}$', description: SHA256 of encrypted file, never of plaintext}
+    Availability:
+      type: object
+      additionalProperties: false
+      required: [timezone, busy]
+      properties:
+        timezone: {type: string, description: Owner IANA timezone}
+        busy:
+          type: array
+          maxItems: 10000
+          description: Sorted merged intervals within the share window, deliberately unencrypted. No titles or task IDs.
+          items:
+            type: object
+            additionalProperties: false
+            required: [start, end]
+            properties:
+              start: {type: string, format: date-time}
+              end: {type: string, format: date-time}
     Task:
       type: object
       required: [title, description, project_id, status]

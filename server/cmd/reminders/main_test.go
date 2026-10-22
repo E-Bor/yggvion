@@ -150,11 +150,10 @@ func TestSnoozePersistsOfflineAndQueuesSync(t *testing.T) {
 	if err := json.Unmarshal([]byte(payload), &r); err != nil {
 		t.Fatal(err)
 	}
-	if err := domain.Validate(r); err != nil {
+	var s domain.Snooze
+	if err := json.Unmarshal(r.Data, &s); err != nil {
 		t.Fatal(err)
 	}
-	var s domain.Snooze
-	json.Unmarshal(r.Data, &s)
 	if s.TaskID != "task" || !s.At.Equal(at) || ordinal != 1 {
 		t.Fatal(r, ordinal)
 	}

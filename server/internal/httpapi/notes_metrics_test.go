@@ -5,14 +5,15 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"yggvion/server/internal/domain"
 )
 
-func TestNoteFoldersTitlesLinksAndValidation(t *testing.T) {
+func TestNoteFoldersAndNotesStayOpaque(t *testing.T) {
 	s, h, token := setup(t)
-	folder := domain.Record{ID: "folder", Kind: "note_folder", Data: json.RawMessage(`{"title":"Work","sort_order":1024}`)}
-	note := domain.Record{ID: "note", Kind: "note", Data: json.RawMessage(`{"title":"Title","content":"[other](note:target)","pinned":"","folder_id":"folder","sort_order":512}`)}
+	folder := encryptedRecord("folder", "note_folder", "Work folder")
+	note := encryptedRecord("note", "note", "Title [other](note:target)")
 	results := decodeResults(t, push(t, h, token, domain.Mutation{OperationID: "f", Record: folder}, domain.Mutation{OperationID: "n", Record: note}))
 	if len(results) != 2 {
 		t.Fatal(results)
@@ -21,20 +22,8 @@ func TestNoteFoldersTitlesLinksAndValidation(t *testing.T) {
 	if err := s.DB.QueryRow("SELECT data FROM records WHERE id='note'").Scan(&content); err != nil {
 		t.Fatal(err)
 	}
-	var decoded map[string]any
-	json.Unmarshal([]byte(content), &decoded)
-	if decoded["folder_id"] != "folder" || decoded["content"] != "[other](note:target)" {
-		t.Fatal(decoded)
-	}
-	for _, bad := range []string{`{"title":"","sort_order":1}`, `{"title":"x","sort_order":1.5}`, `{"title":"x","sort_order":999999999999999}`} {
-		folder.Data = json.RawMessage(bad)
-		if w := push(t, h, token, domain.Mutation{OperationID: "invalid", Record: folder}); w.Code != 400 {
-			t.Fatal(w.Code, w.Body.String())
-		}
-	}
-	note.Data = json.RawMessage(`{"title":"x","pinned":"","folder_id":"../../x"}`)
-	if w := push(t, h, token, domain.Mutation{OperationID: "invalid-note", Record: note}); w.Code != 400 {
-		t.Fatal(w.Code)
+	if content != string(note.Data) || strings.Contains(content, "Title") {
+		t.Fatal("altered/leaked note")
 	}
 }
 func TestMetricsAreAuthenticatedAndLazy(t *testing.T) {

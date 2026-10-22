@@ -8,6 +8,8 @@ import 'package:path/path.dart' as p;
 import 'package:share_plus/share_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../data/local_backup.dart';
+import '../data/encryption.dart';
+import 'encryption_settings.dart';
 import 'providers.dart';
 import 'theme.dart';
 
@@ -126,10 +128,17 @@ class _LocalBackupsPanelState extends ConsumerState<LocalBackupsPanel> {
       ),
     );
     if (yes == true && mounted) {
-      await action(
-        'Проверяем архив и восстанавливаем данные…',
-        () => service.restore(path),
-      );
+      await action('Проверяем архив и восстанавливаем данные…', () async {
+        try {
+          await service.restore(path);
+        } on PasswordRequired {
+          if (!mounted) return;
+          await showEncryptionPasswordDialog(
+            context,
+            submit: (password, _) => service.restore(path, password: password),
+          );
+        }
+      });
     }
   }
 
@@ -147,7 +156,7 @@ class _LocalBackupsPanelState extends ConsumerState<LocalBackupsPanel> {
           ),
           const SizedBox(height: 8),
           Text(
-            'Локальный архив не зашифрован. Сохраняйте его в доверенном месте.',
+            'Архив защищён вашим паролем шифрования. Его можно восстановить без VPS и старого устройства.',
             style: TextStyle(color: context.palette.muted, fontSize: 12),
           ),
           const SizedBox(height: 16),
@@ -170,13 +179,16 @@ class _LocalBackupsPanelState extends ConsumerState<LocalBackupsPanel> {
                   value: service.scheduleEnabled,
                   onChanged: locked
                       ? null
-                      : (value) => guard(
-                          context,
-                          () => service.configureSchedule(
+                      : (value) => guard(context, () async {
+                          if (value &&
+                              !await ensureEncryptionPassword(context, ref)) {
+                            return;
+                          }
+                          await service.configureSchedule(
                             enabled: value,
                             days: service.scheduleDays,
-                          ),
-                        ),
+                          );
+                        }),
                 ),
                 if (service.scheduleEnabled) ...[
                   const SizedBox(height: 12),
@@ -270,6 +282,9 @@ class _LocalBackupsPanelState extends ConsumerState<LocalBackupsPanel> {
                 onPressed: locked
                     ? null
                     : () => action('Создаём локальную копию…', () async {
+                        if (!await ensureEncryptionPassword(context, ref)) {
+                          return;
+                        }
                         await service.create();
                       }),
                 icon: const Icon(Icons.save_alt_rounded),

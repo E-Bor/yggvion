@@ -29,7 +29,6 @@ import (
 var ErrBusy = errors.New("backup operation already running")
 var validID = regexp.MustCompile(`^[a-f0-9]{32}$`)
 var validHash = regexp.MustCompile(`^[a-f0-9]{64}$`)
-var reference = regexp.MustCompile(`attachment:([a-f0-9]{64})`)
 
 type Entry struct {
 	ID      string    `json:"id"`
@@ -253,19 +252,8 @@ func (m *Manager) Create(ctx context.Context, reason string) (Entry, error) {
 	if err != nil {
 		return entry, err
 	}
-	files, err := attachmentIndex(snapshot.Attachments)
-	if err != nil {
+	if _, err = attachmentIndex(snapshot.Attachments); err != nil {
 		return entry, err
-	}
-	for _, r := range snapshot.Records {
-		if r.Deleted {
-			continue
-		}
-		for _, match := range reference.FindAllSubmatch(r.Data, -1) {
-			if _, ok := files[string(match[1])]; !ok {
-				return entry, errors.New("attachment not uploaded yet")
-			}
-		}
 	}
 	b, err := json.Marshal(snapshot)
 	if err != nil {
@@ -339,7 +327,7 @@ func attachmentIndex(entries []store.Attachment) (map[string]store.Attachment, e
 	index := make(map[string]store.Attachment, len(entries))
 	var total int64
 	for _, a := range entries {
-		if !validHash.MatchString(a.ID) || a.Size < 0 || a.Size > 300<<20 {
+		if !validHash.MatchString(a.ID) || a.Size < 0 || a.Size > 301<<20 {
 			return nil, errors.New("invalid attachment")
 		}
 		if _, exists := index[a.ID]; exists {
@@ -473,15 +461,6 @@ func (m *Manager) stage(ctx context.Context, path, key string) (store.Snapshot, 
 	if len(seen) != len(expected) {
 		return snapshot, "", errors.New("missing attachments")
 	}
-	for _, r := range snapshot.Records {
-		if !r.Deleted {
-			for _, match := range reference.FindAllSubmatch(r.Data, -1) {
-				if !seen[string(match[1])] {
-					return snapshot, "", errors.New("unresolved attachment reference")
-				}
-			}
-		}
-	}
 	success = true
 	return snapshot, stage, nil
 }
@@ -496,11 +475,25 @@ func (m *Manager) Restore(ctx context.Context, path, key string) error {
 	// edits cannot slip between them and disappear during restore.
 	m.DataMu.Lock()
 	defer m.DataMu.Unlock()
-	// Create's read-lock is already owned exclusively here; use a separate lock
-	// on this temporary manager while retaining the shared maintenance lock.
-	safety := &Manager{Store: m.Store, Dir: m.Dir, Files: m.Files, DataMu: &sync.RWMutex{}, identity: m.identity}
-	if _, err = safety.Create(ctx, "before_restore"); err != nil {
-		return fmt.Errorf("safety backup: %w", err)
+	keyID, err := m.Store.EncryptionKey(ctx)
+	if err != nil {
+		return err
+	}
+	if keyID == "" {
+		// A new server has nothing to back up. Reject any unexpected unconfigured data.
+		var count int
+		if err = m.Store.DB.QueryRowContext(ctx, "SELECT (SELECT count(*) FROM records)+(SELECT count(*) FROM attachments)").Scan(&count); err != nil {
+			return err
+		}
+		if count != 0 {
+			return errors.New("unconfigured server contains private data")
+		}
+	} else {
+		// Create's read-lock is already owned exclusively here; keep the shared lock.
+		safety := &Manager{Store: m.Store, Dir: m.Dir, Files: m.Files, DataMu: &sync.RWMutex{}, identity: m.identity}
+		if _, err = safety.Create(ctx, "before_restore"); err != nil {
+			return fmt.Errorf("safety backup: %w", err)
+		}
 	}
 	if err = os.MkdirAll(m.Files, 0700); err != nil {
 		return err

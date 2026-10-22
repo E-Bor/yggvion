@@ -18,4 +18,21 @@ CREATE TABLE IF NOT EXISTS server_meta (key TEXT PRIMARY KEY, value TEXT NOT NUL
 CREATE TABLE IF NOT EXISTS invitations (
  token_hash TEXT PRIMARY KEY, expires INTEGER NOT NULL, issuer TEXT NOT NULL
 );
-PRAGMA user_version = 2;
+CREATE INDEX records_kind ON records(kind,deleted);
+CREATE INDEX invitations_expires ON invitations(expires);
+CREATE TABLE calendar_shares (
+ id TEXT PRIMARY KEY, token_hash TEXT UNIQUE NOT NULL, issuer TEXT NOT NULL,
+ expires INTEGER NOT NULL, start TEXT NOT NULL, end TEXT NOT NULL, timezone TEXT NOT NULL
+);
+CREATE INDEX calendar_shares_expires ON calendar_shares(expires);
+CREATE TABLE calendar_proposals (
+ share_id TEXT NOT NULL REFERENCES calendar_shares(id) ON DELETE CASCADE,
+ nonce TEXT NOT NULL, fingerprint TEXT NOT NULL, task_id TEXT NOT NULL,
+ PRIMARY KEY(share_id,nonce)
+);
+CREATE TABLE encrypted_uploads (id TEXT PRIMARY KEY, key_id TEXT NOT NULL);
+CREATE TABLE guest_inbox (id TEXT PRIMARY KEY, data TEXT NOT NULL, created INTEGER NOT NULL);
+CREATE TABLE calendar_availability (
+ share_id TEXT PRIMARY KEY REFERENCES calendar_shares(id) ON DELETE CASCADE, busy TEXT NOT NULL
+);
+PRAGMA user_version = 6;

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"yggvion/server/internal/backup"
+	"yggvion/server/internal/store"
 )
 
 // Check and execute under the same lock: restore cannot race a stale upload.
@@ -16,13 +17,13 @@ func (a *API) current(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		a.DataMu.RLock()
 		defer a.DataMu.RUnlock()
-		generation, required, err := a.Store.Generation(r.Context())
+		generation, err := a.Store.Generation(r.Context())
 		if err != nil {
 			fail(w, 500, "storage_error")
 			return
 		}
 		given := r.Header.Get("X-Yggvion-Generation")
-		if (given != "" && given != generation) || (required && given == "") {
+		if given != generation {
 			fail(w, 409, "generation_changed")
 			return
 		}
@@ -33,14 +34,38 @@ func (a *API) current(next http.Handler) http.Handler {
 func (a *API) state(w http.ResponseWriter, r *http.Request) {
 	a.DataMu.RLock()
 	defer a.DataMu.RUnlock()
-	generation, required, err := a.Store.Generation(r.Context())
+	generation, err := a.Store.Generation(r.Context())
 	if err != nil {
 		fail(w, 500, "storage_error")
 		return
 	}
-	write(w, 200, map[string]any{"generation": generation, "generation_required": required, "protocol": 2, "note_folders": true, "server_schema": 3, "private_ca": a.CAPEM, "backups": a.Backups != nil})
+	keyID, err := a.Store.EncryptionKey(r.Context())
+	if err != nil {
+		fail(w, 500, "storage_error")
+		return
+	}
+	var created, reason string
+	var snapshotCursor int64
+	if err = a.Store.DB.QueryRowContext(r.Context(), `SELECT
+  COALESCE((SELECT value FROM server_meta WHERE key='snapshot_created'), ''),
+  COALESCE((SELECT value FROM server_meta WHERE key='generation_reason'), ''),
+  COALESCE((SELECT value FROM server_meta WHERE key='snapshot_cursor'), '0')`).Scan(&created, &reason, &snapshotCursor); err != nil {
+		fail(w, 500, "storage_error")
+		return
+	}
+	password, err := a.Store.PasswordEnvelope(r.Context())
+	if err != nil {
+		fail(w, 500, "storage_error")
+		return
+	}
+	write(w, 200, map[string]any{"password_envelope": password, "e2ee": true, "encryption_key_id": keyID, "generation_reason": reason, "snapshot_created": created, "snapshot_cursor": snapshotCursor, "generation": generation, "protocol": 5, "server_schema": store.SchemaVersion, "private_ca": a.CAPEM, "backups": a.Backups != nil})
 }
 func (a *API) invite(w http.ResponseWriter, r *http.Request) {
+	var input struct{}
+	if r.ContentLength != 0 && decode(w, r, &input) != nil {
+		fail(w, 400, "invalid_invitation")
+		return
+	}
 	code, err := a.Store.Invite(r.Context(), r.Context().Value(deviceKey{}).(string))
 	if err != nil {
 		fail(w, 409, "invitation_unavailable")

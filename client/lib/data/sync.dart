@@ -10,7 +10,13 @@ import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import '../domain/models.dart';
 import '../domain/server_metrics.dart';
+import '../domain/sync_rules.dart';
 import 'repository.dart';
+import 'encryption.dart';
+import 'package:collection/collection.dart';
+import 'package:timezone/timezone.dart' as tz;
+
+part 'sync_encryption.dart';
 
 class SyncService {
   SyncService(
@@ -46,6 +52,11 @@ class SyncService {
   bool _pairing = false;
   String? _url, _token;
   String? _generation, _privateCA;
+  WorkspaceKey? _cipher;
+  PasswordEnvelope? _password;
+  String? _requiredKeyId;
+  int _restoredThrough = 0;
+  DateTime? _snapshotCreated;
   ServerMetrics? _metrics;
   DateTime? _metricsFetched;
   Future<ServerMetrics> metrics() async {
@@ -80,6 +91,7 @@ class SyncService {
       _url = null;
       _token = null;
       _generation = null;
+      _requiredKeyId = null;
       if (_privateCA != null) {
         client.httpClientAdapter.close(force: true);
         client.httpClientAdapter = IOHttpClientAdapter();
@@ -96,7 +108,7 @@ class SyncService {
       await repo.serial(() async {
         await repo.db.transaction(() async {
           await repo.db.customStatement(
-            "DELETE FROM metadata WHERE key IN ('server_url','server_generation','sync_cursor')",
+            "DELETE FROM metadata WHERE key IN ('server_url','server_generation','sync_cursor','encrypted_server_key_id')",
           );
           // A future connection may target a fresh server. Re-send local records
           // and files; the server resolves equal IDs without losing edits.
@@ -125,6 +137,11 @@ class SyncService {
   }
 
   Future<void> initialize() async {
+    try {
+      await prepareWorkspaceKey();
+    } on StateError catch (e) {
+      repo.syncError = e.message;
+    }
     _url = await repo.db.meta('server_url');
     _token = _url == null ? null : await secure.read(key: 'server_token');
     _privateCA = await secure.read(key: 'server_ca');
@@ -214,6 +231,16 @@ class SyncService {
       if (candidate != client) candidate.close(force: true);
     }
     final data = response.data!;
+    if (data['protocol'] != 5) {
+      throw StateError(
+        'Несовместимая версия сервера. Нужна новая установка с парольным E2EE.',
+      );
+    }
+    _requiredKeyId = null;
+    await repo.db.customStatement(
+      "DELETE FROM metadata WHERE key IN ('encrypted_server_key_id','server_generation','sync_cursor')",
+    );
+    _generation = null;
     final oldId = repo.deviceId;
     final newId = data['device_id'] as String;
     await secure.write(key: 'server_token', value: data['token'] as String);
@@ -317,26 +344,41 @@ class SyncService {
         'Для создания ссылки подключитесь к серверу синхронизации',
       );
     }
+    final zone = repo.snapshot.settings.timezone;
+    final now = tz.TZDateTime.from(repo.now(), tz.getLocation(zone));
+    final start = tz.TZDateTime(now.location, now.year, now.month, now.day);
+    final end = tz.TZDateTime(
+      now.location,
+      now.year,
+      now.month,
+      now.day + days,
+    );
     final response = await client.post<Map<String, dynamic>>(
       '$_url/api/v1/calendar-shares',
-      data: {'days': days},
+      data: {'days': days, 'snapshot': _availability(start, end, zone)},
       options: _auth.copyWith(receiveTimeout: const Duration(minutes: 3)),
     );
     return response.data!;
   }
 
   Future<String> createInvitation() async {
-    final data = await request('POST', '/api/v1/invitations');
-    final payload = {
-      'url': _url,
-      'code': data['code'],
-      'ca': _privateCA,
-      'expires_at': data['expires_at'],
-    };
+    await sync();
+    if (repo.syncError != null) throw StateError(repo.syncError!);
+    final data = await request('POST', '/api/v1/invitations', data: {});
     return Uri(
       scheme: 'yggvion',
       host: 'connect',
-      fragment: base64Url.encode(utf8.encode(jsonEncode(payload))),
+      fragment: base64Url.encode(
+        utf8.encode(
+          jsonEncode({
+            'version': 1,
+            'url': _url,
+            'code': data['code'],
+            'ca': _privateCA,
+            'expires_at': data['expires_at'],
+          }),
+        ),
+      ),
     ).toString();
   }
 
@@ -351,6 +393,19 @@ class SyncService {
     final payload =
         jsonDecode(utf8.decode(base64Url.decode(uri.fragment)))
             as Map<String, dynamic>;
+    if (payload['version'] != 1 ||
+        payload.length != 5 ||
+        !{
+          'version',
+          'url',
+          'code',
+          'ca',
+          'expires_at',
+        }.containsAll(payload.keys)) {
+      throw const FormatException(
+        'Формат приглашения не поддерживается. Создайте новое приглашение.',
+      );
+    }
     if (!DateTime.parse(
       payload['expires_at'] as String,
     ).isAfter(DateTime.now())) {
@@ -367,16 +422,13 @@ class SyncService {
   }
 
   Future<void> _checkGeneration() async {
-    Map<String, dynamic> state;
-    try {
-      state = await request('GET', '/api/v1/state');
-    } on DioException catch (e) {
-      if (e.response?.statusCode == 404 && _generation == null) return;
-      rethrow;
-    }
+    final state = await _checkEncryption(await request('GET', '/api/v1/state'));
+    _restoredThrough = state['snapshot_cursor'] as int? ?? 0;
+    _snapshotCreated = DateTime.tryParse(
+      state['snapshot_created'] as String? ?? '',
+    );
     final next = state['generation'] as String;
-    if ((_generation != null && _generation != next) ||
-        (_generation == null && state['generation_required'] == true)) {
+    if (_generation != next) {
       // Stage every page before replacing anything locally. A network failure
       // keeps the old workspace usable and preserves edits made while fetching.
       final restored = <String, Entity>{};
@@ -394,7 +446,7 @@ class SyncService {
         );
         final body = page.data!;
         for (final raw in body['records'] as List) {
-          final entity = Entity.fromJson(raw as Map<String, dynamic>);
+          final entity = await _decodeRecord(raw as Map<String, dynamic>);
           restored[entity.id] = entity;
         }
         cursor = body['cursor'] as int;
@@ -431,6 +483,7 @@ class SyncService {
           }
           // A snapshot taken before the first pairing can be completely empty.
           var ordinal = int.parse(await repo.db.meta('ordinal') ?? '0');
+          await repo.db.customStatement('UPDATE files SET uploaded=0');
           for (final fallback in Repository.workspaceDefaults(
             repo.snapshot.settings.timezone,
           )) {
@@ -464,6 +517,7 @@ class SyncService {
     repo.publish();
     try {
       await _checkGeneration();
+      await _uploadEncryptedFiles();
       // Drain in dependency order; do not hold the local write queue over HTTP.
       while (!_disposed) {
         final pending = await repo.serial(
@@ -474,25 +528,27 @@ class SyncService {
               .get(),
         );
         if (pending.isEmpty) break;
+        final mutations = <Map<String, dynamic>>[];
+        var bytes = 0;
+        for (final row in pending) {
+          final mutation = await _encodeMutation(row);
+          final size = utf8.encode(jsonEncode(mutation)).length;
+          if (mutations.isNotEmpty && bytes + size > 7 * 1024 * 1024) {
+            break;
+          }
+          mutations.add(mutation);
+          bytes += size;
+        }
         final response = await client.post<Map<String, dynamic>>(
           '$_url/api/v1/sync',
           options: _auth,
-          data: {
-            'mutations': pending
-                .map(
-                  (r) => {
-                    'operation_id': r.read<String>('operation_id'),
-                    'record': jsonDecode(r.read<String>('payload')),
-                  },
-                )
-                .toList(),
-          },
+          data: {'mutations': mutations},
         );
         await repo.serial(() async {
           await repo.db.transaction(() async {
             for (final raw in response.data!['results'] as List) {
               final result = raw as Map<String, dynamic>;
-              final remote = Entity.fromJson(
+              final remote = await _decodeRecord(
                 result['record'] as Map<String, dynamic>,
               );
               final current = await repo.db
@@ -506,7 +562,13 @@ class SyncService {
                 jsonDecode(current.read<String>('payload'))
                     as Map<String, dynamic>,
               );
-              if (result['status'] == 'conflict') {
+              if (result['status'] == 'conflict' &&
+                  !concurrentTimerClosure(local, remote) &&
+                  !(local.deleted == remote.deleted &&
+                      const DeepCollectionEquality().equals(
+                        local.data,
+                        remote.data,
+                      ))) {
                 await repo.db.customStatement(
                   'INSERT INTO conflicts(id,local,remote) VALUES(?,?,?) ON CONFLICT(id) DO UPDATE SET local=excluded.local,remote=excluded.remote',
                   [remote.id, local.encoded, remote.encoded],
@@ -545,7 +607,7 @@ class SyncService {
         await repo.serial(() async {
           await repo.db.transaction(() async {
             for (final raw in body['records'] as List) {
-              final remote = Entity.fromJson(raw as Map<String, dynamic>);
+              final remote = await _decodeRecord(raw as Map<String, dynamic>);
               final dirty = await repo.db
                   .customSelect(
                     'SELECT id FROM outbox WHERE id=? UNION SELECT id FROM conflicts WHERE id=?',
@@ -563,9 +625,23 @@ class SyncService {
         });
         more = body['has_more'] == true;
       }
-      await _files();
+      await _downloadEncryptedFiles();
+      await repo.db.customStatement(
+        'DELETE FROM encrypted_outbox WHERE operation_id NOT IN (SELECT operation_id FROM outbox)',
+      );
       repo.syncStatus = 'Синхронизировано';
       await repo.reload();
+      final reconciled = await reconcileEncryptedRecords(
+        repo,
+        restoredThrough: _restoredThrough,
+        snapshotCreated: _snapshotCreated,
+      );
+      final received = await _receiveGuestProposals();
+      await _refreshAvailability();
+      if (received || reconciled) {
+        _busy = false;
+        await sync();
+      }
     } on DioException catch (e) {
       repo.syncStatus = 'Изменения на устройстве';
       repo.syncError = e.response?.statusCode == 401
@@ -579,80 +655,6 @@ class SyncService {
     } finally {
       _busy = false;
       repo.publish();
-    }
-  }
-
-  Future<void> _files() async {
-    final files = await repo.db
-        .customSelect('SELECT * FROM files WHERE uploaded=0')
-        .get();
-    for (final row in files) {
-      final file = File(row.read<String>('path'));
-      await client.put<Object?>(
-        '$_url/api/v1/attachments/${row.read<String>('id')}',
-        data: file.openRead(),
-        options: Options(
-          sendTimeout: const Duration(minutes: 15),
-          headers: {
-            ...authHeaders,
-            'Authorization': 'Bearer $_token',
-            'Content-Type': 'application/octet-stream',
-            'Content-Length': await file.length(),
-            'X-File-Name': Uri.encodeComponent(row.read<String>('name')),
-          },
-        ),
-      );
-      await repo.db.customStatement('UPDATE files SET uploaded=1 WHERE id=?', [
-        row.read<String>('id'),
-      ]);
-    }
-    final entities = await repo.db.entities();
-    final attachmentNames = <String, String>{};
-    for (final entity in entities) {
-      for (final match in RegExp(
-        r'\[([^\]]*)\]\(attachment:([a-f0-9]{64})\)',
-      ).allMatches(entity.searchable)) {
-        attachmentNames[match[2]!] = match[1]!;
-      }
-    }
-    final ids = entities
-        .expand(
-          (e) => RegExp(
-            r'attachment:([a-f0-9]{64})',
-          ).allMatches(e.searchable).map((m) => m[1]!),
-        )
-        .toSet();
-    for (final id in ids) {
-      if (await repo.attachmentPath(id) != null) continue;
-      try {
-        final dir = Directory(
-          p.join((await getApplicationSupportDirectory()).path, 'attachments'),
-        );
-        await dir.create(recursive: true);
-        final name = attachmentNames[id] ?? id;
-        final extension = p.extension(name).toLowerCase();
-        final target = p.join(
-          dir.path,
-          '$id${RegExp(r'^\.[a-z0-9]{1,12}$').hasMatch(extension) ? extension : ''}',
-        );
-        await client.download(
-          '$_url/api/v1/attachments/$id',
-          '$target.part',
-          options: _auth,
-        );
-        final digest = await sha256.bind(File('$target.part').openRead()).first;
-        if (digest.toString() != id) {
-          await File('$target.part').delete();
-          throw StateError('Контрольная сумма вложения не совпадает');
-        }
-        await File('$target.part').rename(target);
-        await repo.db.customStatement(
-          'INSERT INTO files(id,name,path,uploaded) VALUES (?,?,?,1) ON CONFLICT(id) DO NOTHING',
-          [id, name, target],
-        );
-      } on DioException catch (e) {
-        if (e.response?.statusCode != 404) rethrow;
-      }
     }
   }
 

@@ -11,6 +11,7 @@ import 'package:timezone/data/latest.dart' as tzdata;
 import 'package:timezone/timezone.dart' as tz;
 import '../domain/models.dart';
 import 'repository.dart';
+import 'encryption.dart';
 
 const _maximumSnapshot = 512 * 1024 * 1024;
 const _maximumArchive = 100 * 1024 * 1024 * 1024;
@@ -34,7 +35,7 @@ class LocalBackupEntry {
 }
 
 /// Local, portable snapshots. No network credentials or device paths are exported.
-/// The ZIP container is deliberately unencrypted; UI labels this explicitly.
+/// Portable archives include a password wrapping of their encryption key.
 class LocalBackupService extends ChangeNotifier {
   LocalBackupService(this.repo, {this.directory, this.beforeRestore});
 
@@ -215,14 +216,52 @@ class LocalBackupService extends ChangeNotifier {
     }
   }
 
-  Future<LocalBackupEntry> _create({bool automatic = false}) async {
+  Future<LocalBackupEntry> _create({
+    bool automatic = false,
+    WorkspaceKey? recoveryKey,
+    PasswordEnvelope? recoveryEnvelope,
+  }) async {
     final root = await folder();
     final data = await _snapshot();
     final target = p.join(
       root.path,
       '${automatic ? "auto-" : ""}${repo.now().toUtc().microsecondsSinceEpoch}-${repo.newId()}.ygglocal',
     );
-    await _writeInBackground(data, target);
+    final protection = await repo.serial(() async {
+      final id = await repo.db.meta('workspace_key_id');
+      final key = id == null ? null : await WorkspaceKey.load(id);
+      final envelope = id == null
+          ? null
+          : PasswordEnvelope.fromEncoded(
+              await repo.db.meta(PasswordEnvelope.storageKey(id)),
+            );
+      if (key != null && envelope != null) {
+        envelope.verify(key);
+        return (key: key, envelope: envelope);
+      }
+      if (recoveryKey != null && recoveryEnvelope != null) {
+        recoveryEnvelope.verify(recoveryKey);
+        return (key: recoveryKey, envelope: recoveryEnvelope);
+      }
+      throw StateError('Сначала создайте пароль шифрования в настройках');
+    });
+    final temporary = await root.createTemp('.encrypt-');
+    try {
+      final plain = p.join(temporary.path, 'snapshot.zip');
+      await _writeInBackground(data, plain);
+      await protection.key.encryptFile(
+        File(plain),
+        File('$target.part'),
+        'backup',
+        prefix: protection.envelope.archiveHeader,
+      );
+      await File('$target.part').rename(target);
+    } finally {
+      await temporary.delete(recursive: true);
+      if (await File('$target.part').exists()) {
+        await File('$target.part').delete();
+      }
+    }
     return LocalBackupEntry(
       target,
       DateTime.parse(data['created'] as String),
@@ -230,7 +269,7 @@ class LocalBackupService extends ChangeNotifier {
     );
   }
 
-  Future<void> restore(String source) async {
+  Future<void> restore(String source, {String? password}) async {
     if (busy) throw StateError('Резервное копирование уже выполняется');
     busy = true;
     Directory? stage;
@@ -239,8 +278,39 @@ class LocalBackupService extends ChangeNotifier {
       stage = await root.createTemp('.restore-');
       final stagePath = stage.path;
       // Validation completes before any live database or connection is changed.
-      final data = await _readInBackground(source, stagePath);
-      await _create(); // A full local safety copy, including current attachments.
+      final wrapped = await PasswordEnvelope.readArchive(File(source));
+      var restoredPassword = wrapped.envelope;
+      final restoredKey = password == null
+          ? await WorkspaceKey.load(restoredPassword.keyId)
+          : await restoredPassword.unlock(password);
+      if (restoredKey == null) throw const PasswordRequired();
+      restoredPassword.verify(restoredKey);
+      final archive = p.join(stagePath, 'snapshot.zip');
+      await restoredKey.decryptFile(
+        File(source),
+        File(archive),
+        'backup',
+        maximumBytes: _maximumArchive,
+        offset: wrapped.offset,
+      );
+      final data = await _readInBackground(archive, stagePath);
+      // An old archive keeps its own password, but must not roll back the
+      // password used for new backups or synchronization on this device.
+      final current = PasswordEnvelope.fromEncoded(
+        await repo.db.meta(PasswordEnvelope.storageKey(restoredKey.id)),
+      );
+      if (current != null) {
+        current.verify(restoredKey);
+        if (current.revision > restoredPassword.revision) {
+          restoredPassword = current;
+        }
+      }
+      await _create(
+        recoveryKey: restoredKey,
+        recoveryEnvelope: restoredPassword,
+      );
+      // Store only after full authentication and snapshot validation.
+      await restoredKey.save();
       if (beforeRestore != null) await beforeRestore!();
       final attachmentRoot = Directory(p.join(root.parent.path, 'attachments'));
       await attachmentRoot.create(recursive: true);
@@ -259,12 +329,19 @@ class LocalBackupService extends ChangeNotifier {
       }
       await repo.serial(() async {
         await repo.db.transaction(() async {
-          for (final table in ['outbox', 'records', 'conflicts', 'files']) {
+          for (final table in [
+            'outbox',
+            'records',
+            'conflicts',
+            'files',
+            'encrypted_outbox',
+            'encrypted_files',
+          ]) {
             await repo.db.customStatement('DELETE FROM $table');
           }
           await repo.db.clearSearchIndex();
           await repo.db.customStatement(
-            "DELETE FROM metadata WHERE key IN ('server_url','server_generation','sync_cursor')",
+            "DELETE FROM metadata WHERE key IN ('server_url','server_generation','sync_cursor','encrypted_server_key_id')",
           );
           var ordinal = 0;
           final created = DateTime.parse(data['created'] as String);
@@ -322,6 +399,11 @@ class LocalBackupService extends ChangeNotifier {
             );
           }
           await repo.db.setMeta('ordinal', '$ordinal');
+          await repo.db.setMeta('workspace_key_id', restoredKey.id);
+          await repo.db.setMeta(
+            PasswordEnvelope.storageKey(restoredKey.id),
+            restoredPassword.encoded,
+          );
         });
         await repo.reload();
       });

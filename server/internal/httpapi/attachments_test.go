@@ -22,14 +22,14 @@ func (attachmentZeros) Read(p []byte) (int, error) {
 }
 
 func TestAttachmentSizeLimit(t *testing.T) {
-	const limit int64 = 300 << 20
+	const limit int64 = 301 << 20
 	for _, tc := range []struct {
 		name          string
 		size          int64
 		contentLength int64
 		status        int
 	}{
-		{"exactly 300 MiB", limit, limit, http.StatusCreated},
+		{"301 MiB encrypted transport limit", limit, limit, http.StatusCreated},
 		{"known length exceeds limit by one byte", limit + 1, limit + 1, http.StatusRequestEntityTooLarge},
 		{"stream exceeds limit by one byte", limit + 1, -1, http.StatusRequestEntityTooLarge},
 	} {
@@ -57,7 +57,7 @@ func TestAttachmentSizeLimit(t *testing.T) {
 				t.Fatal(err)
 			}
 			req.ContentLength = tc.contentLength
-			req.Header.Set("Authorization", "Bearer "+token)
+			authorizeTestRequest(t, New(s, strings.Repeat("test", 8), files).Handler(), req, token)
 			req.Header.Set("Content-Type", "application/octet-stream")
 			// A known oversized body must be rejected before transmission starts.
 			req.Header.Set("Expect", "100-continue")
@@ -93,7 +93,7 @@ func TestAttachmentSizeLimit(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			req.Header.Set("Authorization", "Bearer "+token)
+			authorizeTestRequest(t, New(s, strings.Repeat("test", 8), files).Handler(), req, token)
 			response, err = client.Do(req)
 			if err != nil {
 				t.Fatal(err)

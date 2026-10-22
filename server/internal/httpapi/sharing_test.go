@@ -20,6 +20,7 @@ type shareFixture struct {
 	api           *API
 	owner, device string
 	now           time.Time
+	availability  store.Availability
 }
 
 func newShareFixture(t *testing.T) *shareFixture {
@@ -31,6 +32,7 @@ func newShareFixture(t *testing.T) *shareFixture {
 		t.Fatal(err)
 	}
 	f := &shareFixture{owner: owner, device: device, now: time.Date(2026, 10, 22, 9, 0, 0, 0, time.UTC)}
+	f.availability = store.Availability{Timezone: "UTC", Busy: []store.BusyInterval{}}
 	f.api = New(s, "", t.TempDir())
 	f.api.PublicURL = "https://calendar.example.test:8443"
 	f.api.ShareClock = func() time.Time { return f.now }
@@ -45,6 +47,13 @@ func (f *shareFixture) call(method, path, token string, body any) *httptest.Resp
 	r := httptest.NewRequest(method, path, bytes.NewReader(data))
 	r.Header.Set("Content-Type", "application/json")
 	r.Header.Set("Authorization", "Bearer "+token)
+	if token == f.owner {
+		generation, err := f.api.Store.Generation(context.Background())
+		if err != nil {
+			panic(err)
+		}
+		r.Header.Set("X-Yggvion-Generation", generation)
+	}
 	w := httptest.NewRecorder()
 	f.api.Handler().ServeHTTP(w, r)
 	return w
@@ -52,7 +61,7 @@ func (f *shareFixture) call(method, path, token string, body any) *httptest.Resp
 
 func (f *shareFixture) share(t *testing.T) (string, string) {
 	t.Helper()
-	w := f.call("POST", "/api/v1/calendar-shares", f.owner, map[string]int{"days": 7})
+	w := f.call("POST", "/api/v1/calendar-shares", f.owner, map[string]any{"days": 7, "snapshot": f.availability})
 	if w.Code != 201 {
 		t.Fatalf("create share: %d %s", w.Code, w.Body)
 	}
@@ -79,12 +88,10 @@ func (f *shareFixture) propose(nonce string) store.GuestProposal {
 
 func TestPublicCalendarPrivacyAndProposalLifecycle(t *testing.T) {
 	f := newShareFixture(t)
-	// Two overlapping private blocks must appear as one anonymous interval.
-	for i, minutes := range []int{60, 90} {
-		taskID := fmt.Sprintf("private-task-%d", i)
-		block := domain.Block{TaskID: taskID, Start: f.now.Add(time.Duration(minutes) * time.Minute), End: f.now.Add(time.Duration(minutes+60) * time.Minute), Timezone: "UTC", Reminders: []int{0}}
-		payload, _ := json.Marshal(block)
-		w := push(t, f.api.Handler(), f.owner, domain.Mutation{OperationID: fmt.Sprintf("task-op-%d", i), Record: task(taskID, "SECRET TITLE")}, domain.Mutation{OperationID: fmt.Sprintf("block-op-%d", i), Record: domain.Record{ID: fmt.Sprintf("private-block-%d", i), Kind: "block", Data: payload}})
+	// Availability is a client-supplied anonymous snapshot, never inferred from ciphertext.
+	f.availability.Busy = []store.BusyInterval{{Start: f.now.Add(time.Hour), End: f.now.Add(150 * time.Minute)}}
+	for i := range 2 {
+		w := push(t, f.api.Handler(), f.owner, domain.Mutation{OperationID: fmt.Sprintf("private-op-%d", i), Record: task(fmt.Sprintf("private-task-%d", i), "SECRET TITLE")})
 		if w.Code != 200 {
 			t.Fatal(w.Code, w.Body)
 		}
@@ -122,41 +129,25 @@ func TestPublicCalendarPrivacyAndProposalLifecycle(t *testing.T) {
 			t.Fatal(w.Code, w.Body)
 		}
 	}
+	inbox, err := f.api.Store.GuestProposals(context.Background())
+	if err != nil || len(inbox) != 1 {
+		t.Fatal("duplicate or lost proposal", len(inbox), err)
+	}
+	var guest domain.Task
+	if err = json.Unmarshal(inbox[0].Data, &guest); err != nil || guest.Title != proposal.Title || guest.Proposal == nil || !guest.Proposal.Pending || !guest.Proposal.Start.Equal(proposal.Start) {
+		t.Fatal(guest, err)
+	}
 	snapshot, err := f.api.Store.Export(context.Background())
-	if err != nil {
-		t.Fatal(err)
+	if err != nil || len(snapshot.Records) != 2 {
+		t.Fatal("guest input entered private snapshot", err)
 	}
-	count := 0
-	for _, record := range snapshot.Records {
-		if record.Kind != "task" {
-			continue
-		}
-		var task domain.Task
-		json.Unmarshal(record.Data, &task)
-		if task.Proposal == nil {
-			continue
-		}
-		count++
-		if task.Title != proposal.Title || task.Status != "todo" || !task.Proposal.Pending || !task.Proposal.Start.Equal(proposal.Start) {
-			t.Fatal(task)
-		}
-		if err = domain.Validate(record); err != nil {
-			t.Fatal("invalid synchronized proposal", err)
-		}
-		// Once accepted, the owner may turn the event into a recurring task.
-		task.SeriesID = "owner-created-series"
-		record.Data, _ = json.Marshal(task)
-		if domain.Validate(record) == nil {
-			t.Fatal("pending recurring proposal accepted")
-		}
-		task.Proposal.Pending = false
-		record.Data, _ = json.Marshal(task)
-		if err = domain.Validate(record); err != nil {
-			t.Fatal("accepted task cannot be edited", err)
-		}
+	adopted := encryptedRecord(inbox[0].ID, "task", "encrypted guest")
+	if w = push(t, f.api.Handler(), f.owner, domain.Mutation{OperationID: "adopt", Record: adopted}); w.Code != 200 {
+		t.Fatal(w.Code, w.Body)
 	}
-	if count != 1 {
-		t.Fatal("duplicate or lost proposal", count)
+	inbox, err = f.api.Store.GuestProposals(context.Background())
+	if err != nil || len(inbox) != 0 {
+		t.Fatal("guest not acknowledged", err)
 	}
 	w = f.call("GET", "/public/calendar", token, nil)
 	json.Unmarshal(w.Body.Bytes(), &response)
@@ -175,7 +166,7 @@ func TestCalendarShareExpiryRevocationAndAuthentication(t *testing.T) {
 		t.Run(reason, func(t *testing.T) {
 			f := newShareFixture(t)
 			id, token := f.share(t)
-			if w := f.call("POST", "/api/v1/calendar-shares", token, map[string]int{"days": 7}); w.Code != 401 {
+			if w := f.call("POST", "/api/v1/calendar-shares", token, map[string]any{"days": 7, "snapshot": f.availability}); w.Code != 401 {
 				t.Fatal("guest gained owner access", w.Code)
 			}
 			if w := f.call("GET", "/public/calendar", strings.Repeat("0", 64), nil); w.Code != 404 {
@@ -308,13 +299,10 @@ func TestPublicSurfaceHeadersOriginLimitsAndPrivateRoutes(t *testing.T) {
 
 func TestPublicProposalsRejectOccupiedAndUnexpectedInput(t *testing.T) {
 	f := newShareFixture(t)
-	_, token := f.share(t)
+	id, token := f.share(t)
 	proposal := f.propose("occupied")
-	block := domain.Block{TaskID: "occupied-task", Start: proposal.Start, End: proposal.End, Timezone: "UTC", Reminders: []int{}}
-	data, _ := json.Marshal(block)
-	w := push(t, f.api.Handler(), f.owner,
-		domain.Mutation{OperationID: "busy-task", Record: task("occupied-task", "Private")},
-		domain.Mutation{OperationID: "busy-block", Record: domain.Record{ID: "busy", Kind: "block", Data: data}})
+	f.availability.Busy = []store.BusyInterval{{Start: proposal.Start, End: proposal.End}}
+	w := f.call("PUT", "/api/v1/calendar-shares/"+id+"/availability", f.owner, f.availability)
 	if w.Code != 200 {
 		t.Fatal(w.Code, w.Body)
 	}
@@ -336,11 +324,8 @@ func TestPublicProposalsRejectOccupiedAndUnexpectedInput(t *testing.T) {
 func TestShareWindowFollowsOwnerTimezoneAcrossDaylightSaving(t *testing.T) {
 	f := newShareFixture(t)
 	f.now = time.Date(2026, 10, 24, 12, 0, 0, 0, time.UTC)
-	settings := domain.Record{ID: "settings", Kind: "settings", Data: json.RawMessage(`{"timezone":"Europe/Berlin","default_minutes":30,"reminders":[]}`)}
-	if w := push(t, f.api.Handler(), f.owner, domain.Mutation{OperationID: "settings-zone", Record: settings}); w.Code != 200 {
-		t.Fatal(w.Code, w.Body)
-	}
-	w := f.call("POST", "/api/v1/calendar-shares", f.owner, map[string]int{"days": 2})
+	f.availability.Timezone = "Europe/Berlin"
+	w := f.call("POST", "/api/v1/calendar-shares", f.owner, map[string]any{"days": 2, "snapshot": f.availability})
 	if w.Code != 201 {
 		t.Fatal(w.Code, w.Body)
 	}
@@ -357,7 +342,7 @@ func TestSharingRequiresHTTPSAndBoundedRange(t *testing.T) {
 	f := newShareFixture(t)
 	for _, base := range []string{"", "http://example.test", "https://user:secret@example.test", "https://example.test/path", "https://example.test?token=x"} {
 		f.api.PublicURL = base
-		if w := f.call("POST", "/api/v1/calendar-shares", f.owner, map[string]int{"days": 7}); w.Code != 503 {
+		if w := f.call("POST", "/api/v1/calendar-shares", f.owner, map[string]any{"days": 7, "snapshot": f.availability}); w.Code != 503 {
 			t.Fatal(base, w.Code)
 		}
 	}
