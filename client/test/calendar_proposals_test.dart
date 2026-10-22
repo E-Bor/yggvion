@@ -1,9 +1,12 @@
 import 'package:drift/native.dart';
+import 'package:flutter/gestures.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:timezone/data/latest.dart' as tz;
 import 'package:yggvion/data/database.dart';
 import 'package:yggvion/data/repository.dart';
 import 'package:yggvion/domain/models.dart';
+import 'package:yggvion/ui/calendar.dart';
 import 'package:yggvion/ui/calendar_sharing.dart';
 
 import 'interaction_test.dart' show workspace, settle, testInteraction;
@@ -121,6 +124,85 @@ void main() {
 
   for (final mobile in [false, true]) {
     testInteraction(
+      'proposal card selects and schedules another time on ${mobile ? "phone" : "desktop"}',
+      (tester) async {
+        final repo = await workspace(
+          tester,
+          mobile: mobile,
+          prepare: (repo) async => proposal(repo),
+        );
+        final task = repo.snapshot.tasks.single;
+        await tester.tap(find.text('Планировщик').first);
+        await settle(tester);
+
+        await tester.tap(find.byTooltip('Действия с предложением'));
+        await settle(tester);
+        expect(find.text('Открыть предложение'), findsOneWidget);
+        expect(
+          tester
+              .widget<ProposedTaskCard>(find.byType(ProposedTaskCard))
+              .selected,
+          isFalse,
+        );
+        await tester.tapAt(const Offset(8, 8));
+        await settle(tester);
+        expect(repo.snapshot.blocks, isEmpty);
+
+        await tester.tap(find.text(task.title));
+        await settle(tester);
+        expect(find.text('Выберите время: ${task.title}'), findsOneWidget);
+        expect(
+          tester
+              .widget<CalendarPane>(find.byType(CalendarPane))
+              .selectedTask
+              ?.id,
+          task.id,
+        );
+        expect(repo.snapshot.task(task.id)!.isProposed, isTrue);
+        expect(repo.snapshot.blocks, isEmpty);
+        if (mobile) {
+          expect(find.byType(ProposedTaskCard), findsNothing);
+        } else {
+          expect(
+            tester
+                .widget<ProposedTaskCard>(find.byType(ProposedTaskCard))
+                .selected,
+            isTrue,
+          );
+          await tester.tap(find.text(task.title));
+          await settle(tester);
+          expect(
+            tester.widget<CalendarPane>(find.byType(CalendarPane)).selectedTask,
+            isNull,
+          );
+          await tester.tap(find.text(task.title));
+          await settle(tester);
+        }
+
+        final grid = find.byKey(const ValueKey('calendar-grid-gestures'));
+        final gesture = await tester.startGesture(
+          tester.getTopLeft(grid) + const Offset(100, 16 * 72),
+          kind: mobile ? PointerDeviceKind.touch : PointerDeviceKind.mouse,
+        );
+        if (mobile) await tester.pump(const Duration(milliseconds: 600));
+        await gesture.moveBy(const Offset(0, 54));
+        await tester.pump();
+        await gesture.up();
+        await settle(tester);
+        final block = repo.snapshot.blocks.single;
+        expect(block.taskId, task.id);
+        expect(block.start, isNot(task.proposedStart));
+        expect(block.duration, const Duration(minutes: 45));
+        expect(repo.snapshot.task(task.id)!.isProposed, isFalse);
+        expect(
+          tester.widget<CalendarPane>(find.byType(CalendarPane)).selectedTask,
+          isNull,
+        );
+        expect(find.text('Выберите время: ${task.title}'), findsNothing);
+        expect(tester.takeException(), isNull);
+      },
+    );
+    testInteraction(
       'proposal planner card accepts time on ${mobile ? "phone" : "desktop"}',
       (tester) async {
         final repo = await workspace(
@@ -137,13 +219,14 @@ void main() {
         await settle(tester);
         expect(find.byType(ProposedTaskCard), findsOneWidget);
         expect(find.text('ПРЕДЛОЖЕНО'), findsOneWidget);
-        expect(find.text('Другое время'), findsOneWidget);
+        expect(find.text('Другое время'), findsNothing);
         expect(tester.takeException(), isNull);
         await tester.tap(find.text('Принять'));
         await settle(tester);
         expect(find.byType(ProposedTaskCard), findsNothing);
         expect(repo.snapshot.blocks, hasLength(1));
         expect(repo.snapshot.tasks.single.isProposed, isFalse);
+        expect(find.text('Выберите время: Встреча с гостем'), findsNothing);
         expect(tester.takeException(), isNull);
       },
     );

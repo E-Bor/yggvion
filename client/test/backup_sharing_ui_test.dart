@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:intl/date_symbol_data_local.dart';
@@ -55,6 +56,21 @@ void main() {
     ) async {
       tester.view.physicalSize = Size(width, 900);
       tester.view.devicePixelRatio = 1;
+      final copiedLinks = <String>[];
+      var clipboardUnavailable = false;
+      final messenger = tester.binding.defaultBinaryMessenger;
+      messenger.setMockMethodCallHandler(SystemChannels.platform, (call) async {
+        if (call.method == 'Clipboard.setData') {
+          if (clipboardUnavailable) {
+            throw PlatformException(code: 'clipboard_unavailable');
+          }
+          copiedLinks.add((call.arguments as Map)['text'] as String);
+        }
+        return null;
+      });
+      addTearDown(() {
+        messenger.setMockMethodCallHandler(SystemChannels.platform, null);
+      });
       late Repository repo;
       late Directory dir;
       await tester.runAsync(() async {
@@ -122,12 +138,46 @@ void main() {
       await tester.tap(find.text('Создать ссылку'));
       await settle(tester);
       expect(sync.requestedDays, 14);
-      expect(find.byKey(const ValueKey('copy-calendar-share')), findsOneWidget);
+      final url = tester
+          .widget<SelectableText>(find.byType(SelectableText))
+          .data!;
+      expect(copiedLinks, [url]);
+      expect(find.text('Ссылка скопирована'), findsOneWidget);
+      expect(find.text('Скопировать ссылку'), findsNothing);
+      expect(find.byKey(const ValueKey('copy-calendar-share')), findsNothing);
+      await tester.pump(const Duration(seconds: 30));
+      expect(copiedLinks, [
+        url,
+      ], reason: 'Rebuilds must not overwrite the clipboard');
       expect(tester.takeException(), isNull);
       await tester.tap(find.text('Отозвать доступ'));
       await settle(tester);
       expect(sync.revoked, isTrue);
       expect(find.text('Создать ссылку'), findsOneWidget);
+      expect(find.text('Ссылка скопирована'), findsNothing);
+
+      clipboardUnavailable = true;
+      await tester.tap(find.text('Создать ссылку'));
+      await settle(tester);
+      expect(find.text(url), findsOneWidget);
+      expect(find.text('Ссылка скопирована'), findsNothing);
+      expect(
+        find.textContaining('Ссылка создана, но не удалось скопировать'),
+        findsOneWidget,
+      );
+      expect(copiedLinks, [url]);
+      await tester.tap(find.text('Отозвать доступ'));
+      await settle(tester);
+      expect(
+        find.textContaining('Ссылка создана, но не удалось скопировать'),
+        findsNothing,
+      );
+
+      clipboardUnavailable = false;
+      await tester.tap(find.text('Создать ссылку'));
+      await settle(tester);
+      expect(copiedLinks, [url, url]);
+      expect(find.text('Ссылка скопирована'), findsOneWidget);
       expect(tester.takeException(), isNull);
     });
   }

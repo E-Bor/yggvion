@@ -39,6 +39,7 @@ class _CalendarShareDialogState extends ConsumerState<CalendarShareDialog> {
   }
 
   Future<void> create() async {
+    if (busy) return;
     setState(() {
       busy = true;
       error = null;
@@ -54,6 +55,17 @@ class _CalendarShareDialogState extends ConsumerState<CalendarShareDialog> {
       ticker = Timer.periodic(const Duration(seconds: 30), (_) {
         if (mounted) setState(() {});
       });
+      try {
+        await Clipboard.setData(ClipboardData(text: result['url'] as String));
+        if (mounted) setState(() => copied = true);
+      } on Object {
+        if (mounted) {
+          setState(
+            () => error =
+                'Ссылка создана, но не удалось скопировать её. Выделите ссылку и скопируйте вручную.',
+          );
+        }
+      }
     } on DioException catch (e) {
       if (mounted) {
         setState(
@@ -172,24 +184,27 @@ class _CalendarShareDialogState extends ConsumerState<CalendarShareDialog> {
                   ),
                 ),
                 const SizedBox(height: 12),
-                FilledButton.icon(
-                  key: const ValueKey('copy-calendar-share'),
-                  onPressed: expired
-                      ? null
-                      : () => guard(context, () async {
-                          await Clipboard.setData(
-                            ClipboardData(text: link!['url'] as String),
-                          );
-                          if (mounted) setState(() => copied = true);
-                        }),
-                  icon: Icon(
-                    copied ? Icons.check_rounded : Icons.copy_rounded,
-                    size: 18,
+                if (copied && !expired)
+                  Semantics(
+                    liveRegion: true,
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(
+                          Icons.check_rounded,
+                          size: 18,
+                          color: context.accentColor,
+                        ),
+                        const SizedBox(width: 8),
+                        const Flexible(
+                          child: Text(
+                            'Ссылка скопирована',
+                            style: TextStyle(fontSize: 13),
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
-                  label: Text(
-                    copied ? 'Ссылка скопирована' : 'Скопировать ссылку',
-                  ),
-                ),
                 TextButton(
                   onPressed: busy || expired
                       ? null
@@ -204,7 +219,11 @@ class _CalendarShareDialogState extends ConsumerState<CalendarShareDialog> {
                                 );
                             if (mounted) {
                               ticker?.cancel();
-                              setState(() => link = null);
+                              setState(() {
+                                link = null;
+                                copied = false;
+                                error = null;
+                              });
                             }
                           } finally {
                             if (mounted) setState(() => busy = false);
@@ -280,10 +299,10 @@ class ProposedTaskCard extends ConsumerWidget {
     final end = tz.TZDateTime.from(task.proposedEnd!, zone);
     final label =
         '${DateFormat('d MMM · HH:mm', 'ru').format(start)} — ${DateFormat(dayKey(start) == dayKey(end) ? 'HH:mm' : 'd MMM · HH:mm', 'ru').format(end)}';
-    return Container(
+    return AnimatedContainer(
       key: ValueKey('proposal-${task.id}'),
+      duration: const Duration(milliseconds: 120),
       margin: const EdgeInsets.only(bottom: 10),
-      padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
         color: Color.alphaBlend(
           context.accentColor.withValues(alpha: .06),
@@ -294,79 +313,86 @@ class ProposedTaskCard extends ConsumerWidget {
           color: context.accentColor.withValues(alpha: selected ? .8 : .25),
         ),
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
+      child: InkWell(
+        onTap: onSelect,
+        borderRadius: BorderRadius.circular(14),
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Icon(
-                Icons.mark_email_unread_outlined,
-                size: 15,
-                color: context.accentColor,
+              Row(
+                children: [
+                  Icon(
+                    Icons.mark_email_unread_outlined,
+                    size: 15,
+                    color: context.accentColor,
+                  ),
+                  const SizedBox(width: 7),
+                  Text(
+                    'ПРЕДЛОЖЕНО',
+                    style: TextStyle(
+                      fontSize: 9,
+                      letterSpacing: 1.4,
+                      fontWeight: FontWeight.w700,
+                      color: context.accentColor,
+                    ),
+                  ),
+                  const Spacer(),
+                  PopupMenuButton<String>(
+                    tooltip: 'Действия с предложением',
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(minWidth: 180),
+                    icon: const Icon(Icons.more_horiz_rounded, size: 18),
+                    onSelected: (value) {
+                      if (value == 'edit') openTask(context, task: task);
+                      if (value == 'decline') {
+                        guard(context, () async {
+                          await repo.deleteEntity(task.entity);
+                          if (context.mounted) onResolved?.call();
+                        });
+                      }
+                    },
+                    itemBuilder: (_) => const [
+                      PopupMenuItem(
+                        value: 'edit',
+                        child: Text('Открыть предложение'),
+                      ),
+                      PopupMenuItem(value: 'decline', child: Text('Отклонить')),
+                    ],
+                  ),
+                ],
               ),
-              const SizedBox(width: 7),
               Text(
-                'ПРЕДЛОЖЕНО',
+                task.title,
+                style: const TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              if (task.description.trim().isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(top: 5),
+                  child: Text(
+                    task.description,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: context.palette.muted,
+                    ),
+                  ),
+                ),
+              const SizedBox(height: 12),
+              Text(
+                label,
                 style: TextStyle(
-                  fontSize: 9,
-                  letterSpacing: 1.4,
-                  fontWeight: FontWeight.w700,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w500,
                   color: context.accentColor,
                 ),
               ),
-              const Spacer(),
-              PopupMenuButton<String>(
-                tooltip: 'Действия с предложением',
-                padding: EdgeInsets.zero,
-                constraints: const BoxConstraints(minWidth: 180),
-                icon: const Icon(Icons.more_horiz_rounded, size: 18),
-                onSelected: (value) {
-                  if (value == 'edit') openTask(context, task: task);
-                  if (value == 'decline') {
-                    guard(context, () async {
-                      await repo.deleteEntity(task.entity);
-                      if (context.mounted) onResolved?.call();
-                    });
-                  }
-                },
-                itemBuilder: (_) => const [
-                  PopupMenuItem(
-                    value: 'edit',
-                    child: Text('Открыть предложение'),
-                  ),
-                  PopupMenuItem(value: 'decline', child: Text('Отклонить')),
-                ],
-              ),
-            ],
-          ),
-          Text(
-            task.title,
-            style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
-          ),
-          if (task.description.trim().isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.only(top: 5),
-              child: Text(
-                task.description,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(fontSize: 12, color: context.palette.muted),
-              ),
-            ),
-          const SizedBox(height: 12),
-          Text(
-            label,
-            style: TextStyle(
-              fontSize: 11,
-              fontWeight: FontWeight.w500,
-              color: context.accentColor,
-            ),
-          ),
-          const SizedBox(height: 10),
-          Wrap(
-            spacing: 6,
-            runSpacing: 6,
-            children: [
+              const SizedBox(height: 10),
               FilledButton.tonal(
                 key: ValueKey('accept-proposal-${task.id}'),
                 onPressed: () => guard(context, () async {
@@ -375,13 +401,9 @@ class ProposedTaskCard extends ConsumerWidget {
                 }),
                 child: const Text('Принять'),
               ),
-              TextButton(
-                onPressed: onSelect,
-                child: const Text('Другое время'),
-              ),
             ],
           ),
-        ],
+        ),
       ),
     );
   }
