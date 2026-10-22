@@ -26,6 +26,10 @@ import (
 )
 
 type API struct {
+	PublicURL    string
+	EnsurePublic func(context.Context) (string, error)
+	ShareClock   func() time.Time
+	shareLimit   shareLimiter
 	Store        *store.Store
 	PairingKey   string
 	Files        string
@@ -66,6 +70,7 @@ func (a *API) Handler() http.Handler {
 		write(w, 200, snapshot)
 	})))
 	a.backupRoutes(mux)
+	a.calendarShareRoutes(mux)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("Cache-Control", "no-store")

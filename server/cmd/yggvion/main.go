@@ -17,6 +17,7 @@ import (
 	"yggvion/server/internal/backup"
 	"yggvion/server/internal/httpapi"
 	"yggvion/server/internal/identity"
+	"yggvion/server/internal/publictls"
 	"yggvion/server/internal/store"
 )
 
@@ -120,6 +121,20 @@ func main() {
 		api.CAPEM = string(tlsManager.CAPEM)
 		addr = fmt.Sprintf(":%d", config.Port)
 		go tlsManager.Run(ctx)
+	}
+	api.PublicURL = os.Getenv("YGGVION_PUBLIC_URL")
+	if api.PublicURL == "" && config.Host != "" {
+		publicPort := 8443
+		if config.Port == publicPort {
+			publicPort = 8444
+		}
+		manager, err := publictls.New(ctx, filepath.Join(dir, "public-identity"), config.Host, publicPort, api.PublicHandler())
+		if err != nil {
+			slog.Warn("public calendar HTTPS unavailable", "error", err)
+		} else {
+			api.EnsurePublic = manager.Ensure
+			go manager.Run(ctx)
+		}
 	}
 	server := &http.Server{Addr: addr, Handler: api.Handler(), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 120 * time.Second, IdleTimeout: 90 * time.Second, MaxHeaderBytes: 16 << 10}
 	if tlsManager != nil {

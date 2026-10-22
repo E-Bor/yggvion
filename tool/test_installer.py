@@ -25,7 +25,7 @@ elif cmd == 'ss': print(os.environ.get('FIXTURE_LISTENERS',''), end='')
 elif cmd in ['sleep','chown','userdel']: pass
 elif cmd == 'flock':
     if os.environ.get('FIXTURE_LOCKED') == 'yes': sys.exit(1)
-elif cmd == 'ufw': print('Status: inactive')
+elif cmd == 'ufw': print('Status: '+os.environ.get('FIXTURE_UFW','inactive'))
 elif cmd == 'sha256sum': print(hashlib.sha256(pathlib.Path(a[0]).read_bytes()).hexdigest()+'  '+a[0])
 elif cmd == 'runuser':
     sys.exit(subprocess.run(a[a.index('--')+1:]).returncode)
@@ -120,6 +120,14 @@ class InstallerTest(unittest.TestCase):
         self.assertIn('NEW_BINARY',self.binary.read_text())
         self.assertIn('444',self.config.read_text())
         self.assertIn('CapabilityBoundingSet=CAP_NET_BIND_SERVICE',self.unit.read_text())
+
+    def test_public_calendar_opens_separate_https_and_challenge_ports(self):
+        result=self.run_install(FIXTURE_UFW='active')
+        self.assertEqual(result.returncode,0,result.stderr)
+        commands=(self.root/'commands.log').read_text()
+        for port in [444,80,8443]:
+            self.assertIn(f'ufw allow {port}/tcp\n',commands)
+        self.assertNotIn('ufw disable',commands)
 
     def test_restart_and_late_start_failure_restore_binary_unit_and_config(self):
         for failure in ['restart','is-active']:

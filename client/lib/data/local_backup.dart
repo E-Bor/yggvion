@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 import 'dart:isolate';
+import 'package:flutter/foundation.dart';
 import 'package:archive/archive_io.dart';
 import 'package:crypto/crypto.dart';
 import 'package:path/path.dart' as p;
@@ -26,6 +27,7 @@ const _preferences = {
 
 class LocalBackupEntry {
   const LocalBackupEntry(this.path, this.created, this.bytes);
+  bool get automatic => p.basename(path).startsWith('auto-');
   final String path;
   final DateTime created;
   final int bytes;
@@ -33,8 +35,115 @@ class LocalBackupEntry {
 
 /// Local, portable snapshots. No network credentials or device paths are exported.
 /// The ZIP container is deliberately unencrypted; UI labels this explicitly.
-class LocalBackupService {
+class LocalBackupService extends ChangeNotifier {
   LocalBackupService(this.repo, {this.directory, this.beforeRestore});
+
+  bool scheduleEnabled = false;
+  int scheduleDays = 1;
+  DateTime? lastScheduledAt;
+  String? scheduleError;
+  Future<void>? _loaded;
+  bool _checking = false;
+  DateTime? _retryAfter;
+  bool _disposed = false;
+
+  DateTime? get nextScheduledAt => !scheduleEnabled
+      ? null
+      : lastScheduledAt?.add(Duration(days: scheduleDays));
+
+  void _publish() {
+    if (!_disposed) notifyListeners();
+  }
+
+  Future<void> loadSchedule() =>
+      _loaded ??= _loadSchedule().catchError((Object error, StackTrace stack) {
+        _loaded = null;
+        Error.throwWithStackTrace(error, stack);
+      });
+
+  Future<void> _loadSchedule() async {
+    scheduleEnabled = await repo.db.meta('local_backup_enabled') == 'true';
+    scheduleDays =
+        (int.tryParse(await repo.db.meta('local_backup_days') ?? '') ?? 1)
+            .clamp(1, 365);
+    lastScheduledAt = DateTime.tryParse(
+      await repo.db.meta('local_backup_last_success') ?? '',
+    );
+    _publish();
+  }
+
+  Future<void> configureSchedule({
+    required bool enabled,
+    required int days,
+  }) async {
+    if (days < 1 || days > 365) throw ArgumentError('Укажите от 1 до 365 дней');
+    await loadSchedule();
+    await repo.serial(
+      () => repo.db.transaction(() async {
+        await repo.db.setMeta('local_backup_enabled', '$enabled');
+        await repo.db.setMeta('local_backup_days', '$days');
+      }),
+    );
+    scheduleEnabled = enabled;
+    scheduleDays = days;
+    scheduleError = null;
+    _retryAfter = null;
+    _publish();
+    await runIfDue();
+  }
+
+  Future<void> runIfDue() async {
+    if (_checking || busy || _disposed) return;
+    _checking = true;
+    try {
+      await loadSchedule();
+      final now = repo.now().toUtc();
+      if (!scheduleEnabled ||
+          _disposed ||
+          busy ||
+          (_retryAfter != null && now.isBefore(_retryAfter!)) ||
+          (nextScheduledAt != null && now.isBefore(nextScheduledAt!))) {
+        return;
+      }
+      busy = true;
+      _publish();
+      try {
+        final entry = await _create(automatic: true);
+        // Rotate only after the new complete archive is atomically published.
+        final previous = (await list())
+            .where((e) => e.automatic && e.path != entry.path)
+            .toList();
+        for (final old in previous.skip(1)) {
+          await File(old.path).delete();
+        }
+        await repo.serial(
+          () => repo.db.setMeta(
+            'local_backup_last_success',
+            entry.created.toUtc().toIso8601String(),
+          ),
+        );
+        lastScheduledAt = entry.created;
+        scheduleError = null;
+        _retryAfter = null;
+      } finally {
+        busy = false;
+        _publish();
+      }
+    } catch (error) {
+      scheduleError = 'Не удалось создать автоматическую копию: $error';
+      _retryAfter = repo.now().add(const Duration(minutes: 5));
+      _publish();
+    } finally {
+      _checking = false;
+    }
+  }
+
+  @override
+  void dispose() {
+    _disposed = true;
+    super.dispose();
+  }
+
   final Repository repo;
   final Directory? directory;
   final Future<void> Function()? beforeRestore;
@@ -106,12 +215,12 @@ class LocalBackupService {
     }
   }
 
-  Future<LocalBackupEntry> _create() async {
+  Future<LocalBackupEntry> _create({bool automatic = false}) async {
     final root = await folder();
     final data = await _snapshot();
     final target = p.join(
       root.path,
-      '${DateTime.now().toUtc().microsecondsSinceEpoch}-${repo.newId()}.ygglocal',
+      '${automatic ? "auto-" : ""}${repo.now().toUtc().microsecondsSinceEpoch}-${repo.newId()}.ygglocal',
     );
     await _writeInBackground(data, target);
     return LocalBackupEntry(
@@ -524,6 +633,17 @@ void _validateEntity(Entity e) {
         t.seriesId;
         t.occurrence;
         t.isBirthday;
+        if (t.proposal != null) {
+          check(
+            t.proposedStart != null && t.proposedEnd!.isAfter(t.proposedStart!),
+          );
+          check(
+            t.proposedEnd!.difference(t.proposedStart!) <=
+                const Duration(days: 1),
+          );
+          tz.getLocation(t.proposedTimezone!);
+          t.isProposed;
+        }
       case 'block':
         final b = TimeBlock(e);
         if (!b.end.isAfter(b.start)) {

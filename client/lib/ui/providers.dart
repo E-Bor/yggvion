@@ -5,6 +5,7 @@ import '../data/reminders.dart';
 import '../data/clipboard.dart';
 import '../data/app_icon.dart';
 import '../data/activity.dart';
+import '../data/local_backup.dart';
 
 final activityProvider = ChangeNotifierProvider<ApplicationActivity?>(
   (ref) => null,
@@ -24,6 +25,12 @@ final syncProvider = Provider<SyncService>(
 );
 final remindersProvider = Provider<ReminderService>(
   (ref) => throw StateError('Reminders must be provided at startup'),
+);
+final localBackupProvider = ChangeNotifierProvider<LocalBackupService>(
+  (ref) => LocalBackupService(
+    ref.read(appProvider),
+    beforeRestore: ref.read(syncProvider).disconnect,
+  ),
 );
 final clipboardProvider = Provider<AttachmentClipboard>(
   (ref) => AttachmentClipboard(ref.read(appProvider)),

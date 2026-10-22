@@ -15,6 +15,7 @@ import 'birthdays.dart';
 import 'dashboard.dart';
 import 'shortcuts.dart';
 import 'timer_control.dart';
+import 'calendar_sharing.dart';
 import 'notes.dart';
 import 'providers.dart';
 import 'settings.dart';
@@ -162,6 +163,7 @@ class _WorkspaceState extends ConsumerState<Workspace>
   Future<void> refresh() async {
     try {
       final repo = ref.read(appProvider);
+      unawaited(ref.read(localBackupProvider).runIfDue());
       await repo.rollover();
       await RecurrenceService(repo).expand(
         repo.now().subtract(const Duration(days: 1)),
@@ -608,6 +610,14 @@ class _WorkspaceState extends ConsumerState<Workspace>
                         child: Text(project.title),
                       ),
                   ],
+                ),
+              if ((home || page == PageKind.planner) &&
+                  ref.read(syncProvider).connected)
+                IconButton(
+                  key: const ValueKey('share-calendar'),
+                  tooltip: 'Поделиться календарём',
+                  onPressed: () => shareCalendar(context),
+                  icon: const Icon(Icons.ios_share_rounded, size: 20),
                 ),
               TimerControl(compact: !wide),
               IconButton(
@@ -1092,7 +1102,7 @@ class _WorkspaceState extends ConsumerState<Workspace>
 
   Widget _planner(bool desktop) {
     final repo = ref.watch(appProvider);
-    final tasks = repo.snapshot.tasks
+    final matching = repo.snapshot.tasks
         .where(
           (t) =>
               t.seriesId.isEmpty &&
@@ -1101,6 +1111,10 @@ class _WorkspaceState extends ConsumerState<Workspace>
               t.title.toLowerCase().contains(query.toLowerCase()),
         )
         .toList();
+    final tasks = [
+      ...matching.where((t) => t.isProposed),
+      ...matching.where((t) => !t.isProposed),
+    ];
     final list = Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -1145,16 +1159,60 @@ class _WorkspaceState extends ConsumerState<Workspace>
               : ListView.builder(
                   padding: const EdgeInsets.all(12),
                   itemCount: tasks.length,
-                  itemBuilder: (context, index) => TaskCard(
-                    task: tasks[index],
-                    selected: selected?.id == tasks[index].id,
-                    onSelect: () => setState(() {
-                      selected = selected?.id == tasks[index].id
-                          ? null
-                          : tasks[index];
+                  itemBuilder: (context, index) {
+                    final task = tasks[index];
+                    void choose() => setState(() {
+                      selected = selected?.id == task.id ? null : task;
                       if (!desktop && selected != null) mobileTasks = false;
-                    }),
-                  ),
+                    });
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        if (task.isProposed && index == 0)
+                          Padding(
+                            padding: const EdgeInsets.fromLTRB(4, 2, 4, 12),
+                            child: Text(
+                              'Предложения · ${tasks.where((t) => t.isProposed).length}',
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                                color: context.accentColor,
+                              ),
+                            ),
+                          ),
+                        if (!task.isProposed &&
+                            index > 0 &&
+                            tasks[index - 1].isProposed)
+                          Padding(
+                            padding: const EdgeInsets.fromLTRB(4, 10, 4, 12),
+                            child: Text(
+                              'Ваши задачи',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: context.palette.muted,
+                              ),
+                            ),
+                          ),
+                        if (task.isProposed)
+                          ProposedTaskCard(
+                            task: task,
+                            selected: selected?.id == task.id,
+                            onSelect: choose,
+                            onResolved: () {
+                              if (selected?.id == task.id) {
+                                setState(() => selected = null);
+                              }
+                            },
+                          )
+                        else
+                          TaskCard(
+                            task: task,
+                            selected: selected?.id == task.id,
+                            onSelect: choose,
+                          ),
+                      ],
+                    );
+                  },
                 ),
         ),
       ],
@@ -1267,6 +1325,7 @@ class _WorkspaceState extends ConsumerState<Workspace>
                           .where(
                             (t) =>
                                 t.seriesId.isEmpty &&
+                                !t.isProposed &&
                                 t.status == status &&
                                 (projectId.isEmpty || t.projectId == projectId),
                           )

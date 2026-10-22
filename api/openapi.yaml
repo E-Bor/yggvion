@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Yggvion personal sync API
-  version: 1.2.0
+  version: 1.3.0
   description: >-
     One owner, device tokens, optimistic record versions. UTC RFC3339 timestamps;
     IANA timezone retained on blocks/series. Mutations in a batch are atomic.
@@ -16,6 +16,125 @@ servers:
 security:
   - deviceToken: []
 paths:
+  /calendar-shares:
+    post:
+      summary: Share anonymous availability for exactly one hour
+      description: >-
+        Owner only. Maximum 20 live invitations. Returns a 256-bit secret once in
+        the URL fragment; only its SHA-256 hash is stored. Initial public HTTPS
+        certificate issuance can take up to two minutes.
+      parameters:
+        - {$ref: '#/components/parameters/Generation'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [days]
+              properties:
+                days: {type: integer, minimum: 1, maximum: 30}
+      responses:
+        '201':
+          description: N days starting today in the owner's timezone
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id, url, expires, start, end, timezone]
+                properties:
+                  id: {type: string}
+                  url: {type: string, format: uri}
+                  expires: {type: string, format: date-time}
+                  start: {type: string, format: date-time}
+                  end: {type: string, format: date-time}
+                  timezone: {type: string}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '429': {$ref: '#/components/responses/Error'}
+        '503': {$ref: '#/components/responses/Error'}
+  /calendar-shares/{id}:
+    delete:
+      summary: Revoke an invitation immediately; previously received tasks are preserved
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: {type: string}
+      responses:
+        '200': {description: Revoked}
+        '401': {$ref: '#/components/responses/Error'}
+  /public/calendar:
+    servers: [{url: 'https://planner.example.com'}]
+    get:
+      summary: Anonymous busy intervals with overlaps and adjacent intervals merged
+      description: >-
+        Send the share secret from the URL fragment as a Bearer token. No titles,
+        descriptions, IDs, projects, birthdays or pending suggestions are disclosed.
+        Responses are not cached. Revoking the issuing device or restoring server
+        data also invalidates invitations.
+      security: [{calendarShare: []}]
+      responses:
+        '200':
+          description: UTC boundaries, rendered in the guest's local timezone
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [expires, start, end, timezone, busy, now]
+                properties:
+                  expires: {type: string, format: date-time}
+                  start: {type: string, format: date-time}
+                  end: {type: string, format: date-time}
+                  now: {type: string, format: date-time}
+                  timezone: {type: string}
+                  busy:
+                    type: array
+                    items:
+                      type: object
+                      additionalProperties: false
+                      required: [start, end]
+                      properties:
+                        start: {type: string, format: date-time}
+                        end: {type: string, format: date-time}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '429': {$ref: '#/components/responses/Error'}
+  /public/proposals:
+    servers: [{url: 'https://planner.example.com'}]
+    post:
+      summary: Suggest a one-time event without reserving its time
+      description: >-
+        At most 10 proposals per invitation. Start must be in the future, within
+        the shared window and currently free. Minute precision, duration at most
+        24 hours. Repeating a nonce with identical content is idempotent; changed
+        content is rejected. Maximum JSON body 16 KiB, description 8000 UTF-8 bytes.
+        Owners receive an ordinary task through sync/SSE, without a calendar block.
+      security: [{calendarShare: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [nonce, title, start, end]
+              properties:
+                nonce: {type: string, pattern: '^[a-zA-Z0-9_-]{1,160}$'}
+                title: {type: string, minLength: 1, maxLength: 200}
+                description: {type: string, description: Text or Markdown}
+                start: {type: string, format: date-time}
+                end: {type: string, format: date-time}
+      responses:
+        '201': {description: Created or identical retry; returns only proposed=true}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '429': {$ref: '#/components/responses/Error'}
   /state:
     get:
       summary: Server generation and supported administrative capabilities
@@ -387,6 +506,7 @@ components:
       description: Required after any restore; mismatches return 409 generation_changed
   securitySchemes:
     deviceToken: {type: http, scheme: bearer}
+    calendarShare: {type: http, scheme: bearer, description: 256-bit share secret; one-hour lifetime}
   responses:
     Error:
       description: A stable error code without internal server details
@@ -475,6 +595,19 @@ components:
         occurrence: {type: string, description: Original occurrence in UTC; empty for nonrecurring task}
         birthday_date: {type: string, format: date, description: Optional birth date YYYY-MM-DD. Marks a birthday occurrence; excluded from planner and kanban. Managed through its annual series.}
         birthday_year: {type: integer, minimum: 1800, maximum: 9999, description: Calendar year of this birthday; completion is independent for each year.}
+        proposal:
+          type: object
+          description: >-
+            Optional guest suggestion. Pending tasks form a separate planner group
+            and are excluded from kanban. Planning clears pending and creates a block
+            with deterministic ID proposal_TASKID to prevent duplicates across devices.
+            The original requested interval is retained as provenance.
+          required: [pending, start, end, timezone]
+          properties:
+            pending: {type: boolean}
+            start: {type: string, format: date-time}
+            end: {type: string, format: date-time}
+            timezone: {type: string}
     Block:
       type: object
       required: [task_id, start, end, timezone, all_day, historical, reminders]

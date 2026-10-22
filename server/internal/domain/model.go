@@ -31,15 +31,24 @@ type Result struct {
 }
 
 type Task struct {
-	BirthdayDate string `json:"birthday_date,omitempty"`
-	BirthdayYear int    `json:"birthday_year,omitempty"`
-	Title        string `json:"title"`
-	Description  string `json:"description"`
-	ProjectID    string `json:"project_id"`
-	Status       string `json:"status"`
-	ParentID     string `json:"parent_id"`
-	SeriesID     string `json:"series_id"`
-	Occurrence   string `json:"occurrence"`
+	Proposal     *Proposal `json:"proposal,omitempty"`
+	BirthdayDate string    `json:"birthday_date,omitempty"`
+	BirthdayYear int       `json:"birthday_year,omitempty"`
+	Title        string    `json:"title"`
+	Description  string    `json:"description"`
+	ProjectID    string    `json:"project_id"`
+	Status       string    `json:"status"`
+	ParentID     string    `json:"parent_id"`
+	SeriesID     string    `json:"series_id"`
+	Occurrence   string    `json:"occurrence"`
+}
+
+// Proposal is a guest suggestion, not a calendar reservation.
+type Proposal struct {
+	Pending  bool      `json:"pending"`
+	Start    time.Time `json:"start"`
+	End      time.Time `json:"end"`
+	Timezone string    `json:"timezone"`
 }
 
 type Block struct {
@@ -165,6 +174,10 @@ func Validate(r Record) error {
 		}
 		valid = title(t.Title) && (t.Status == "todo" || t.Status == "in_progress" || t.Status == "waiting" || t.Status == "done") && (t.ProjectID == "" || ValidID(t.ProjectID)) && (t.ParentID == "" || ValidID(t.ParentID)) && (t.SeriesID == "" || ValidID(t.SeriesID))
 		valid = valid && birthdayDate(t.BirthdayDate)
+		if t.Proposal != nil {
+			p := t.Proposal
+			valid = valid && !p.Start.IsZero() && p.End.After(p.Start) && p.End.Sub(p.Start) <= 24*time.Hour && zone(p.Timezone) && (!p.Pending || (t.SeriesID == "" && t.BirthdayDate == ""))
+		}
 		if t.BirthdayDate != "" {
 			birth, _ := time.Parse(time.DateOnly, t.BirthdayDate)
 			valid = valid && t.SeriesID != "" && t.ProjectID == "" && t.BirthdayYear >= birth.Year() && t.BirthdayYear <= 9999 && t.Occurrence != "" && optionalInstant(t.Occurrence)

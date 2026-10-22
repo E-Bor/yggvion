@@ -185,7 +185,7 @@ func (s *Store) Restore(ctx context.Context, v Snapshot) error {
 		return err
 	}
 	defer tx.Rollback()
-	for _, table := range []string{"records", "changes", "operations", "attachments", "invitations"} {
+	for _, table := range []string{"records", "changes", "operations", "attachments", "invitations", "calendar_shares"} {
 		if _, err = tx.ExecContext(ctx, "DELETE FROM "+table); err != nil {
 			return err
 		}

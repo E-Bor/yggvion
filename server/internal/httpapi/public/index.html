@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex,nofollow,noarchive" />
+    <title>Найдём время · Yggvion</title>
+    <link rel="icon" type="image/svg+xml" href="/share/logo.svg" />
+    <link rel="stylesheet" href="/share/calendar.css" />
+    <script src="/share/calendar.js" defer></script>
+  </head>
+  <body>
+    <div class="shell">
+      <header>
+        <span class="brand"
+          ><img
+            class="mark"
+            src="/share/logo.svg"
+            alt=""
+            width="34"
+            height="38"
+          />
+          Yggvion</span
+        ><span class="expiry" id="expiry">Приватное приглашение</span>
+      </header>
+      <section class="intro">
+        <div class="eyebrow">ВРЕМЯ ДЛЯ ВАЖНОГО</div>
+        <h1>Найдём время<span>.</span></h1>
+        <p>
+          Выберите свободный интервал и предложите встречу.<br />Детали чужих
+          событий остаются личными.
+        </p>
+      </section>
+      <div id="notice" role="status" aria-live="polite">
+        Открываем календарь…
+      </div>
+      <main id="workspace" hidden>
+        <section class="calendar" aria-label="Занятость календаря">
+          <div class="toolbar">
+            <div>
+              <h2 id="range"></h2>
+              <div id="zone" class="muted small"></div>
+            </div>
+            <div class="navigation">
+              <button id="prev" type="button" aria-label="Предыдущие дни">
+                ‹</button
+              ><button id="today" type="button">Сегодня</button
+              ><button id="next" type="button" aria-label="Следующие дни">
+                ›
+              </button>
+            </div>
+          </div>
+          <div class="legend">
+            <span class="dot busy-dot"></span> Занято
+            <span class="dot free-dot"></span> Можно предложить встречу
+          </div>
+          <div id="viewport">
+            <div id="grid">
+              <div id="days"></div>
+              <div id="timeline"></div>
+            </div>
+          </div>
+          <div class="calendar-hint">
+            Нажмите или протяните интервал. На телефоне — удерживайте для
+            выделения.
+          </div>
+        </section>
+        <aside class="proposal" id="proposal-panel">
+          <div class="eyebrow">ВАШЕ ПРЕДЛОЖЕНИЕ</div>
+          <h2 id="selection-title">Начните с времени</h2>
+          <p id="selection-help" class="muted">
+            Свободные промежутки открыты для ваших планов.
+          </p>
+          <form id="form" hidden>
+            <div id="selected-time" class="selected-time"></div>
+            <div class="time-fields">
+              <label
+                >Начало<input
+                  id="start-time"
+                  type="time"
+                  step="900"
+                  required /></label
+              ><span>—</span
+              ><label
+                >Окончание<input id="end-time" type="time" step="900" required
+              /></label>
+            </div>
+            <label
+              >Название встречи<input
+                id="title"
+                maxlength="200"
+                placeholder="Например, обсудить проект"
+                required
+                autocomplete="off"
+            /></label>
+            <label
+              >Описание <span class="muted">· необязательно</span
+              ><textarea
+                id="description"
+                maxlength="2000"
+                rows="4"
+                placeholder="Что стоит знать перед встречей?"
+              ></textarea>
+            </label>
+            <p id="form-error" class="error" role="alert"></p>
+            <button class="primary" id="submit" type="submit">
+              Предложить встречу <span>↗</span>
+            </button>
+            <p class="small muted">
+              Это предложение. Встреча появится в календаре после подтверждения
+              владельцем.
+            </p>
+          </form>
+          <div id="success" hidden>
+            <div class="success-icon">✓</div>
+            <h3>Предложение отправлено</h3>
+            <p class="muted">
+              Владелец увидит его в планировщике и сможет подтвердить время.
+              Окончательное время согласуйте с ним.
+            </p>
+            <button id="another" type="button">Предложить ещё</button>
+          </div>
+        </aside>
+      </main>
+      <footer>
+        <span>Только занятость. Ничего личного.</span
+        ><span>Ссылка действует один час</span>
+      </footer>
+    </div>
+  </body>
+</html>

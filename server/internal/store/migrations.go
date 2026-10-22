@@ -5,7 +5,7 @@ import (
 	"fmt"
 )
 
-const SchemaVersion = 3
+const SchemaVersion = 4
 
 // Each migration runs once, in the same transaction as its version marker.
 // Future changes append a step; existing migrations remain immutable.
@@ -25,6 +25,21 @@ func migrate(db *sql.DB, version int) error {
    CREATE INDEX IF NOT EXISTS invitations_expires ON invitations(expires);
    PRAGMA user_version=3;`); err != nil {
 			return fmt.Errorf("schema 3: %w", err)
+		}
+	}
+	if version < 4 {
+		if _, err = tx.Exec(`CREATE TABLE calendar_shares (
+      id TEXT PRIMARY KEY, token_hash TEXT UNIQUE NOT NULL, issuer TEXT NOT NULL,
+      expires INTEGER NOT NULL, start TEXT NOT NULL, end TEXT NOT NULL, timezone TEXT NOT NULL
+    );
+    CREATE INDEX calendar_shares_expires ON calendar_shares(expires);
+    CREATE TABLE calendar_proposals (
+      share_id TEXT NOT NULL REFERENCES calendar_shares(id) ON DELETE CASCADE,
+      nonce TEXT NOT NULL, fingerprint TEXT NOT NULL, task_id TEXT NOT NULL,
+      PRIMARY KEY(share_id,nonce)
+    );
+    PRAGMA user_version=4;`); err != nil {
+			return fmt.Errorf("schema 4: %w", err)
 		}
 	}
 	return tx.Commit()

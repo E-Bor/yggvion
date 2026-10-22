@@ -318,22 +318,64 @@ class Repository extends ChangeNotifier {
     Task task,
     DateTime start,
     DateTime end, {
+    bool acceptProposedTime = false,
     bool allDay = false,
     List<int>? reminders,
     String? timezone,
   }) async {
     validateInterval(start, end);
-    await commit([
-      TimeBlock.create(
-        newId(),
-        task.id,
-        start,
-        end,
-        timezone: timezone ?? snapshot.settings.timezone,
-        allDay: allDay,
-        reminders: reminders ?? snapshot.settings.reminders,
-      ),
-    ]);
+    await commitComputed(() async {
+      final current = snapshot.task(task.id);
+      if (current == null || (task.isProposed && !current.isProposed)) {
+        return [];
+      }
+      if (acceptProposedTime) {
+        if (!current.isProposed) return [];
+        if (start.isBefore(now())) {
+          throw StateError(
+            'Предложенное время уже прошло. Выберите другой интервал в календаре.',
+          );
+        }
+        if (snapshot.blocks.any(
+          (b) =>
+              !b.historical &&
+              snapshot.task(b.taskId)?.isBirthday == false &&
+              b.start.isBefore(end) &&
+              b.end.isAfter(start),
+        )) {
+          throw StateError(
+            'Это время уже занято. Выберите другой интервал в календаре.',
+          );
+        }
+      }
+      return [
+        if (current.isProposed)
+          current.entity.change({
+            'proposal': {...current.proposal!, 'pending': false},
+          }),
+        TimeBlock.create(
+          current.isProposed ? 'proposal_${current.id}' : newId(),
+          current.id,
+          start,
+          end,
+          timezone: timezone ?? snapshot.settings.timezone,
+          allDay: allDay,
+          reminders: reminders ?? snapshot.settings.reminders,
+        ),
+      ];
+    });
+  }
+
+  Future<void> acceptProposal(Task task) async {
+    final current = snapshot.task(task.id);
+    if (current == null || !current.isProposed) return;
+    await schedule(
+      current,
+      current.proposedStart!,
+      current.proposedEnd!,
+      timezone: current.proposedTimezone,
+      acceptProposedTime: true,
+    );
   }
 
   Future<void> changeBlock(

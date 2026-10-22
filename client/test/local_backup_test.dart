@@ -17,12 +17,14 @@ void main() {
   late Repository repo;
   late LocalBackupService backups;
   var disconnects = 0;
+  late DateTime now;
   const channel = MethodChannel('plugins.flutter.io/path_provider');
   setUp(() async {
     dir = await Directory.systemTemp.createTemp('yggvion-local-backup-test-');
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(channel, (_) async => dir.path);
-    repo = Repository(LocalDatabase(NativeDatabase.memory()));
+    now = DateTime.utc(2026, 10, 22, 9);
+    repo = Repository(LocalDatabase(NativeDatabase.memory()), clock: () => now);
     await repo.initialize();
     disconnects = 0;
     backups = LocalBackupService(
@@ -34,12 +36,96 @@ void main() {
     );
   });
   tearDown(() async {
+    backups.dispose();
     await repo.db.close();
     repo.dispose();
     await dir.delete(recursive: true);
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(channel, null);
   });
+  test(
+    'schedule persists every N days, catches up once and keeps two copies',
+    () async {
+      await backups.runIfDue();
+      expect(await backups.list(), isEmpty);
+      final manual = await backups.create();
+      await backups.configureSchedule(enabled: true, days: 2);
+      expect((await backups.list()).where((e) => e.automatic), hasLength(1));
+      expect(backups.lastScheduledAt, now);
+      expect(backups.nextScheduledAt, now.add(const Duration(days: 2)));
+      now = now.add(const Duration(hours: 47));
+      await backups.runIfDue();
+      expect(await backups.list(), hasLength(2));
+      now = now.add(const Duration(hours: 1));
+      await Future.wait(List.generate(5, (_) => backups.runIfDue()));
+      expect(await backups.list(), hasLength(3));
+      backups.dispose();
+      backups = LocalBackupService(
+        repo,
+        directory: Directory('${dir.path}/backups'),
+      );
+      await backups.loadSchedule();
+      expect(backups.scheduleEnabled, isTrue);
+      expect(backups.scheduleDays, 2);
+      now = now.add(const Duration(days: 9));
+      await backups.runIfDue();
+      final entries = await backups.list();
+      expect(entries.where((e) => e.automatic), hasLength(2));
+      expect(entries.where((e) => !e.automatic).single.path, manual.path);
+      expect(backups.lastScheduledAt, now);
+      await backups.configureSchedule(enabled: false, days: 3);
+      now = now.add(const Duration(days: 10));
+      await backups.runIfDue();
+      expect(await backups.list(), hasLength(3));
+      expect(backups.nextScheduledAt, isNull);
+    },
+  );
+  test(
+    'failed automatic copy preserves both archives and last successful date',
+    () async {
+      await backups.configureSchedule(enabled: true, days: 1);
+      now = now.add(const Duration(days: 1));
+      await backups.runIfDue();
+      final before = (await backups.list()).map((e) => e.path).toSet();
+      final last = backups.lastScheduledAt;
+      final note = await repo.createNote();
+      await repo.saveNote(
+        note.id,
+        'Missing file',
+        '[file](attachment:${sha256.convert([8])})',
+      );
+      now = now.add(const Duration(days: 1));
+      await backups.runIfDue();
+      expect(backups.scheduleError, isNotNull);
+      expect(backups.busy, isFalse);
+      expect(backups.lastScheduledAt, last);
+      expect((await backups.list()).map((e) => e.path).toSet(), before);
+      await repo.saveNote(note.id, 'Fixed', 'Complete note');
+      now = now.add(const Duration(minutes: 5));
+      await backups.runIfDue();
+      expect(backups.scheduleError, isNull);
+      expect(backups.lastScheduledAt, now);
+      expect(await backups.list(), hasLength(2));
+      expect(
+        (await backups.folder()).listSync().where(
+          (f) => f.path.endsWith('.part'),
+        ),
+        isEmpty,
+      );
+    },
+  );
+  test(
+    'invalid schedule frequency cannot change persisted preferences',
+    () async {
+      for (final days in [0, -1, 366]) {
+        await expectLater(
+          backups.configureSchedule(enabled: true, days: days),
+          throwsArgumentError,
+        );
+      }
+      expect(await repo.db.meta('local_backup_enabled'), isNull);
+    },
+  );
   test(
     'offline backup round trip includes titles folders links files and preferences',
     () async {

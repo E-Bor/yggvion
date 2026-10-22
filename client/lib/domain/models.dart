@@ -121,6 +121,15 @@ class Entity {
 
 class Task {
   const Task(this.entity);
+
+  Map<String, dynamic>? get proposal =>
+      (entity.data['proposal'] as Map?)?.cast<String, dynamic>();
+  bool get isProposed => proposal?['pending'] == true;
+  DateTime? get proposedStart =>
+      proposal == null ? null : parseTime(proposal!['start']);
+  DateTime? get proposedEnd =>
+      proposal == null ? null : parseTime(proposal!['end']);
+  String? get proposedTimezone => proposal?['timezone'] as String?;
   final Entity entity;
   String get id => entity.id;
   String get title => entity.data['title'] as String;

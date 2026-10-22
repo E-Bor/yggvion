@@ -124,6 +124,12 @@ systemctl enable yggvion >/dev/null
 systemctl restart yggvion
 if command -v ufw >/dev/null 2>&1 && ufw status | head -n 1 | grep -q 'Status: active'; then
   ufw allow "$port/tcp" >/dev/null
+  # Public invitations use a separate browser-trusted HTTPS identity. Port 80
+  # serves only ACME challenges, and only while issuing or renewing a certificate.
+  public_port=8443
+  if test "$port" = 8443; then public_port=8444; fi
+  ufw allow 80/tcp >/dev/null
+  ufw allow "$public_port/tcp" >/dev/null
 fi
 sleep 2
 if ! systemctl is-active --quiet yggvion; then

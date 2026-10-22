@@ -1,0 +1,131 @@
+import 'dart:io';
+import 'package:drift/native.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:intl/date_symbol_data_local.dart';
+import 'package:timezone/data/latest.dart' as tz;
+import 'package:yggvion/data/database.dart';
+import 'package:yggvion/data/local_backup.dart';
+import 'package:yggvion/data/repository.dart';
+import 'package:yggvion/data/sync.dart';
+import 'package:yggvion/ui/calendar_sharing.dart';
+import 'package:yggvion/ui/local_backups.dart';
+import 'package:yggvion/ui/providers.dart';
+import 'package:yggvion/ui/theme.dart';
+import 'interaction_test.dart' show settle;
+
+class SharingFixture extends SyncService {
+  SharingFixture(super.repo);
+  int? requestedDays;
+  bool revoked = false;
+  @override
+  Future<Map<String, dynamic>> createCalendarShare(int days) async {
+    requestedDays = days;
+    return {
+      'id': 'invitation',
+      'url': 'https://203.0.113.1:8443/share#${'a'.padRight(64, 'a')}',
+      'expires': DateTime.now()
+          .add(const Duration(hours: 1))
+          .toUtc()
+          .toIso8601String(),
+    };
+  }
+
+  @override
+  Future<Map<String, dynamic>> request(
+    String method,
+    String path, {
+    Object? data,
+  }) async {
+    revoked =
+        method == 'DELETE' && path == '/api/v1/calendar-shares/invitation';
+    return {'revoked': revoked};
+  }
+}
+
+void main() {
+  setUpAll(() async {
+    tz.initializeTimeZones();
+    await initializeDateFormatting('ru');
+  });
+  for (final width in [390.0, 1440.0]) {
+    testWidgets('backup schedule and share controls work at $width px', (
+      tester,
+    ) async {
+      tester.view.physicalSize = Size(width, 900);
+      tester.view.devicePixelRatio = 1;
+      late Repository repo;
+      late Directory dir;
+      await tester.runAsync(() async {
+        dir = await Directory.systemTemp.createTemp('yggvion-backup-ui-');
+        repo = Repository(LocalDatabase(NativeDatabase.memory()));
+        await repo.initialize();
+      });
+      final backups = LocalBackupService(repo, directory: dir);
+      final sync = SharingFixture(repo);
+      final container = ProviderContainer(
+        overrides: [
+          appProvider.overrideWith((ref) => repo),
+          syncProvider.overrideWithValue(sync),
+          localBackupProvider.overrideWith((ref) => backups),
+        ],
+      );
+      addTearDown(() async {
+        await tester.pumpWidget(const SizedBox());
+        container.dispose();
+        sync.dispose();
+        await tester.runAsync(() async {
+          await repo.db.close();
+          await dir.delete(recursive: true);
+        });
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      });
+      Widget app(Widget child) => UncontrolledProviderScope(
+        container: container,
+        child: MaterialApp(
+          theme: appTheme(),
+          home: Scaffold(body: child),
+        ),
+      );
+      await tester.pumpWidget(
+        app(ListView(children: const [LocalBackupsPanel()])),
+      );
+      await settle(tester);
+      await tester.tap(find.byKey(const ValueKey('local-backup-schedule')));
+      // Drain both widget microtasks and real archive-isolate messages.
+      for (var i = 0; i < 100; i++) {
+        await tester.pump(const Duration(milliseconds: 16));
+        await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 20)),
+        );
+        if (backups.scheduleEnabled && !backups.busy) break;
+      }
+      expect(backups.busy, isFalse, reason: backups.scheduleError);
+      await settle(tester);
+      expect(backups.scheduleEnabled, isTrue);
+      await tester.enterText(
+        find.byKey(const ValueKey('local-backup-days')),
+        '3',
+      );
+      await settle(tester);
+      expect(backups.scheduleDays, 3);
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(app(const CalendarShareDialog()));
+      await settle(tester);
+      expect(tester.takeException(), isNull);
+      await tester.tap(find.text('14 дней'));
+      await tester.tap(find.text('Создать ссылку'));
+      await settle(tester);
+      expect(sync.requestedDays, 14);
+      expect(find.byKey(const ValueKey('copy-calendar-share')), findsOneWidget);
+      expect(tester.takeException(), isNull);
+      await tester.tap(find.text('Отозвать доступ'));
+      await settle(tester);
+      expect(sync.revoked, isTrue);
+      expect(find.text('Создать ссылку'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    });
+  }
+}

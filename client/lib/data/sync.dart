@@ -303,6 +303,28 @@ class SyncService {
     return result.data ?? {};
   }
 
+  Future<Map<String, dynamic>> createCalendarShare(int days) async {
+    final deadline = DateTime.now().add(const Duration(seconds: 30));
+    while (_busy) {
+      if (DateTime.now().isAfter(deadline)) {
+        throw StateError('Дождитесь окончания синхронизации');
+      }
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+    }
+    await sync();
+    if (!connected || repo.syncError != null) {
+      throw StateError(
+        'Для создания ссылки подключитесь к серверу синхронизации',
+      );
+    }
+    final response = await client.post<Map<String, dynamic>>(
+      '$_url/api/v1/calendar-shares',
+      data: {'days': days},
+      options: _auth.copyWith(receiveTimeout: const Duration(minutes: 3)),
+    );
+    return response.data!;
+  }
+
   Future<String> createInvitation() async {
     final data = await request('POST', '/api/v1/invitations');
     final payload = {
