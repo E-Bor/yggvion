@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:timezone/data/latest.dart' as tz;
 import 'package:yggvion/ui/markdown_editor.dart';
+import 'package:yggvion/ui/notes.dart';
 import 'package:yggvion/ui/task_editor.dart';
 import 'interaction_test.dart' show workspace, settle, command, testInteraction;
 
@@ -70,6 +71,67 @@ void main() {
         expect(tester.takeException(), isNull);
       },
     );
+    testInteraction(
+      'opening an event note switches to the main library (mobile: $mobile)',
+      (tester) async {
+        late String id;
+        final repo = await workspace(
+          tester,
+          mobile: mobile,
+          prepare: (repo) async {
+            final note = await repo.createNote();
+            id = note.id;
+            await repo.saveNote(id, 'Материалы', 'План встречи');
+            await repo.createTask(
+              'Обсудить проект',
+              description: '[[Материалы]]',
+              start: repo.now(),
+              end: repo.now().add(const Duration(hours: 1)),
+            );
+          },
+        );
+        await tester.ensureVisible(find.text('Обсудить проект'));
+        await tester.tap(find.text('Обсудить проект'));
+        await settle(tester);
+        final link = find.descendant(
+          of: find.byType(TaskEditor),
+          matching: find.text('Материалы'),
+        );
+        await tester.ensureVisible(link);
+        await tester.tap(link);
+        await settle(tester);
+        expect(find.text('Открыть заметку'), findsOneWidget);
+        await tester.tap(find.text('Открыть заметку'));
+        await settle(tester);
+
+        expect(find.byKey(ValueKey('note-title-$id')), findsOneWidget);
+        expect(find.byType(NotesPage, skipOffstage: false), findsOneWidget);
+        expect(find.byType(TaskEditor, skipOffstage: false), findsNothing);
+        expect(find.byType(Dialog, skipOffstage: false), findsNothing);
+        expect(find.byType(BackButton), findsNothing);
+        expect(
+          Navigator.of(tester.element(find.byType(NotesPage))).canPop(),
+          isFalse,
+        );
+        if (mobile) {
+          expect(
+            tester
+                .widget<NavigationBar>(find.byType(NavigationBar))
+                .selectedIndex,
+            2,
+          );
+          await tester.tap(find.byKey(const ValueKey('mobile-nav-today')));
+          await settle(tester);
+        } else {
+          await command(tester, LogicalKeyboardKey.digit1);
+        }
+        expect(find.byType(NotesPage, skipOffstage: false), findsNothing);
+        expect(find.byType(TaskEditor, skipOffstage: false), findsNothing);
+        expect(repo.snapshot.tasks.single.title, 'Обсудить проект');
+        expect(repo.snapshot.tasks.single.description, '[[Материалы]]');
+        expect(tester.takeException(), isNull);
+      },
+    );
   }
   testInteraction('folder navigation and drag order use saved ranks', (
     tester,
@@ -126,7 +188,7 @@ void main() {
     expect(find.byKey(ValueKey('note-list-$a')), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
-  testInteraction('opening a linked note preserves an unsaved event draft', (
+  testInteraction('closing a note preview preserves an unsaved event draft', (
     tester,
   ) async {
     late String id;
@@ -146,11 +208,9 @@ void main() {
     );
     unawaited(showNotePreview(tester.element(find.byType(TaskEditor)), id));
     await settle(tester);
-    await tester.tap(find.text('Открыть заметку'));
+    await tester.tap(find.text('Закрыть'));
     await settle(tester);
-    expect(find.byKey(ValueKey('note-title-$id')), findsOneWidget);
-    await tester.tap(find.byType(BackButton));
-    await settle(tester);
+    expect(find.byType(NotesPage), findsNothing);
     expect(
       tester
           .widget<TextField>(find.byKey(const ValueKey('task-title')))

@@ -19,3 +19,4 @@ server/yggvion
 /client/assets/server/manifest.json
 /client/assets/server/install.sh
 /client/assets/server/uninstall.sh
+.serena/

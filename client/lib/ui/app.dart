@@ -255,24 +255,15 @@ class _WorkspaceState extends ConsumerState<Workspace>
     final repo = ref.watch(appProvider), size = MediaQuery.sizeOf(context);
     ref.listen(openNoteProvider, (_, id) {
       if (id == null) return;
-      final navigator = Navigator.of(context);
-      if (navigator.canPop()) {
-        // Keep an event editor (and its unsaved draft) underneath the note.
-        navigator.push<void>(
-          MaterialPageRoute(
-            builder: (_) => Scaffold(
-              appBar: AppBar(title: const Text('Заметка')),
-              body: NotesPage(initialId: id),
-            ),
-          ),
-        );
-      } else {
-        setState(() {
-          page = PageKind.notes;
-          selectedNote = id;
-          newNoteId = null;
-        });
-      }
+      FocusManager.instance.primaryFocus?.unfocus();
+      Navigator.of(context).popUntil((route) => route.isFirst);
+      setState(() {
+        page = PageKind.notes;
+        selectedNote = id;
+        selected = null;
+        newNoteId = null;
+        birthdaysOpen = false;
+      });
       ref.read(openNoteProvider.notifier).state = null;
     });
     ref.listen(appProvider, (_, current) {
