@@ -161,19 +161,19 @@ class CalendarToolbar extends StatelessWidget {
                     children: [
                       Text(
                         view.label,
-                        style: const TextStyle(
+                        style: TextStyle(
                           fontFamily: 'Inter',
-                          color: Palette.text,
+                          color: context.palette.text,
                           fontSize: 13,
                           fontWeight: FontWeight.w500,
                           height: 1.2,
                         ),
                       ),
                       const SizedBox(width: 6),
-                      const Icon(
+                      Icon(
                         Icons.expand_more_rounded,
                         size: 16,
-                        color: Palette.muted,
+                        color: context.palette.muted,
                       ),
                     ],
                   ),
@@ -734,9 +734,9 @@ class _CalendarPaneState extends ConsumerState<CalendarPane>
         },
         child: DecoratedBox(
           decoration: BoxDecoration(
-            color: Palette.surface,
+            color: context.palette.surface,
             borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: Palette.border, width: .6),
+            border: Border.all(color: context.palette.border, width: .6),
           ),
           child: Column(
             children: [
@@ -940,6 +940,9 @@ class _CalendarPaneState extends ConsumerState<CalendarPane>
                                                     Positioned.fill(
                                                       child: CustomPaint(
                                                         painter: _GridPainter(
+                                                          border: context
+                                                              .palette
+                                                              .border,
                                                           count: count,
                                                           columnWidth: width,
                                                           hourHeight:
@@ -1140,11 +1143,11 @@ class _CalendarPaneState extends ConsumerState<CalendarPane>
               DateFormat('HH:mm').format(value),
               key: const ValueKey('calendar-time-label'),
               textAlign: TextAlign.center,
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 10,
                 height: 1.3,
                 fontWeight: FontWeight.w600,
-                color: Palette.background,
+                color: context.palette.background,
               ),
             ),
           ),
@@ -1162,7 +1165,7 @@ class _CalendarPaneState extends ConsumerState<CalendarPane>
           DateFormat('EEE', 'ru').format(day),
           style: TextStyle(
             fontSize: 11,
-            color: today ? context.accentColor : Palette.muted,
+            color: today ? context.accentColor : context.palette.muted,
           ),
         ),
         const SizedBox(width: 8),
@@ -1177,7 +1180,7 @@ class _CalendarPaneState extends ConsumerState<CalendarPane>
             style: TextStyle(
               fontSize: 17,
               fontWeight: FontWeight.w600,
-              color: today ? Palette.background : Palette.text,
+              color: today ? context.palette.background : context.palette.text,
             ),
           ),
         ),
@@ -1213,10 +1216,14 @@ class _CalendarPaneState extends ConsumerState<CalendarPane>
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const SizedBox(
+          SizedBox(
             width: gutter,
             height: 34,
-            child: Icon(Icons.cake_outlined, size: 17, color: birthdayColor),
+            child: Icon(
+              Icons.cake_outlined,
+              size: 17,
+              color: context.palette.accent(birthdayColor),
+            ),
           ),
           for (final items in days)
             SizedBox(
@@ -1300,7 +1307,7 @@ class _CalendarPaneState extends ConsumerState<CalendarPane>
                       vertical: 2,
                     ),
                     decoration: BoxDecoration(
-                      color: Palette.raised,
+                      color: context.palette.raised,
                       border: Border(
                         left: BorderSide(
                           color: Color(
@@ -1317,8 +1324,8 @@ class _CalendarPaneState extends ConsumerState<CalendarPane>
                       '${DateFormat('HH:mm').format(start)} · ${repo.snapshot.task(b.taskId)!.title}',
                       maxLines: height > 48 ? 2 : 1,
                       overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        color: Palette.muted,
+                      style: TextStyle(
+                        color: context.palette.muted,
                         fontSize: 11,
                       ),
                     ),
@@ -1358,10 +1365,10 @@ class _CalendarPaneState extends ConsumerState<CalendarPane>
         ? widget.timeEntryTask ?? widget.selectedTask
         : repo.snapshot.task(drag!.block.taskId);
     final color = enteringTime
-        ? Palette.pink
+        ? context.palette.pink
         : task == null
         ? context.accentColor
-        : Color(repo.snapshot.taskColor(task));
+        : context.palette.accent(Color(repo.snapshot.taskColor(task)));
     return [
       for (var index = 0; index < count; index++)
         if (start.isBefore(
@@ -1467,7 +1474,7 @@ class _CalendarPaneState extends ConsumerState<CalendarPane>
           ),
           child: Container(
             decoration: BoxDecoration(
-              color: Palette.taskSurface(color, selected: true),
+              color: context.palette.taskSurface(color, selected: true),
               border: Border.all(color: color, width: 1.5),
               borderRadius: BorderRadius.circular(8),
               boxShadow: [
@@ -1549,8 +1556,8 @@ class _CalendarPaneState extends ConsumerState<CalendarPane>
                 child: Container(
                   decoration: BoxDecoration(
                     color: s.running
-                        ? Palette.pink
-                        : Palette.pink.withValues(alpha: .55),
+                        ? context.palette.pink
+                        : context.palette.pink.withValues(alpha: .55),
                     borderRadius: BorderRadius.circular(3),
                   ),
                 ),
@@ -1596,8 +1603,8 @@ class _CalendarPaneState extends ConsumerState<CalendarPane>
             child: Container(
               decoration: BoxDecoration(
                 border: Border(
-                  right: const BorderSide(color: Palette.border, width: .5),
-                  bottom: const BorderSide(color: Palette.border, width: .5),
+                  right: BorderSide(color: context.palette.border, width: .5),
+                  bottom: BorderSide(color: context.palette.border, width: .5),
                 ),
                 color: _midnight(day) == _midnight(_clock)
                     ? context.accentColor.withValues(alpha: .04)
@@ -1611,8 +1618,8 @@ class _CalendarPaneState extends ConsumerState<CalendarPane>
                     '${day.day}',
                     style: TextStyle(
                       color: day.month == date.month
-                          ? Palette.text
-                          : Palette.muted.withValues(alpha: .4),
+                          ? context.palette.text
+                          : context.palette.muted.withValues(alpha: .4),
                       fontSize: 12,
                     ),
                   ),
@@ -1647,8 +1654,10 @@ class _CalendarPaneState extends ConsumerState<CalendarPane>
                             margin: const EdgeInsets.only(bottom: 3),
                             padding: const EdgeInsets.all(4),
                             decoration: BoxDecoration(
-                              color: Palette.taskSurface(
-                                Color(repo.snapshot.taskColor(task)),
+                              color: context.palette.taskSurface(
+                                context.palette.accent(
+                                  Color(repo.snapshot.taskColor(task)),
+                                ),
                                 subdued: task.done || b.historical,
                               ),
                               borderRadius: BorderRadius.circular(5),
@@ -1662,7 +1671,9 @@ class _CalendarPaneState extends ConsumerState<CalendarPane>
                                 decoration: task.done
                                     ? TextDecoration.lineThrough
                                     : null,
-                                color: Color(repo.snapshot.taskColor(task)),
+                                color: context.palette.accent(
+                                  Color(repo.snapshot.taskColor(task)),
+                                ),
                               ),
                             ),
                           ),
@@ -1672,9 +1683,9 @@ class _CalendarPaneState extends ConsumerState<CalendarPane>
                   if (items.length > capacity)
                     Text(
                       '+${items.length - capacity}',
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 10,
-                        color: Palette.muted,
+                        color: context.palette.muted,
                       ),
                     ),
                 ],
@@ -1958,8 +1969,8 @@ class _CalendarBlockState extends ConsumerState<CalendarBlock> {
         task = repo.snapshot.task(widget.block.taskId);
     if (task == null) return const SizedBox.shrink();
     final color = widget.onDelete != null
-        ? Palette.pink
-        : Color(repo.snapshot.taskColor(task));
+        ? context.palette.pink
+        : context.palette.accent(Color(repo.snapshot.taskColor(task)));
     final running = repo.snapshot.sessions.any(
       (s) => s.taskId == task.id && s.running,
     );
@@ -2031,7 +2042,7 @@ class _CalendarBlockState extends ConsumerState<CalendarBlock> {
               child: Container(
                 height: height,
                 decoration: BoxDecoration(
-                  color: Palette.taskSurface(
+                  color: context.palette.taskSurface(
                     color,
                     subdued: task.done || widget.block.historical,
                     selected: editing || widget.planning,
@@ -2071,7 +2082,7 @@ class _CalendarBlockState extends ConsumerState<CalendarBlock> {
                           child: DecoratedBox(
                             decoration: BoxDecoration(
                               color: running
-                                  ? Palette.pink
+                                  ? context.palette.pink
                                   : color.withValues(alpha: .8),
                               borderRadius: BorderRadius.circular(3),
                             ),
@@ -2095,7 +2106,7 @@ class _CalendarBlockState extends ConsumerState<CalendarBlock> {
                                         fontSize: 12,
                                         fontWeight: FontWeight.w600,
                                         color: task.done
-                                            ? Palette.muted
+                                            ? context.palette.muted
                                             : color,
                                         decoration: task.done
                                             ? TextDecoration.lineThrough
@@ -2114,10 +2125,10 @@ class _CalendarBlockState extends ConsumerState<CalendarBlock> {
                                         padding: EdgeInsets.zero,
                                         tooltip: 'Убрать интервал',
                                         onPressed: widget.onDelete,
-                                        icon: const Icon(
+                                        icon: Icon(
                                           Icons.close_rounded,
                                           size: 15,
-                                          color: Palette.pink,
+                                          color: context.palette.pink,
                                         ),
                                       ),
                                     ),
@@ -2176,7 +2187,7 @@ class _CalendarBlockState extends ConsumerState<CalendarBlock> {
                                                 : Icons.play_arrow_rounded,
                                             size: 19,
                                             color: running
-                                                ? Palette.pink
+                                                ? context.palette.pink
                                                 : color,
                                           ),
                                         ),
@@ -2244,16 +2255,19 @@ class _GridPainter extends CustomPainter {
     required this.columnWidth,
     required this.hourHeight,
     required this.gutter,
+    required this.border,
   });
   final int count;
   final double columnWidth, hourHeight, gutter;
+  final Color border;
+
   @override
   void paint(Canvas canvas, Size size) {
     final line = Paint()
-      ..color = Palette.border.withValues(alpha: .65)
+      ..color = border.withValues(alpha: .65)
       ..strokeWidth = .5;
     final half = Paint()
-      ..color = Palette.border.withValues(alpha: .25)
+      ..color = border.withValues(alpha: .25)
       ..strokeWidth = .5;
     for (var h = 0; h <= 24; h++) {
       canvas.drawLine(
@@ -2278,5 +2292,9 @@ class _GridPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(_GridPainter old) =>
-      old.count != count || old.columnWidth != columnWidth;
+      old.count != count ||
+      old.columnWidth != columnWidth ||
+      old.hourHeight != hourHeight ||
+      old.gutter != gutter ||
+      old.border != border;
 }

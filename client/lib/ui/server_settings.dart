@@ -193,7 +193,9 @@ class _SynchronizationPageState extends ConsumerState<SynchronizationPage> {
             reachable == true
                 ? Icons.check_circle_outline_rounded
                 : Icons.cloud_off_rounded,
-            color: reachable == true ? context.accentColor : Palette.muted,
+            color: reachable == true
+                ? context.accentColor
+                : context.palette.muted,
             size: 20,
           ),
           const SizedBox(width: 10),
@@ -241,11 +243,11 @@ class _SynchronizationPageState extends ConsumerState<SynchronizationPage> {
         ),
         Text(
           'Снимок ${DateFormat('HH:mm:ss').format(m.sampledAt.toLocal())} · обновление при открытии экрана',
-          style: const TextStyle(fontSize: 12, color: Palette.muted),
+          style: TextStyle(fontSize: 12, color: context.palette.muted),
         ),
       ],
       if (metricsError != null)
-        Text(metricsError!, style: const TextStyle(color: Palette.muted)),
+        Text(metricsError!, style: TextStyle(color: context.palette.muted)),
     ]);
   }
 
@@ -318,7 +320,7 @@ class _SynchronizationPageState extends ConsumerState<SynchronizationPage> {
               sync.connected
                   ? sync.url!
                   : 'Изменения сохраняются на устройстве сразу. VPS объединяет их, когда появляется интернет.',
-              style: const TextStyle(color: Palette.muted, height: 1.5),
+              style: TextStyle(color: context.palette.muted, height: 1.5),
             ),
             if (sync.connected) ...[
               const SizedBox(height: 12),
@@ -380,9 +382,9 @@ class _SynchronizationPageState extends ConsumerState<SynchronizationPage> {
           ]),
         if (sync.connected)
           settingsCard('Управление сервером', [
-            const Text(
+            Text(
               'Обновление сохраняет базу, вложения, сертификат и подключённые устройства.',
-              style: TextStyle(color: Palette.muted, height: 1.5),
+              style: TextStyle(color: context.palette.muted, height: 1.5),
             ),
             const SizedBox(height: 12),
             Wrap(
@@ -405,9 +407,9 @@ class _SynchronizationPageState extends ConsumerState<SynchronizationPage> {
             ),
           ]),
         settingsCard('Установить на VPS', [
-          const Text(
+          Text(
             'Ubuntu / Debian · x86_64 или ARM64\nSSH нужен только для установки и обновления. Домен не требуется.',
-            style: TextStyle(color: Palette.muted, height: 1.5),
+            style: TextStyle(color: context.palette.muted, height: 1.5),
           ),
           const SizedBox(height: 16),
           Align(
@@ -663,7 +665,7 @@ class _InstallServerPageState extends ConsumerState<InstallServerPage> {
           widget.operation == ServerOperation.install
               ? 'Приложение установит отдельный сервис Yggvion, настроит HTTPS и резервные копии. Данные SSH не сохраняются.'
               : 'Операция выполняется через SSH. Пароль и ключ не сохраняются.',
-          style: TextStyle(color: Palette.muted, height: 1.5),
+          style: TextStyle(color: context.palette.muted, height: 1.5),
         ),
         const SizedBox(height: 20),
         for (final item in [
@@ -1030,9 +1032,9 @@ class _BackupsPageState extends ConsumerState<BackupsPage> {
       children: [
         settingsCard('Копии на этом устройстве', [const LocalBackupsPanel()]),
         settingsCard('Ваши данные под защитой', [
-          const Text(
+          Text(
             'Зашифрованные копии включают задачи, заметки, проекты, учёт времени и вложения, уже дошедшие до сервера. Незагруженные изменения остаются на устройствах.',
-            style: TextStyle(color: Palette.muted, height: 1.5),
+            style: TextStyle(color: context.palette.muted, height: 1.5),
           ),
           if (!connected)
             const Padding(
@@ -1391,9 +1393,9 @@ class _RemoteBackupsPageState extends ConsumerState<RemoteBackupsPage> {
     title: 'Вторая копия вне VPS',
     children: [
       settingsCard('Автоматическое хранение', [
-        const Text(
+        Text(
           'На внешнее хранилище отправляются только зашифрованные архивы. Ключ восстановления сохраните отдельно. Копии вне VPS сохраняются до удаления в самом хранилище.',
-          style: TextStyle(color: Palette.muted, height: 1.5),
+          style: TextStyle(color: context.palette.muted, height: 1.5),
         ),
         const SizedBox(height: 20),
         DropdownButtonFormField<String>(
@@ -1439,9 +1441,9 @@ class _RemoteBackupsPageState extends ConsumerState<RemoteBackupsPage> {
               ),
             ),
           const SizedBox(height: 12),
-          const Text(
+          Text(
             'Пустое поле секрета сохраняет ранее заданное значение для того же адреса и пользователя.',
-            style: TextStyle(color: Palette.muted, fontSize: 12),
+            style: TextStyle(color: context.palette.muted, fontSize: 12),
           ),
         ],
         if (error != null)

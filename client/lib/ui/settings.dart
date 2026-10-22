@@ -317,6 +317,26 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                   ),
                 ),
                 section(
+                  'Оформление',
+                  SwitchListTile.adaptive(
+                    key: const ValueKey('light-theme-toggle'),
+                    activeTrackColor: context.accentColor,
+                    applyCupertinoTheme: true,
+                    contentPadding: EdgeInsets.zero,
+                    secondary: Icon(
+                      repo.lightTheme
+                          ? Icons.light_mode_outlined
+                          : Icons.dark_mode_outlined,
+                      color: context.accentColor,
+                    ),
+                    title: const Text('Светлая тема'),
+                    subtitle: const Text('Сохраняется на этом устройстве'),
+                    value: repo.lightTheme,
+                    onChanged: (value) =>
+                        guard(context, () => repo.setLightTheme(value)),
+                  ),
+                ),
+                section(
                   'Планирование',
                   Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -359,17 +379,20 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                         onChanged: (v) => saveSettings(accentColor: v),
                       ),
                       const SizedBox(height: 8),
-                      const Text(
+                      Text(
                         'Логотип, кнопки, выделения, акцентный текст и задачи без проекта. У проектов — собственные цвета.',
-                        style: TextStyle(color: Palette.muted, fontSize: 12),
+                        style: TextStyle(
+                          color: context.palette.muted,
+                          fontSize: 12,
+                        ),
                       ),
                       if (Platform.isIOS)
-                        const Padding(
+                        Padding(
                           padding: EdgeInsets.only(top: 6),
                           child: Text(
                             'Иконка приложения тоже меняет цвет. iOS покажет системное уведомление.',
                             style: TextStyle(
-                              color: Palette.muted,
+                              color: context.palette.muted,
                               fontSize: 12,
                             ),
                           ),
@@ -413,9 +436,12 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                             saveSettings(searchTypos: values.single),
                       ),
                       const SizedBox(height: 8),
-                      const Text(
+                      Text(
                         'Одна буква ищется точно, для двух букв допускается не больше одной ошибки. Дописывать слово не нужно. Сначала идут заметки, затем события; в каждой группе — заголовки, потом текст. Точные совпадения первыми внутри группы.',
-                        style: TextStyle(color: Palette.muted, fontSize: 12),
+                        style: TextStyle(
+                          color: context.palette.muted,
+                          fontSize: 12,
+                        ),
                       ),
                       const SizedBox(height: 12),
                       Text(
@@ -425,7 +451,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                                 : 'Изменения сохраняются автоматически'),
                         style: TextStyle(
                           color: saveError == null
-                              ? Palette.muted
+                              ? context.palette.muted
                               : Theme.of(context).colorScheme.error,
                           fontSize: 12,
                         ),
@@ -453,17 +479,17 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(16),
                       ),
-                      leading: const Icon(
+                      leading: Icon(
                         Icons.cake_outlined,
-                        color: birthdayColor,
+                        color: context.palette.accent(birthdayColor),
                       ),
                       title: const Text('Дни рождения'),
                       subtitle: Text(
                         repo.snapshot.birthdays.isEmpty
                             ? 'Имена, даты и ежегодные напоминания'
                             : 'Людей в списке: ${repo.snapshot.birthdays.length}',
-                        style: const TextStyle(
-                          color: Palette.muted,
+                        style: TextStyle(
+                          color: context.palette.muted,
                           fontSize: 12,
                         ),
                       ),
@@ -485,7 +511,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                           leading: Icon(
                             Icons.circle,
                             size: 12,
-                            color: Color(project.color),
+                            color: context.palette.accent(Color(project.color)),
                           ),
                           title: Text(project.title),
                           onTap: () => projectDialog(project: project),
@@ -537,9 +563,9 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                   Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Text(
+                      Text(
                         'Разрешите уведомления на каждом устройстве. Ближайшие 60 напоминаний о синхронизированных задачах сохраняются в системе и работают без интернета. При открытии приложения список обновляется.',
-                        style: TextStyle(color: Palette.muted),
+                        style: TextStyle(color: context.palette.muted),
                       ),
                       if (Platform.isLinux)
                         const Padding(
@@ -557,8 +583,8 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                             : 'Проверьте разрешение на этом устройстве',
                         style: TextStyle(
                           color: notifications.permissionGranted == false
-                              ? Palette.pink
-                              : Palette.green,
+                              ? context.palette.pink
+                              : context.palette.green,
                         ),
                       ),
                       if (notifications.error != null)
@@ -730,9 +756,9 @@ class ConflictsPanel extends ConsumerWidget {
                   for (final s in conflict.sessions)
                     Text(
                       'Устройство ${conflict.devices.toList().indexOf(s.deviceId) + 1}${s.deviceId == repo.deviceId ? ' (это)' : ''} · ${repo.snapshot.task(s.taskId)?.title ?? 'Задача'}\n${DateFormat('dd.MM HH:mm').format(s.start.toLocal())} — ${s.end == null ? 'сейчас' : DateFormat('HH:mm').format(s.end!.toLocal())}',
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 12,
-                        color: Palette.muted,
+                        color: context.palette.muted,
                       ),
                     ),
                   const SizedBox(height: 12),

@@ -11,11 +11,11 @@ Future<void> showShortcutHelp(BuildContext context) => showDialog<void>(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Padding(
+            Padding(
               padding: EdgeInsets.only(bottom: 16),
               child: Text(
                 'На Mac — ⌘, на Windows и Linux — Ctrl.',
-                style: TextStyle(color: Palette.muted),
+                style: TextStyle(color: context.palette.muted),
               ),
             ),
             for (final item in [

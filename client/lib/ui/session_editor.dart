@@ -102,9 +102,9 @@ class _SessionEditorState extends ConsumerState<SessionEditor> {
             children: [
               Row(
                 children: [
-                  const Icon(
+                  Icon(
                     Icons.timelapse_rounded,
-                    color: Palette.pink,
+                    color: context.palette.pink,
                     size: 22,
                   ),
                   const SizedBox(width: 10),
@@ -128,7 +128,7 @@ class _SessionEditorState extends ConsumerState<SessionEditor> {
                 widget.task.title,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: const TextStyle(color: Palette.muted, fontSize: 13),
+                style: TextStyle(color: context.palette.muted, fontSize: 13),
               ),
               const SizedBox(height: 10),
               Align(
@@ -156,9 +156,9 @@ class _SessionEditorState extends ConsumerState<SessionEditor> {
                   mobile
                       ? 'Удерживайте и тяните, чтобы отметить время. Можно добавить несколько интервалов.'
                       : 'Выделите один или несколько интервалов. Контур — план задачи.',
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 12,
-                    color: Palette.muted,
+                    color: context.palette.muted,
                     height: 1.4,
                   ),
                 ),
@@ -231,15 +231,18 @@ class _SessionEditorState extends ConsumerState<SessionEditor> {
                         Text(
                           formatDuration(total),
                           key: const ValueKey('time-entry-total'),
-                          style: const TextStyle(
+                          style: TextStyle(
                             fontSize: 18,
                             fontWeight: FontWeight.w600,
-                            color: Palette.pink,
+                            color: context.palette.pink,
                           ),
                         ),
-                        const Text(
+                        Text(
                           'Пересечения считаются один раз',
-                          style: TextStyle(fontSize: 10, color: Palette.muted),
+                          style: TextStyle(
+                            fontSize: 10,
+                            color: context.palette.muted,
+                          ),
                         ),
                       ],
                     ),

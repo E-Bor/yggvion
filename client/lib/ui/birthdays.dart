@@ -35,17 +35,17 @@ class BirthdayPage extends ConsumerWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              const Padding(
+              Padding(
                 padding: EdgeInsets.fromLTRB(0, 16, 0, 6),
                 child: Text(
                   'Близкие люди — в календаре. Возраст посчитается автоматически.',
-                  style: TextStyle(color: Palette.muted, height: 1.5),
+                  style: TextStyle(color: context.palette.muted, height: 1.5),
                 ),
               ),
               Text(
                 'Напоминание в день рождения · 09:00 · ${zone.name}',
-                style: const TextStyle(
-                  color: birthdayColor,
+                style: TextStyle(
+                  color: context.palette.accent(birthdayColor),
                   fontSize: 12,
                   height: 1.5,
                 ),
@@ -80,15 +80,15 @@ class BirthdayPage extends ConsumerWidget {
                               width: 44,
                               height: 44,
                               decoration: BoxDecoration(
-                                color: Palette.taskSurface(
+                                color: context.palette.taskSurface(
                                   birthdayColor,
                                   subdued: !isToday,
                                 ),
                                 borderRadius: BorderRadius.circular(14),
                               ),
-                              child: const Icon(
+                              child: Icon(
                                 Icons.cake_outlined,
-                                color: birthdayColor,
+                                color: context.palette.accent(birthdayColor),
                                 size: 21,
                               ),
                             ),
@@ -100,7 +100,9 @@ class BirthdayPage extends ConsumerWidget {
                             subtitle: Text(
                               '${isToday ? 'Сегодня' : DateFormat('d MMMM', 'ru').format(next)} · ${ageLabel(next.year - birthday.date.year)}',
                               style: TextStyle(
-                                color: isToday ? birthdayColor : Palette.muted,
+                                color: isToday
+                                    ? context.palette.accent(birthdayColor)
+                                    : context.palette.muted,
                                 fontSize: 12,
                               ),
                             ),
@@ -219,7 +221,10 @@ class _BirthdayEditorState extends ConsumerState<BirthdayEditor> {
     return AlertDialog(
       title: Row(
         children: [
-          const Icon(Icons.cake_outlined, color: birthdayColor),
+          Icon(
+            Icons.cake_outlined,
+            color: context.palette.accent(birthdayColor),
+          ),
           const SizedBox(width: 12),
           const Expanded(child: Text('День рождения')),
         ],
@@ -281,7 +286,9 @@ class _BirthdayEditorState extends ConsumerState<BirthdayEditor> {
               Container(
                 padding: const EdgeInsets.all(16),
                 decoration: BoxDecoration(
-                  color: birthdayColor.withValues(alpha: .08),
+                  color: context.palette
+                      .accent(birthdayColor)
+                      .withValues(alpha: .08),
                   borderRadius: BorderRadius.circular(14),
                 ),
                 child: Column(
@@ -293,8 +300,8 @@ class _BirthdayEditorState extends ConsumerState<BirthdayEditor> {
                           : name.text.trim(),
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        color: birthdayColor,
+                      style: TextStyle(
+                        color: context.palette.accent(birthdayColor),
                         fontWeight: FontWeight.w600,
                       ),
                     ),
@@ -304,9 +311,9 @@ class _BirthdayEditorState extends ConsumerState<BirthdayEditor> {
                       const SizedBox(height: 5),
                       Text(
                         '${DateFormat('d MMMM', 'ru').format(birth)} · ${ageLabel(today.year - birth.year)} в этом году',
-                        style: const TextStyle(
+                        style: TextStyle(
                           fontSize: 12,
-                          color: Palette.muted,
+                          color: context.palette.muted,
                         ),
                       ),
                     ],
@@ -317,15 +324,18 @@ class _BirthdayEditorState extends ConsumerState<BirthdayEditor> {
                     ),
                     Text(
                       'В 09:00 · ${repo.snapshot.settings.timezone}',
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 11,
-                        color: Palette.muted,
+                        color: context.palette.muted,
                       ),
                     ),
                     if (birth?.month == 2 && birth?.day == 29)
-                      const Text(
+                      Text(
                         'В невисокосный год — 28 февраля',
-                        style: TextStyle(fontSize: 11, color: Palette.muted),
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: context.palette.muted,
+                        ),
                       ),
                   ],
                 ),
@@ -380,7 +390,11 @@ class BirthdayChip extends ConsumerWidget {
     return Tooltip(
       message: task.title,
       child: Material(
-        color: task.done ? Palette.raised : const Color(0xff2c4439),
+        color: task.done
+            ? context.palette.raised
+            : Theme.of(context).brightness == Brightness.dark
+            ? const Color(0xff2c4439)
+            : context.palette.taskSurface(birthdayColor, selected: true),
         borderRadius: BorderRadius.circular(7),
         child: InkWell(
           borderRadius: BorderRadius.circular(7),
@@ -391,10 +405,10 @@ class BirthdayChip extends ConsumerWidget {
               children: [
                 const SizedBox(width: 7),
                 if (!compact) ...[
-                  const Icon(
+                  Icon(
                     Icons.cake_outlined,
                     size: 15,
-                    color: birthdayColor,
+                    color: context.palette.accent(birthdayColor),
                   ),
                   const SizedBox(width: 7),
                 ],
@@ -405,7 +419,9 @@ class BirthdayChip extends ConsumerWidget {
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
                       fontSize: compact ? 10 : 12,
-                      color: task.done ? Palette.muted : birthdayColor,
+                      color: task.done
+                          ? context.palette.muted
+                          : context.palette.accent(birthdayColor),
                       decoration: task.done ? TextDecoration.lineThrough : null,
                     ),
                   ),
@@ -428,7 +444,7 @@ class BirthdayChip extends ConsumerWidget {
                           ? Icons.check_circle_rounded
                           : Icons.circle_outlined,
                       size: 17,
-                      color: birthdayColor,
+                      color: context.palette.accent(birthdayColor),
                     ),
                   ),
                 ),
@@ -457,7 +473,11 @@ Future<void> showBirthday(BuildContext parentContext, Task task) =>
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                const Icon(Icons.cake_outlined, color: birthdayColor, size: 42),
+                Icon(
+                  Icons.cake_outlined,
+                  color: context.palette.accent(birthdayColor),
+                  size: 42,
+                ),
                 const SizedBox(height: 18),
                 if (current != null)
                   Text(current.title, textAlign: TextAlign.center),

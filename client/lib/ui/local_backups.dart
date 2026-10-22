@@ -129,14 +129,14 @@ class _LocalBackupsPanelState extends ConsumerState<LocalBackupsPanel> {
     child: Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        const Text(
+        Text(
           'Работает без VPS и интернета. В копию входят заметки, папки, события, настройки и вложения на этом устройстве.',
-          style: TextStyle(color: Palette.muted, height: 1.5),
+          style: TextStyle(color: context.palette.muted, height: 1.5),
         ),
         const SizedBox(height: 8),
-        const Text(
+        Text(
           'Локальный архив не зашифрован. Сохраняйте его в доверенном месте.',
-          style: TextStyle(color: Palette.muted, fontSize: 12),
+          style: TextStyle(color: context.palette.muted, fontSize: 12),
         ),
         const SizedBox(height: 16),
         Wrap(

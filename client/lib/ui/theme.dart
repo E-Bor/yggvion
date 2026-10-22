@@ -37,19 +37,127 @@ abstract final class Palette {
     Color accent, {
     bool subdued = false,
     bool selected = false,
+  }) =>
+      AppPalette.dark.taskSurface(accent, subdued: subdued, selected: selected);
+}
+
+@immutable
+class AppPalette extends ThemeExtension<AppPalette> {
+  const AppPalette({
+    required this.brightness,
+    required this.background,
+    required this.surface,
+    required this.raised,
+    required this.border,
+    required this.text,
+    required this.muted,
+    required this.pink,
+    required this.green,
+  });
+
+  static const dark = AppPalette(
+    brightness: Brightness.dark,
+    background: Palette.background,
+    surface: Palette.surface,
+    raised: Palette.raised,
+    border: Palette.border,
+    text: Palette.text,
+    muted: Palette.muted,
+    pink: Palette.pink,
+    green: Palette.green,
+  );
+  static const light = AppPalette(
+    brightness: Brightness.light,
+    background: Color(0xfff3f5f8),
+    surface: Color(0xffffffff),
+    raised: Color(0xffe8edf3),
+    border: Color(0xffd4dbe6),
+    text: Color(0xff202735),
+    muted: Color(0xff5d697c),
+    pink: Color(0xff9f3f61),
+    green: Color(0xff226d57),
+  );
+
+  final Brightness brightness;
+  final Color background, surface, raised, border, text, muted, pink, green;
+
+  // Retain the chosen hue while giving pastel accents enough contrast on white.
+  Color accent(Color color) {
+    if (brightness == Brightness.dark) return color;
+    var result = color.withValues(alpha: 1);
+    while (result.computeLuminance() > .12) {
+      result = Color.lerp(result, Colors.black, .08)!;
+    }
+    return result;
+  }
+
+  Color taskSurface(
+    Color accent, {
+    bool subdued = false,
+    bool selected = false,
   }) => Color.lerp(
     surface,
     accent.withValues(alpha: 1),
-    subdued
-        ? .08
-        : selected
-        ? .33
-        : .26,
+    brightness == Brightness.light
+        ? (subdued
+              ? .04
+              : selected
+              ? .19
+              : .11)
+        : (subdued
+              ? .08
+              : selected
+              ? .33
+              : .26),
   )!;
+
+  @override
+  AppPalette copyWith({
+    Brightness? brightness,
+    Color? background,
+    Color? surface,
+    Color? raised,
+    Color? border,
+    Color? text,
+    Color? muted,
+    Color? pink,
+    Color? green,
+  }) => AppPalette(
+    brightness: brightness ?? this.brightness,
+    background: background ?? this.background,
+    surface: surface ?? this.surface,
+    raised: raised ?? this.raised,
+    border: border ?? this.border,
+    text: text ?? this.text,
+    muted: muted ?? this.muted,
+    pink: pink ?? this.pink,
+    green: green ?? this.green,
+  );
+
+  @override
+  AppPalette lerp(covariant AppPalette? other, double t) {
+    if (other == null) return this;
+    return AppPalette(
+      brightness: t < .5 ? brightness : other.brightness,
+      background: Color.lerp(background, other.background, t)!,
+      surface: Color.lerp(surface, other.surface, t)!,
+      raised: Color.lerp(raised, other.raised, t)!,
+      border: Color.lerp(border, other.border, t)!,
+      text: Color.lerp(text, other.text, t)!,
+      muted: Color.lerp(muted, other.muted, t)!,
+      pink: Color.lerp(pink, other.pink, t)!,
+      green: Color.lerp(green, other.green, t)!,
+    );
+  }
 }
 
 extension AppColors on BuildContext {
   Color get accentColor => Theme.of(this).colorScheme.primary;
+  AppPalette get palette =>
+      Theme.of(this).extension<AppPalette>() ??
+      (Theme.of(this).brightness == Brightness.light
+          ? AppPalette.light
+          : AppPalette.dark);
 }
 
 class ColorPalettePicker extends StatelessWidget {
@@ -80,10 +188,10 @@ class ColorPalettePicker extends StatelessWidget {
                 width: 42,
                 height: 42,
                 decoration: BoxDecoration(
-                  color: Palette.taskSurface(Palette.projects[i]),
+                  color: context.palette.taskSurface(Palette.projects[i]),
                   borderRadius: BorderRadius.circular(12),
                   border: Border.all(
-                    color: Palette.projects[i],
+                    color: context.palette.accent(Palette.projects[i]),
                     width: value == Palette.projects[i].toARGB32() ? 2 : .7,
                   ),
                 ),
@@ -91,7 +199,7 @@ class ColorPalettePicker extends StatelessWidget {
                   value == Palette.projects[i].toARGB32()
                       ? Icons.check_rounded
                       : Icons.circle,
-                  color: Palette.projects[i],
+                  color: context.palette.accent(Palette.projects[i]),
                   size: value == Palette.projects[i].toARGB32() ? 20 : 10,
                 ),
               ),
@@ -115,29 +223,49 @@ RelativeRect menuPosition(BuildContext context, Offset globalPosition) {
   );
 }
 
-ThemeData appTheme({int accentColor = AppSettings.defaultAccentColor}) {
-  final accent = Color(accentColor);
+ThemeData appTheme({
+  int accentColor = AppSettings.defaultAccentColor,
+  Brightness brightness = Brightness.dark,
+}) {
+  final palette = brightness == Brightness.light
+      ? AppPalette.light
+      : AppPalette.dark;
+  final accent = palette.accent(Color(accentColor));
   final scheme =
       ColorScheme.fromSeed(
         seedColor: accent,
-        brightness: Brightness.dark,
-        surface: Palette.surface,
+        brightness: brightness,
+        surface: palette.surface,
       ).copyWith(
         primary: accent,
-        onPrimary: Palette.background,
-        primaryContainer: Palette.taskSurface(accent, selected: true),
+        onPrimary: brightness == Brightness.light
+            ? Colors.white
+            : palette.background,
+        primaryContainer: palette.taskSurface(accent, selected: true),
         onPrimaryContainer: accent,
         secondary: accent,
-        onSecondary: Palette.background,
-        secondaryContainer: Palette.taskSurface(accent),
+        onSecondary: brightness == Brightness.light
+            ? Colors.white
+            : palette.background,
+        secondaryContainer: palette.taskSurface(accent),
         onSecondaryContainer: accent,
-        outline: Palette.border,
+        outline: palette.border,
+        onSurface: brightness == Brightness.light ? palette.text : null,
+        onSurfaceVariant: brightness == Brightness.light ? palette.muted : null,
+        surfaceContainerHighest: brightness == Brightness.light
+            ? palette.raised
+            : null,
+        surfaceContainerLow: brightness == Brightness.light
+            ? palette.surface
+            : null,
+        outlineVariant: brightness == Brightness.light ? palette.border : null,
       );
   return ThemeData(
     useMaterial3: true,
-    brightness: Brightness.dark,
+    extensions: [palette],
+    brightness: brightness,
     colorScheme: scheme,
-    scaffoldBackgroundColor: Palette.background,
+    scaffoldBackgroundColor: palette.background,
     fontFamily: 'Inter',
     textSelectionTheme: TextSelectionThemeData(
       cursorColor: accent,
@@ -147,9 +275,9 @@ ThemeData appTheme({int accentColor = AppSettings.defaultAccentColor}) {
     scrollbarTheme: ScrollbarThemeData(
       thickness: const WidgetStatePropertyAll(4),
       radius: const Radius.circular(4),
-      thumbColor: WidgetStatePropertyAll(Palette.muted.withValues(alpha: .35)),
+      thumbColor: WidgetStatePropertyAll(palette.muted.withValues(alpha: .35)),
     ),
-    textTheme: const TextTheme(
+    textTheme: TextTheme(
       headlineLarge: TextStyle(
         fontSize: 30,
         fontWeight: FontWeight.w600,
@@ -162,50 +290,50 @@ ThemeData appTheme({int accentColor = AppSettings.defaultAccentColor}) {
       ),
       titleMedium: TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
       bodyMedium: TextStyle(fontSize: 14, height: 1.5),
-      bodySmall: TextStyle(fontSize: 12, color: Palette.muted),
+      bodySmall: TextStyle(fontSize: 12, color: palette.muted),
     ),
-    dividerColor: Palette.border,
-    dividerTheme: const DividerThemeData(
-      color: Palette.border,
+    dividerColor: palette.border,
+    dividerTheme: DividerThemeData(
+      color: palette.border,
       space: 1,
       thickness: .6,
     ),
     tooltipTheme: TooltipThemeData(
       decoration: BoxDecoration(
-        color: Palette.raised,
+        color: palette.raised,
         borderRadius: BorderRadius.circular(8),
       ),
-      textStyle: const TextStyle(color: Palette.text, fontSize: 12),
+      textStyle: TextStyle(color: palette.text, fontSize: 12),
     ),
     inputDecorationTheme: InputDecorationTheme(
       filled: true,
-      fillColor: Palette.background,
+      fillColor: palette.background,
       contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
       border: OutlineInputBorder(
         borderRadius: BorderRadius.circular(12),
-        borderSide: const BorderSide(color: Palette.border),
+        borderSide: BorderSide(color: palette.border),
       ),
       enabledBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(12),
-        borderSide: const BorderSide(color: Palette.border),
+        borderSide: BorderSide(color: palette.border),
       ),
       focusedBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(12),
         borderSide: BorderSide(color: accent),
       ),
-      labelStyle: const TextStyle(color: Palette.muted),
+      labelStyle: TextStyle(color: palette.muted),
     ),
     cardTheme: CardThemeData(
-      color: Palette.surface,
+      color: palette.surface,
       margin: EdgeInsets.zero,
       elevation: 0,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(16),
-        side: const BorderSide(color: Palette.border, width: .6),
+        side: BorderSide(color: palette.border, width: .6),
       ),
     ),
     dialogTheme: DialogThemeData(
-      backgroundColor: Palette.surface,
+      backgroundColor: palette.surface,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
     ),
     filledButtonTheme: FilledButtonThemeData(
@@ -220,16 +348,16 @@ ThemeData appTheme({int accentColor = AppSettings.defaultAccentColor}) {
       ),
     ),
     iconButtonTheme: IconButtonThemeData(
-      style: IconButton.styleFrom(foregroundColor: Palette.muted),
+      style: IconButton.styleFrom(foregroundColor: palette.muted),
     ),
     popupMenuTheme: PopupMenuThemeData(
-      color: Palette.raised,
+      color: palette.raised,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
     ),
-    snackBarTheme: const SnackBarThemeData(
+    snackBarTheme: SnackBarThemeData(
       behavior: SnackBarBehavior.floating,
-      backgroundColor: Palette.raised,
-      contentTextStyle: TextStyle(color: Palette.text),
+      backgroundColor: palette.raised,
+      contentTextStyle: TextStyle(color: palette.text),
     ),
   );
 }
@@ -283,7 +411,7 @@ class EmptyState extends StatelessWidget {
           const SizedBox(height: 8),
           Text(
             subtitle,
-            style: const TextStyle(color: Palette.muted, height: 1.6),
+            style: TextStyle(color: context.palette.muted, height: 1.6),
             textAlign: TextAlign.center,
           ),
           if (action != null) ...[const SizedBox(height: 20), action!],

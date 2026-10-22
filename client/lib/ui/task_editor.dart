@@ -226,7 +226,7 @@ class _BlockEditorState extends ConsumerState<BlockEditor> {
             const SizedBox(height: 12),
             Text(
               'План: ${formatDuration(end.difference(start))}',
-              style: const TextStyle(color: Palette.muted),
+              style: TextStyle(color: context.palette.muted),
             ),
           ],
         ),
@@ -397,12 +397,12 @@ class ReminderPicker extends StatelessWidget {
   Widget build(BuildContext context) => Row(
     crossAxisAlignment: CrossAxisAlignment.start,
     children: [
-      const Padding(
+      Padding(
         padding: EdgeInsets.only(top: 12, right: 16),
         child: Icon(
           Icons.notifications_none_rounded,
           size: 20,
-          color: Palette.muted,
+          color: context.palette.muted,
         ),
       ),
       Expanded(
@@ -418,9 +418,9 @@ class ReminderPicker extends StatelessWidget {
                         key: ValueKey('reminder-choice-$i'),
                         isExpanded: true,
                         value: values.isEmpty ? -1 : values[i],
-                        style: const TextStyle(
+                        style: TextStyle(
                           fontFamily: 'Inter',
-                          color: Palette.text,
+                          color: context.palette.text,
                           fontSize: 13,
                         ),
                         items: [
@@ -697,13 +697,13 @@ class _TaskEditorState extends ConsumerState<TaskEditor> {
     childrenPadding: const EdgeInsets.only(bottom: 12),
     shape: const Border(),
     collapsedShape: const Border(),
-    leading: Icon(icon, size: 20, color: Palette.muted),
+    leading: Icon(icon, size: 20, color: context.palette.muted),
     title: Text(label, style: const TextStyle(fontSize: 13)),
     subtitle: subtitle == null
         ? null
         : Text(
             subtitle,
-            style: const TextStyle(fontSize: 11, color: Palette.muted),
+            style: TextStyle(fontSize: 11, color: context.palette.muted),
           ),
     children: children,
   );
@@ -778,11 +778,15 @@ class _TaskEditorState extends ConsumerState<TaskEditor> {
                         decoration: InputDecoration(
                           hintText: 'Введите название',
                           filled: false,
-                          border: const UnderlineInputBorder(
-                            borderSide: BorderSide(color: Palette.border),
+                          border: UnderlineInputBorder(
+                            borderSide: BorderSide(
+                              color: context.palette.border,
+                            ),
                           ),
-                          enabledBorder: const UnderlineInputBorder(
-                            borderSide: BorderSide(color: Palette.border),
+                          enabledBorder: UnderlineInputBorder(
+                            borderSide: BorderSide(
+                              color: context.palette.border,
+                            ),
                           ),
                           focusedBorder: UnderlineInputBorder(
                             borderSide: BorderSide(
@@ -827,12 +831,12 @@ class _TaskEditorState extends ConsumerState<TaskEditor> {
                         ),
                         if (rule != initialRule &&
                             task?.seriesId.isNotEmpty == true)
-                          const Padding(
+                          Padding(
                             padding: EdgeInsets.only(left: 32, top: 4),
                             child: Text(
                               'Новая периодичность — с этой задачи.',
                               style: TextStyle(
-                                color: Palette.muted,
+                                color: context.palette.muted,
                                 fontSize: 12,
                               ),
                             ),
@@ -854,10 +858,10 @@ class _TaskEditorState extends ConsumerState<TaskEditor> {
                       const SizedBox(height: 4),
                       Row(
                         children: [
-                          const Icon(
+                          Icon(
                             Icons.folder_outlined,
                             size: 20,
-                            color: Palette.muted,
+                            color: context.palette.muted,
                           ),
                           const SizedBox(width: 16),
                           Expanded(
@@ -871,10 +875,10 @@ class _TaskEditorState extends ConsumerState<TaskEditor> {
                                     ? projectId
                                     : '',
                                 isExpanded: true,
-                                style: const TextStyle(
+                                style: TextStyle(
                                   fontFamily: 'Inter',
                                   fontSize: 13,
-                                  color: Palette.text,
+                                  color: context.palette.text,
                                 ),
                                 items: [
                                   const DropdownMenuItem(
@@ -889,7 +893,9 @@ class _TaskEditorState extends ConsumerState<TaskEditor> {
                                           Icon(
                                             Icons.circle,
                                             size: 9,
-                                            color: Color(project.color),
+                                            color: context.palette.accent(
+                                              Color(project.color),
+                                            ),
                                           ),
                                           const SizedBox(width: 10),
                                           Expanded(

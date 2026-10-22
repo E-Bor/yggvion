@@ -105,7 +105,7 @@ class TaskCard extends ConsumerWidget {
         running = repo.snapshot.sessions.any(
           (s) => s.taskId == task.id && s.running,
         );
-    final accent = Color(repo.snapshot.taskColor(task));
+    final accent = context.palette.accent(Color(repo.snapshot.taskColor(task)));
     return GestureDetector(
       onSecondaryTapDown: (details) async {
         final value = await showMenu<String>(
@@ -131,7 +131,7 @@ class TaskCard extends ConsumerWidget {
         duration: const Duration(milliseconds: 120),
         margin: const EdgeInsets.only(bottom: 8),
         decoration: BoxDecoration(
-          color: Palette.taskSurface(
+          color: context.palette.taskSurface(
             accent,
             subdued: task.done,
             selected: selected,
@@ -141,7 +141,7 @@ class TaskCard extends ConsumerWidget {
             color: selected
                 ? accent
                 : running
-                ? Palette.pink.withValues(alpha: .5)
+                ? context.palette.pink.withValues(alpha: .5)
                 : accent.withValues(alpha: .3),
             width: .7,
           ),
@@ -190,7 +190,9 @@ class TaskCard extends ConsumerWidget {
                           decoration: task.done
                               ? TextDecoration.lineThrough
                               : null,
-                          color: task.done ? Palette.muted : Palette.text,
+                          color: task.done
+                              ? context.palette.muted
+                              : context.palette.text,
                         ),
                       ),
                       const SizedBox(height: 7),
@@ -203,15 +205,17 @@ class TaskCard extends ConsumerWidget {
                               '● ${project.title}',
                               style: TextStyle(
                                 fontSize: 10,
-                                color: Color(project.color),
+                                color: context.palette.accent(
+                                  Color(project.color),
+                                ),
                               ),
                             ),
                           if (repo.snapshot.estimate(task.id) > Duration.zero)
                             Text(
                               formatDuration(repo.snapshot.estimate(task.id)),
-                              style: const TextStyle(
+                              style: TextStyle(
                                 fontSize: 10,
-                                color: Palette.muted,
+                                color: context.palette.muted,
                               ),
                             ),
                           if (running ||
@@ -221,9 +225,9 @@ class TaskCard extends ConsumerWidget {
                               formatDuration(
                                 repo.snapshot.spent(task.id, repo.now()),
                               ),
-                              style: const TextStyle(
+                              style: TextStyle(
                                 fontSize: 10,
-                                color: Palette.pink,
+                                color: context.palette.pink,
                               ),
                             ),
                         ],
@@ -243,7 +247,9 @@ class TaskCard extends ConsumerWidget {
                     icon: Icon(
                       running ? Icons.pause_rounded : Icons.play_arrow_rounded,
                       size: 22,
-                      color: running ? Palette.pink : Palette.muted,
+                      color: running
+                          ? context.palette.pink
+                          : context.palette.muted,
                     ),
                   ),
                 ),

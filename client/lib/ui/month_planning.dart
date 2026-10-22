@@ -21,7 +21,7 @@ Future<TimeRange?> chooseMonthPlan(
       // Vertical gestures belong to the time grid, including its resize handles.
       enableDrag: false,
       showDragHandle: false,
-      backgroundColor: Palette.surface,
+      backgroundColor: context.palette.surface,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
@@ -121,9 +121,9 @@ class _MonthPlanningEditorState extends ConsumerState<MonthPlanningEditor> {
                       widget.task.title,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 13,
-                        color: Palette.muted,
+                        color: context.palette.muted,
                       ),
                     ),
                   ],
@@ -154,7 +154,9 @@ class _MonthPlanningEditorState extends ConsumerState<MonthPlanningEditor> {
                   style: TextStyle(
                     fontSize: 23,
                     fontWeight: FontWeight.w600,
-                    color: start == null ? Palette.muted : context.accentColor,
+                    color: start == null
+                        ? context.palette.muted
+                        : context.accentColor,
                   ),
                 ),
               ),
@@ -162,7 +164,7 @@ class _MonthPlanningEditorState extends ConsumerState<MonthPlanningEditor> {
                 message: 'Часовой пояс из настроек',
                 child: Text(
                   tz.TZDateTime.from(scrollFocus, zone).timeZoneName,
-                  style: const TextStyle(color: Palette.muted, fontSize: 11),
+                  style: TextStyle(color: context.palette.muted, fontSize: 11),
                 ),
               ),
             ],
@@ -171,13 +173,13 @@ class _MonthPlanningEditorState extends ConsumerState<MonthPlanningEditor> {
             Text(
               'Окончание ${DateFormat('d MMMM', 'ru').format(end)}',
               key: const ValueKey('month-plan-end-date'),
-              style: const TextStyle(fontSize: 12, color: Palette.muted),
+              style: TextStyle(fontSize: 12, color: context.palette.muted),
             ),
           const SizedBox(height: 4),
           Text(
             formatDuration(Duration(minutes: minutes)),
             key: const ValueKey('month-plan-duration'),
-            style: const TextStyle(color: Palette.muted, fontSize: 12),
+            style: TextStyle(color: context.palette.muted, fontSize: 12),
           ),
           const SizedBox(height: 10),
           Expanded(
@@ -206,10 +208,10 @@ class _MonthPlanningEditorState extends ConsumerState<MonthPlanningEditor> {
             key: const ValueKey('month-plan-hint'),
             maxLines: 2,
             overflow: TextOverflow.ellipsis,
-            style: const TextStyle(
+            style: TextStyle(
               fontSize: 11,
               height: 1.4,
-              color: Palette.muted,
+              color: context.palette.muted,
             ),
           ),
           const SizedBox(height: 12),

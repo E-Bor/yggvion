@@ -155,9 +155,9 @@ class _StatisticsPageState extends ConsumerState<StatisticsPage> {
                         ),
                       ),
                       const SizedBox(height: 6),
-                      const Text(
+                      Text(
                         'Как соотносятся планы и учтённое время',
-                        style: TextStyle(color: Palette.muted),
+                        style: TextStyle(color: context.palette.muted),
                       ),
                       const SizedBox(height: 24),
                       Wrap(
@@ -224,7 +224,7 @@ class _StatisticsPageState extends ConsumerState<StatisticsPage> {
                               children: [
                                 Text(
                                   error!,
-                                  style: const TextStyle(color: Palette.pink),
+                                  style: TextStyle(color: context.palette.pink),
                                 ),
                                 TextButton(
                                   onPressed: load,
@@ -252,8 +252,8 @@ class _StatisticsPageState extends ConsumerState<StatisticsPage> {
                             padding: const EdgeInsets.fromLTRB(4, 12, 4, 0),
                             child: Text(
                               '${formatDuration(data.overlap)} записаны одновременно в разных задачах. В общем факте пересечения считаются один раз; в проектах и задачах показан их собственный учёт.',
-                              style: const TextStyle(
-                                color: Palette.pink,
+                              style: TextStyle(
+                                color: context.palette.pink,
                                 fontSize: 12,
                                 height: 1.5,
                               ),
@@ -315,7 +315,9 @@ class _StatisticsPageState extends ConsumerState<StatisticsPage> {
                                   padding: const EdgeInsets.only(top: 12),
                                   child: Text(
                                     usageError,
-                                    style: const TextStyle(color: Palette.pink),
+                                    style: TextStyle(
+                                      color: context.palette.pink,
+                                    ),
                                   ),
                                 ),
                               const SizedBox(height: 20),
@@ -325,10 +327,10 @@ class _StatisticsPageState extends ConsumerState<StatisticsPage> {
                                 application: true,
                               ),
                               const SizedBox(height: 8),
-                              const Text(
+                              Text(
                                 'Время в активном окне. После 2 минут без действий учёт приостанавливается. Рабочий таймер считается отдельно.',
                                 style: TextStyle(
-                                  color: Palette.muted,
+                                  color: context.palette.muted,
                                   fontSize: 12,
                                   height: 1.5,
                                 ),
@@ -340,8 +342,8 @@ class _StatisticsPageState extends ConsumerState<StatisticsPage> {
                         Text(
                           'Сейчас в пространстве: ${data.tasks} задач · ${data.notes} заметок',
                           textAlign: TextAlign.center,
-                          style: const TextStyle(
-                            color: Palette.muted,
+                          style: TextStyle(
+                            color: context.palette.muted,
                             fontSize: 12,
                           ),
                         ),
@@ -439,9 +441,9 @@ class _Totals extends StatelessWidget {
                       const SizedBox(height: 4),
                       Text(
                         item.detail,
-                        style: const TextStyle(
+                        style: TextStyle(
                           fontSize: 11,
-                          color: Palette.muted,
+                          color: context.palette.muted,
                         ),
                       ),
                     ],
@@ -477,9 +479,9 @@ class _StatCard extends StatelessWidget {
           const SizedBox(height: 6),
           Text(
             subtitle,
-            style: const TextStyle(
+            style: TextStyle(
               fontSize: 12,
-              color: Palette.muted,
+              color: context.palette.muted,
               height: 1.5,
             ),
           ),
@@ -503,7 +505,7 @@ class _SmallTotal extends StatelessWidget {
         style: const TextStyle(fontSize: 23, fontWeight: FontWeight.w600),
       ),
       const SizedBox(height: 4),
-      Text(label, style: const TextStyle(fontSize: 12, color: Palette.muted)),
+      Text(label, style: TextStyle(fontSize: 12, color: context.palette.muted)),
     ],
   );
 }
@@ -544,7 +546,9 @@ class _TimeChartState extends State<_TimeChart> {
       ),
     );
     final ceiling = math.max(1.0, maximum.ceilToDouble());
-    final accent = widget.application ? Palette.green : context.accentColor;
+    final accent = widget.application
+        ? context.palette.green
+        : context.accentColor;
     final picked =
         groups[(selected ?? groups.length - 1).clamp(0, groups.length - 1)];
     String label(DateTime start, DateTime end) => start == end
@@ -556,7 +560,7 @@ class _TimeChartState extends State<_TimeChart> {
         if (!widget.application) ...[
           Row(
             children: [
-              const _Legend(color: Palette.muted, text: 'План'),
+              _Legend(color: context.palette.muted, text: 'План'),
               const SizedBox(width: 20),
               _Legend(color: accent, text: 'Факт'),
             ],
@@ -575,15 +579,24 @@ class _TimeChartState extends State<_TimeChart> {
                 children: [
                   Text(
                     '${ceiling.toInt()} ч',
-                    style: const TextStyle(fontSize: 10, color: Palette.muted),
+                    style: TextStyle(
+                      fontSize: 10,
+                      color: context.palette.muted,
+                    ),
                   ),
                   Text(
                     '${ceiling / 2 == (ceiling / 2).round() ? (ceiling / 2).toInt() : (ceiling / 2).toStringAsFixed(1)}',
-                    style: const TextStyle(fontSize: 10, color: Palette.muted),
+                    style: TextStyle(
+                      fontSize: 10,
+                      color: context.palette.muted,
+                    ),
                   ),
-                  const Text(
+                  Text(
                     '0',
-                    style: TextStyle(fontSize: 10, color: Palette.muted),
+                    style: TextStyle(
+                      fontSize: 10,
+                      color: context.palette.muted,
+                    ),
                   ),
                 ],
               ),
@@ -596,7 +609,9 @@ class _TimeChartState extends State<_TimeChart> {
                     child: Stack(
                       children: [
                         Positioned.fill(
-                          child: CustomPaint(painter: _GridPainter()),
+                          child: CustomPaint(
+                            painter: _GridPainter(context.palette.border),
+                          ),
                         ),
                         Row(
                           crossAxisAlignment: CrossAxisAlignment.end,
@@ -642,7 +657,7 @@ class _TimeChartState extends State<_TimeChart> {
                                                 child: _Bar(
                                                   duration: groups[i].plan,
                                                   maximum: ceiling,
-                                                  color: Palette.muted
+                                                  color: context.palette.muted
                                                       .withValues(alpha: .45),
                                                 ),
                                               ),
@@ -678,8 +693,8 @@ class _TimeChartState extends State<_TimeChart> {
                                 ? '${groups[i].start.day}'
                                 : '',
                             textAlign: TextAlign.center,
-                            style: const TextStyle(
-                              color: Palette.muted,
+                            style: TextStyle(
+                              color: context.palette.muted,
                               fontSize: 10,
                             ),
                           ),
@@ -698,12 +713,12 @@ class _TimeChartState extends State<_TimeChart> {
           children: [
             Text(
               label(picked.start, picked.end),
-              style: const TextStyle(fontSize: 12, color: Palette.muted),
+              style: TextStyle(fontSize: 12, color: context.palette.muted),
             ),
             if (!widget.application)
               Text(
                 'План ${formatDuration(picked.plan)}',
-                style: const TextStyle(fontSize: 12, color: Palette.muted),
+                style: TextStyle(fontSize: 12, color: context.palette.muted),
               ),
             Text(
               '${widget.application ? 'Активно' : 'Факт'} ${formatDuration(picked.fact)}',
@@ -712,11 +727,11 @@ class _TimeChartState extends State<_TimeChart> {
           ],
         ),
         if (maximum == 0)
-          const Padding(
+          Padding(
             padding: EdgeInsets.only(top: 12),
             child: Text(
               'За этот период пока нет данных.',
-              style: TextStyle(fontSize: 12, color: Palette.muted),
+              style: TextStyle(fontSize: 12, color: context.palette.muted),
             ),
           ),
       ],
@@ -748,10 +763,13 @@ class _Bar extends StatelessWidget {
 }
 
 class _GridPainter extends CustomPainter {
+  _GridPainter(this.border);
+  final Color border;
+
   @override
   void paint(Canvas canvas, Size size) {
     final paint = Paint()
-      ..color = Palette.border.withValues(alpha: .6)
+      ..color = border.withValues(alpha: .6)
       ..strokeWidth = .5;
     for (final fraction in [0.0, .5, 1.0]) {
       final y = fraction * (size.height - 1);
@@ -760,7 +778,7 @@ class _GridPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(_GridPainter oldDelegate) => false;
+  bool shouldRepaint(_GridPainter oldDelegate) => oldDelegate.border != border;
 }
 
 class _Legend extends StatelessWidget {
@@ -780,7 +798,7 @@ class _Legend extends StatelessWidget {
         ),
       ),
       const SizedBox(width: 7),
-      Text(text, style: const TextStyle(fontSize: 12, color: Palette.muted)),
+      Text(text, style: TextStyle(fontSize: 12, color: context.palette.muted)),
     ],
   );
 }
@@ -804,9 +822,9 @@ class _ProjectCardState extends State<_ProjectCard> {
       title: 'Куда уходит время',
       subtitle: 'Фактическое время по проектам за период',
       child: widget.projects.isEmpty
-          ? const Text(
+          ? Text(
               'Проекты появятся вместе с планом или учётом времени.',
-              style: TextStyle(color: Palette.muted, height: 1.5),
+              style: TextStyle(color: context.palette.muted, height: 1.5),
             )
           : Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -824,7 +842,9 @@ class _ProjectCardState extends State<_ProjectCard> {
                               width: 7,
                               height: 7,
                               decoration: BoxDecoration(
-                                color: Color(project.color),
+                                color: context.palette.accent(
+                                  Color(project.color),
+                                ),
                                 shape: BoxShape.circle,
                               ),
                             ),
@@ -853,8 +873,8 @@ class _ProjectCardState extends State<_ProjectCard> {
                           child: LinearProgressIndicator(
                             value: project.actual.inSeconds / maximum,
                             minHeight: 5,
-                            backgroundColor: Palette.raised,
-                            color: Color(project.color),
+                            backgroundColor: context.palette.raised,
+                            color: context.palette.accent(Color(project.color)),
                             semanticsLabel:
                                 '${project.title}: ${formatDuration(project.actual)}, план ${formatDuration(project.planned)}',
                           ),
@@ -864,8 +884,8 @@ class _ProjectCardState extends State<_ProjectCard> {
                           alignment: Alignment.centerRight,
                           child: Text(
                             'План ${formatDuration(project.planned)}',
-                            style: const TextStyle(
-                              color: Palette.muted,
+                            style: TextStyle(
+                              color: context.palette.muted,
                               fontSize: 11,
                             ),
                           ),
@@ -916,9 +936,9 @@ class _EstimateCard extends StatelessWidget {
             const SizedBox(height: 20),
           ],
           if (estimates.isEmpty)
-            const Text(
+            Text(
               'Завершите запланированную задачу и запишите потраченное время, чтобы сравнить оценку с фактом.',
-              style: TextStyle(color: Palette.muted, height: 1.5),
+              style: TextStyle(color: context.palette.muted, height: 1.5),
             ),
           for (final item in estimates.take(8))
             Padding(
@@ -940,9 +960,9 @@ class _EstimateCard extends StatelessWidget {
                     children: [
                       Text(
                         'План ${formatDuration(item.planned)}',
-                        style: const TextStyle(
+                        style: TextStyle(
                           fontSize: 11,
-                          color: Palette.muted,
+                          color: context.palette.muted,
                         ),
                       ),
                       Text(
@@ -952,7 +972,7 @@ class _EstimateCard extends StatelessWidget {
                         style: TextStyle(
                           fontSize: 11,
                           color: item.actual == Duration.zero
-                              ? Palette.muted
+                              ? context.palette.muted
                               : context.accentColor,
                         ),
                       ),
@@ -962,9 +982,9 @@ class _EstimateCard extends StatelessWidget {
               ),
             ),
           if (estimates.length > 8)
-            const Text(
+            Text(
               'Показаны 8 задач с наибольшим отклонением.',
-              style: TextStyle(fontSize: 11, color: Palette.muted),
+              style: TextStyle(fontSize: 11, color: context.palette.muted),
             ),
         ],
       ),
@@ -981,20 +1001,24 @@ class _StatisticsExplanation extends StatelessWidget {
         'Как считаются показатели',
         style: TextStyle(fontSize: 13),
       ),
-      leading: const Icon(
+      leading: Icon(
         Icons.info_outline_rounded,
         size: 19,
-        color: Palette.muted,
+        color: context.palette.muted,
       ),
       childrenPadding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
-      children: const [
+      children: [
         Text(
           'План — длительности блоков, попавшие в выбранный период, включая сохранённый невыполненный план прошлых дней. Событие на весь день учитывается целиком; дни рождения исключены.\n\n'
           'Факт — таймер и ручной учёт до текущего момента. Отменённые записи исключены, пересечения в общей сумме считаются один раз. Границы дней соответствуют часовому поясу приложения.\n\n'
           'Закрыто из плана — текущий статус задач, у которых есть блок в периоде. Это не история дат завершения. Удалённые задачи не учитываются.\n\n'
           'Точность эстимейта сравнивает текущий полный план завершённой задачи со всем её учтённым временем. Задачи без учёта не принимаются за нулевую фактическую длительность.\n\n'
           'Использование приложения сохраняется только на этом устройстве с момента обновления. Новый сеанс начинается при возвращении в приложение или после паузы без действий. Фоновое время не учитывается.',
-          style: TextStyle(color: Palette.muted, fontSize: 12, height: 1.6),
+          style: TextStyle(
+            color: context.palette.muted,
+            fontSize: 12,
+            height: 1.6,
+          ),
         ),
       ],
     ),

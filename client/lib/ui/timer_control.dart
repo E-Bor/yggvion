@@ -65,20 +65,20 @@ class _TimerControlState extends ConsumerState<TimerControl> {
                 running
                     ? Icons.pause_circle_outline
                     : Icons.play_circle_outline,
-                color: running ? Palette.pink : null,
+                color: running ? context.palette.pink : null,
               ),
             )
           : Container(
               margin: const EdgeInsets.symmetric(horizontal: 10),
               decoration: BoxDecoration(
                 color: running
-                    ? Palette.pink.withValues(alpha: .08)
-                    : Palette.raised.withValues(alpha: .5),
+                    ? context.palette.pink.withValues(alpha: .08)
+                    : context.palette.raised.withValues(alpha: .5),
                 borderRadius: BorderRadius.circular(12),
                 border: Border.all(
                   color: running
-                      ? Palette.pink.withValues(alpha: .3)
-                      : Palette.border,
+                      ? context.palette.pink.withValues(alpha: .3)
+                      : context.palette.border,
                   width: .6,
                 ),
               ),
@@ -90,14 +90,16 @@ class _TimerControlState extends ConsumerState<TimerControl> {
                 icon: Icon(
                   running ? Icons.pause_rounded : Icons.play_arrow_rounded,
                   size: 18,
-                  color: running ? Palette.pink : null,
+                  color: running ? context.palette.pink : null,
                 ),
                 label: Text(
                   time,
                   style: TextStyle(
                     fontFeatures: const [FontFeature.tabularFigures()],
                     fontSize: 12,
-                    color: running ? Palette.pink : Palette.muted,
+                    color: running
+                        ? context.palette.pink
+                        : context.palette.muted,
                   ),
                 ),
               ),

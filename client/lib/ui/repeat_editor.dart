@@ -61,13 +61,17 @@ class RepeatPicker extends StatelessWidget {
     key: ValueKey(value),
     isExpanded: true,
     style: compact
-        ? const TextStyle(
+        ? TextStyle(
             fontFamily: 'Inter',
             fontSize: 12,
-            color: Palette.text,
+            color: context.palette.text,
           )
         : null,
-    icon: const Icon(Icons.expand_more_rounded, size: 18, color: Palette.muted),
+    icon: Icon(
+      Icons.expand_more_rounded,
+      size: 18,
+      color: context.palette.muted,
+    ),
     selectedItemBuilder: compact
         ? (context) => [
             for (final label in [...repeatPresets.values, repeatLabel(value)])
@@ -208,12 +212,12 @@ class _RepeatEditorState extends State<RepeatEditor> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text(
+            Text(
               'ПОВТОРЯТЬ КАЖДЫЕ',
               style: TextStyle(
                 fontSize: 10,
                 letterSpacing: 1.4,
-                color: Palette.muted,
+                color: context.palette.muted,
               ),
             ),
             const SizedBox(height: 12),
@@ -245,12 +249,12 @@ class _RepeatEditorState extends State<RepeatEditor> {
             ),
             if (frequency == 'WEEKLY') ...[
               const SizedBox(height: 22),
-              const Text(
+              Text(
                 'В ДНИ НЕДЕЛИ',
                 style: TextStyle(
                   fontSize: 10,
                   letterSpacing: 1.4,
-                  color: Palette.muted,
+                  color: context.palette.muted,
                 ),
               ),
               const SizedBox(height: 10),
@@ -290,9 +294,13 @@ class _RepeatEditorState extends State<RepeatEditor> {
               ),
             ],
             const SizedBox(height: 20),
-            const Text(
+            Text(
               'Повторяется, пока вы не удалите серию или последующие задачи.',
-              style: TextStyle(color: Palette.muted, fontSize: 12, height: 1.5),
+              style: TextStyle(
+                color: context.palette.muted,
+                fontSize: 12,
+                height: 1.5,
+              ),
             ),
             if (error != null)
               Padding(

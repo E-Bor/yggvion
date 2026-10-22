@@ -90,26 +90,35 @@ class ScheduleFields extends StatelessWidget {
     }
   }
 
-  Widget field(String key, String label, String tooltip, VoidCallback onTap) =>
-      TextButton(
-        key: ValueKey(key),
-        onPressed: onTap,
-        style: TextButton.styleFrom(
-          foregroundColor: Palette.text,
-          minimumSize: const Size(0, 38),
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-          textStyle: const TextStyle(fontFamily: 'Inter', fontSize: 14),
-        ),
-        child: Tooltip(message: tooltip, child: Text(label)),
-      );
+  Widget field(
+    BuildContext context,
+    String key,
+    String label,
+    String tooltip,
+    VoidCallback onTap,
+  ) => TextButton(
+    key: ValueKey(key),
+    onPressed: onTap,
+    style: TextButton.styleFrom(
+      foregroundColor: context.palette.text,
+      minimumSize: const Size(0, 38),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+      textStyle: const TextStyle(fontFamily: 'Inter', fontSize: 14),
+    ),
+    child: Tooltip(message: tooltip, child: Text(label)),
+  );
 
   @override
   Widget build(BuildContext context) => Row(
     crossAxisAlignment: CrossAxisAlignment.start,
     children: [
-      const Padding(
+      Padding(
         padding: EdgeInsets.only(top: 10, right: 12),
-        child: Icon(Icons.schedule_rounded, size: 20, color: Palette.muted),
+        child: Icon(
+          Icons.schedule_rounded,
+          size: 20,
+          color: context.palette.muted,
+        ),
       ),
       Expanded(
         child: Column(
@@ -119,30 +128,37 @@ class ScheduleFields extends StatelessWidget {
               builder: (context) {
                 final multipleDays = !DateUtils.isSameDay(start, visibleEnd);
                 final firstDate = field(
+                  context,
                   'schedule-start-date',
                   dateLabel(start),
                   'Дата начала',
                   () => date(context, true),
                 );
                 final lastDate = field(
+                  context,
                   'schedule-end-date',
                   dateLabel(visibleEnd),
                   'Дата окончания',
                   () => date(context, false),
                 );
                 final firstTime = field(
+                  context,
                   'schedule-start-time',
                   DateFormat('HH:mm').format(start),
                   'Время начала',
                   () => time(context, true),
                 );
                 final lastTime = field(
+                  context,
                   'schedule-end-time',
                   DateFormat('HH:mm').format(end),
                   'Время окончания',
                   () => time(context, false),
                 );
-                const dash = Text('—', style: TextStyle(color: Palette.muted));
+                final dash = Text(
+                  '—',
+                  style: TextStyle(color: context.palette.muted),
+                );
                 return Wrap(
                   crossAxisAlignment: WrapCrossAlignment.center,
                   children: [
@@ -165,10 +181,10 @@ class ScheduleFields extends StatelessWidget {
                         tooltip: 'Выбрать дату окончания',
                         onPressed: () => date(context, false),
                         visualDensity: VisualDensity.compact,
-                        icon: const Icon(
+                        icon: Icon(
                           Icons.date_range_outlined,
                           size: 17,
-                          color: Palette.muted,
+                          color: context.palette.muted,
                         ),
                       ),
                   ],

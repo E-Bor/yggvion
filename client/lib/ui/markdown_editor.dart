@@ -36,7 +36,7 @@ class MarkdownPreview extends ConsumerWidget {
           ? snapshot.note(legacy[2]!)
           : WikiNoteIndex(snapshot).resolve(wiki!.target);
       return Material(
-        color: Palette.raised,
+        color: context.palette.raised,
         borderRadius: BorderRadius.circular(12),
         child: InkWell(
           borderRadius: BorderRadius.circular(12),
@@ -73,18 +73,18 @@ class MarkdownPreview extends ConsumerWidget {
                             : note.content.replaceAll('\n', ' '),
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
+                        style: TextStyle(
                           fontSize: 12,
-                          color: Palette.muted,
+                          color: context.palette.muted,
                         ),
                       ),
                     ],
                   ),
                 ),
-                const Icon(
+                Icon(
                   Icons.north_east_rounded,
                   size: 16,
-                  color: Palette.muted,
+                  color: context.palette.muted,
                 ),
               ],
             ),
@@ -97,7 +97,7 @@ class MarkdownPreview extends ConsumerWidget {
       inlineSyntaxes: [_WikiLinkSyntax()],
       selectable: selectable,
       styleSheet: MarkdownStyleSheet.fromTheme(Theme.of(context)).copyWith(
-        p: const TextStyle(height: 1.65, color: Palette.text),
+        p: TextStyle(height: 1.65, color: context.palette.text),
         code: TextStyle(
           fontFamily: 'monospace',
           fontSize: 12,
@@ -148,7 +148,7 @@ class MarkdownPreview extends ConsumerWidget {
                 return Container(
                   padding: const EdgeInsets.all(14),
                   decoration: BoxDecoration(
-                    color: Palette.raised,
+                    color: context.palette.raised,
                     borderRadius: BorderRadius.circular(10),
                   ),
                   child: Text(alt ?? 'Изображение ожидает синхронизации'),
@@ -534,7 +534,10 @@ class LiveMarkdownEditorState extends ConsumerState<LiveMarkdownEditor> {
                 else if (widget.toolbarLabel.isNotEmpty)
                   Text(
                     widget.toolbarLabel,
-                    style: const TextStyle(fontSize: 12, color: Palette.muted),
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: context.palette.muted,
+                    ),
                   ),
                 const Spacer(),
                 if (_showToolbarActions) ...[
@@ -670,8 +673,8 @@ class LiveMarkdownEditorState extends ConsumerState<LiveMarkdownEditor> {
                           child: _blocks[index].isEmpty
                               ? Text(
                                   widget.placeholder,
-                                  style: const TextStyle(
-                                    color: Palette.muted,
+                                  style: TextStyle(
+                                    color: context.palette.muted,
                                     height: 1.65,
                                   ),
                                 )

@@ -99,7 +99,7 @@ class _NotePanelState extends ConsumerState<NotePanel> {
                 note.pinned == 'scratchpad'
                     ? Icons.edit_note_rounded
                     : Icons.bookmark_outline_rounded,
-                color: Palette.muted,
+                color: context.palette.muted,
                 size: 19,
               ),
             ),
@@ -247,11 +247,11 @@ class _NotesPageState extends ConsumerState<NotesPage> {
             ),
             const SizedBox(height: 14),
           ],
-          const Padding(
+          Padding(
             padding: EdgeInsets.only(bottom: 16),
             child: Text(
               'Удерживайте текст заметки, чтобы редактировать',
-              style: TextStyle(color: Palette.muted, fontSize: 12),
+              style: TextStyle(color: context.palette.muted, fontSize: 12),
             ),
           ),
           const NotePanel(noteId: 'scratchpad'),
@@ -440,12 +440,12 @@ class _NoteLibraryState extends ConsumerState<NoteLibrary> {
             index: index,
             child: MouseRegion(
               cursor: SystemMouseCursors.grab,
-              child: const Padding(
+              child: Padding(
                 padding: EdgeInsets.symmetric(vertical: 8),
                 child: Icon(
                   Icons.drag_indicator_rounded,
                   size: 18,
-                  color: Palette.muted,
+                  color: context.palette.muted,
                 ),
               ),
             ),
@@ -600,11 +600,11 @@ class _NoteLibraryState extends ConsumerState<NoteLibrary> {
         ),
         if (!collapsed.contains(id))
           if (notes.isEmpty)
-            const Padding(
+            Padding(
               padding: EdgeInsets.only(left: 26, bottom: 12),
               child: Text(
                 'Пока пусто',
-                style: TextStyle(color: Palette.muted, fontSize: 12),
+                style: TextStyle(color: context.palette.muted, fontSize: 12),
               ),
             )
           else
@@ -645,11 +645,11 @@ class _NoteLibraryState extends ConsumerState<NoteLibrary> {
         Row(
           children: [
             const SizedBox(width: 8),
-            const Expanded(
+            Expanded(
               child: Text(
                 'БИБЛИОТЕКА',
                 style: TextStyle(
-                  color: Palette.muted,
+                  color: context.palette.muted,
                   fontSize: 10,
                   letterSpacing: 1.5,
                   fontWeight: FontWeight.w600,
@@ -669,11 +669,15 @@ class _NoteLibraryState extends ConsumerState<NoteLibrary> {
         group('', 'Без папки'),
         for (final folder in snapshot.noteFolders)
           group(folder.id, folder.title, folder: folder),
-        const Padding(
+        Padding(
           padding: EdgeInsets.all(8),
           child: Text(
             'Перетащите значок слева, чтобы изменить порядок',
-            style: TextStyle(fontSize: 11, color: Palette.muted, height: 1.5),
+            style: TextStyle(
+              fontSize: 11,
+              color: context.palette.muted,
+              height: 1.5,
+            ),
           ),
         ),
       ],

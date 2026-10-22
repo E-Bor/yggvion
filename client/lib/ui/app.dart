@@ -31,6 +31,9 @@ class YggvionApp extends ConsumerWidget {
     title: 'Yggvion',
     debugShowCheckedModeBanner: false,
     theme: appTheme(
+      brightness: ref.watch(appProvider.select((repo) => repo.lightTheme))
+          ? Brightness.light
+          : Brightness.dark,
       accentColor: ref.watch(
         appProvider.select((repo) => repo.snapshot.settings.accentColor),
       ),
@@ -38,15 +41,25 @@ class YggvionApp extends ConsumerWidget {
     locale: const Locale('ru'),
     supportedLocales: const [Locale('ru'), Locale('en')],
     localizationsDelegates: GlobalMaterialLocalizations.delegates,
-    builder: (context, child) => Listener(
-      behavior: HitTestBehavior.translucent,
-      onPointerDown: (_) => ref.read(activityProvider)?.interact(),
-      onPointerMove: (_) => ref.read(activityProvider)?.interact(),
-      onPointerHover: (_) => ref.read(activityProvider)?.interact(),
-      onPointerSignal: (_) => ref.read(activityProvider)?.interact(),
-      onPointerPanZoomStart: (_) => ref.read(activityProvider)?.interact(),
-      onPointerPanZoomUpdate: (_) => ref.read(activityProvider)?.interact(),
-      child: child!,
+    builder: (context, child) => AnnotatedRegion<SystemUiOverlayStyle>(
+      value:
+          (Theme.of(context).brightness == Brightness.light
+                  ? SystemUiOverlayStyle.dark
+                  : SystemUiOverlayStyle.light)
+              .copyWith(
+                statusBarColor: Colors.transparent,
+                systemNavigationBarColor: context.palette.background,
+              ),
+      child: Listener(
+        behavior: HitTestBehavior.translucent,
+        onPointerDown: (_) => ref.read(activityProvider)?.interact(),
+        onPointerMove: (_) => ref.read(activityProvider)?.interact(),
+        onPointerHover: (_) => ref.read(activityProvider)?.interact(),
+        onPointerSignal: (_) => ref.read(activityProvider)?.interact(),
+        onPointerPanZoomStart: (_) => ref.read(activityProvider)?.interact(),
+        onPointerPanZoomUpdate: (_) => ref.read(activityProvider)?.interact(),
+        child: child!,
+      ),
     ),
     home: const Workspace(),
   );
@@ -367,11 +380,11 @@ class _WorkspaceState extends ConsumerState<Workspace>
                               horizontal: 24,
                               vertical: 9,
                             ),
-                            color: Palette.pink.withValues(alpha: .1),
+                            color: context.palette.pink.withValues(alpha: .1),
                             child: Text(
                               'Есть изменения с разных устройств ($conflicts) · Выбрать или объединить',
-                              style: const TextStyle(
-                                color: Palette.pink,
+                              style: TextStyle(
+                                color: context.palette.pink,
                                 fontSize: 12,
                               ),
                             ),
@@ -485,9 +498,9 @@ class _WorkspaceState extends ConsumerState<Workspace>
                             ),
                           ],
                         ),
-                        child: const Icon(
+                        child: Icon(
                           Icons.add_rounded,
-                          color: Palette.background,
+                          color: context.palette.background,
                         ),
                       ),
                     ),
@@ -549,7 +562,10 @@ class _WorkspaceState extends ConsumerState<Workspace>
                         : page == PageKind.notes
                         ? 'Место для мыслей и знаний'
                         : 'Ваше рабочее пространство',
-                    style: const TextStyle(color: Palette.muted, fontSize: 12),
+                    style: TextStyle(
+                      color: context.palette.muted,
+                      fontSize: 12,
+                    ),
                   ),
               ],
             );
@@ -580,7 +596,7 @@ class _WorkspaceState extends ConsumerState<Workspace>
                   icon: Icon(
                     Icons.filter_list_rounded,
                     color: projectId.isEmpty
-                        ? Palette.muted
+                        ? context.palette.muted
                         : context.accentColor,
                   ),
                   onSelected: (value) => setState(() => projectId = value),
@@ -726,7 +742,7 @@ class _WorkspaceState extends ConsumerState<Workspace>
                 style: IconButton.styleFrom(
                   foregroundColor: selected
                       ? context.accentColor
-                      : Palette.muted,
+                      : context.palette.muted,
                   backgroundColor: selected
                       ? context.accentColor.withValues(alpha: .09)
                       : Colors.transparent,
@@ -771,9 +787,11 @@ class _WorkspaceState extends ConsumerState<Workspace>
       curve: Curves.easeOutCubic,
       key: const ValueKey('workspace-sidebar'),
       width: width,
-      decoration: const BoxDecoration(
-        color: Palette.surface,
-        border: Border(right: BorderSide(color: Palette.border, width: .6)),
+      decoration: BoxDecoration(
+        color: context.palette.surface,
+        border: Border(
+          right: BorderSide(color: context.palette.border, width: .6),
+        ),
       ),
       child: Stack(
         fit: StackFit.expand,
@@ -816,14 +834,14 @@ class _WorkspaceState extends ConsumerState<Workspace>
                   for (var i = 0; i < 4; i++) navigation(i),
                   const SizedBox(height: 30),
                   if (!collapsed) ...[
-                    const Padding(
+                    Padding(
                       padding: EdgeInsets.symmetric(horizontal: 26),
                       child: Text(
                         'ПРОЕКТЫ',
                         style: TextStyle(
                           fontSize: 10,
                           letterSpacing: 1.7,
-                          color: Palette.muted,
+                          color: context.palette.muted,
                         ),
                       ),
                     ),
@@ -919,7 +937,7 @@ class _WorkspaceState extends ConsumerState<Workspace>
                               ? Icons.cloud_done_outlined
                               : Icons.cloud_off_outlined,
                           size: 16,
-                          color: Palette.muted,
+                          color: context.palette.muted,
                         ),
                       ),
                     ),
@@ -943,11 +961,11 @@ class _WorkspaceState extends ConsumerState<Workspace>
                               'Клавиши',
                               style: TextStyle(fontSize: 12),
                             ),
-                            trailing: const Text(
+                            trailing: Text(
                               'F1',
                               style: TextStyle(
                                 fontSize: 10,
-                                color: Palette.muted,
+                                color: context.palette.muted,
                               ),
                             ),
                             onTap: () => showShortcutHelp(context),
@@ -964,15 +982,15 @@ class _WorkspaceState extends ConsumerState<Workspace>
                                       ? Icons.cloud_done_outlined
                                       : Icons.cloud_off_outlined,
                                   size: 14,
-                                  color: Palette.muted,
+                                  color: context.palette.muted,
                                 ),
                                 const SizedBox(width: 7),
                                 Expanded(
                                   child: Text(
                                     repo.syncStatus,
-                                    style: const TextStyle(
+                                    style: TextStyle(
                                       fontSize: 10,
-                                      color: Palette.muted,
+                                      color: context.palette.muted,
                                     ),
                                     maxLines: 1,
                                     overflow: TextOverflow.ellipsis,
@@ -1100,7 +1118,7 @@ class _WorkspaceState extends ConsumerState<Workspace>
                   const Spacer(),
                   Text(
                     '${tasks.length}',
-                    style: const TextStyle(color: Palette.muted),
+                    style: TextStyle(color: context.palette.muted),
                   ),
                 ],
               ),
@@ -1257,12 +1275,12 @@ class _WorkspaceState extends ConsumerState<Workspace>
                         decoration: BoxDecoration(
                           color: candidates.isNotEmpty
                               ? context.accentColor.withValues(alpha: .08)
-                              : Palette.surface.withValues(alpha: .5),
+                              : context.palette.surface.withValues(alpha: .5),
                           borderRadius: BorderRadius.circular(14),
                           border: Border.all(
                             color: candidates.isNotEmpty
                                 ? context.accentColor
-                                : Palette.border,
+                                : context.palette.border,
                             width: .6,
                           ),
                         ),
@@ -1278,9 +1296,9 @@ class _WorkspaceState extends ConsumerState<Workspace>
                                     decoration: BoxDecoration(
                                       shape: BoxShape.circle,
                                       color: status == TaskStatus.done
-                                          ? Palette.green
+                                          ? context.palette.green
                                           : status == TaskStatus.inProgress
-                                          ? Palette.pink
+                                          ? context.palette.pink
                                           : status == TaskStatus.waiting
                                           ? Palette.projects[2]
                                           : context.accentColor,
@@ -1297,8 +1315,8 @@ class _WorkspaceState extends ConsumerState<Workspace>
                                   const Spacer(),
                                   Text(
                                     '${tasks.length}',
-                                    style: const TextStyle(
-                                      color: Palette.muted,
+                                    style: TextStyle(
+                                      color: context.palette.muted,
                                       fontSize: 12,
                                     ),
                                   ),
@@ -1422,7 +1440,7 @@ class _SearchDialogState extends ConsumerState<SearchDialog> {
                 searchHint(
                   ref.watch(appProvider).snapshot.settings.searchTypos,
                 ),
-                style: const TextStyle(color: Palette.muted, fontSize: 12),
+                style: TextStyle(color: context.palette.muted, fontSize: 12),
               ),
             ),
           ),

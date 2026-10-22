@@ -171,8 +171,8 @@ class _WikiAutocompleteState extends ConsumerState<WikiAutocomplete> {
                 margin: const EdgeInsets.only(bottom: 8),
                 clipBehavior: Clip.antiAlias,
                 decoration: BoxDecoration(
-                  color: Palette.raised,
-                  border: Border.all(color: Palette.border),
+                  color: context.palette.raised,
+                  border: Border.all(color: context.palette.border),
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: ConstrainedBox(
@@ -182,11 +182,14 @@ class _WikiAutocompleteState extends ConsumerState<WikiAutocomplete> {
                     mainAxisSize: MainAxisSize.min,
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      const Padding(
+                      Padding(
                         padding: EdgeInsets.fromLTRB(12, 9, 12, 5),
                         child: Text(
                           'Ссылка на заметку',
-                          style: TextStyle(fontSize: 11, color: Palette.muted),
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: context.palette.muted,
+                          ),
                         ),
                       ),
                       if (notes.isEmpty)
@@ -219,7 +222,7 @@ class _WikiAutocompleteState extends ConsumerState<WikiAutocomplete> {
                                   size: 18,
                                   color: i == highlighted
                                       ? context.accentColor
-                                      : Palette.muted,
+                                      : context.palette.muted,
                                 ),
                                 minLeadingWidth: 20,
                                 title: Text(
