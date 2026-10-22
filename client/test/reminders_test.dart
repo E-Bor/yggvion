@@ -64,6 +64,9 @@ void main() {
                 'payload': data['payload'],
               };
               return null;
+            case 'cancelAll':
+              pending.clear();
+              return null;
             case 'cancel':
               pending.remove(call.arguments as int);
               return null;
@@ -205,4 +208,30 @@ void main() {
     expect(service.error, isNull);
     expect(pending, hasLength(1));
   });
+
+  test(
+    'storage reset cancels notifications and prevents rescheduling',
+    () async {
+      await repo.createTask(
+        'Private reminder',
+        start: repo.now().add(const Duration(hours: 1)),
+      );
+      await service.refresh();
+      expect(pending, isNotEmpty);
+      await service.clearAndStop();
+      expect(pending, isEmpty);
+      expect(calls.where((c) => c.method == 'cancelAll'), hasLength(1));
+      expect(service.scheduledCount, 0);
+      final before = calls.length;
+      await repo.createTask(
+        'Late reminder',
+        start: repo.now().add(const Duration(hours: 2)),
+      );
+      await service.refresh();
+      service.changed();
+      await Future<void>.delayed(const Duration(milliseconds: 150));
+      expect(pending, isEmpty);
+      expect(calls.length, before);
+    },
+  );
 }

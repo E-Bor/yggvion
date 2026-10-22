@@ -11,7 +11,15 @@ import (
 
 func (a *API) encryptionRoutes(mux *http.ServeMux) {
 	mux.Handle("POST /api/v1/encryption", a.auth(http.HandlerFunc(a.enableEncryption)))
-	mux.Handle("PUT /api/v1/encryption/password", a.auth(a.current(http.HandlerFunc(a.updatePassword))))
+	mux.Handle("GET /api/v1/snapshot", a.auth(a.current(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		snapshot, err := a.Store.Export(r.Context())
+		if err != nil {
+			fail(w, 500, "storage_error")
+			return
+		}
+		write(w, 200, snapshot)
+	}))))
+	mux.Handle("PUT /api/v1/encryption/password", a.auth(http.HandlerFunc(a.updatePassword)))
 	mux.Handle("GET /api/v1/guest-proposals", a.auth(a.current(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		records, err := a.Store.GuestProposals(r.Context())
 		if err != nil {
@@ -47,8 +55,8 @@ func (a *API) encryptionRoutes(mux *http.ServeMux) {
 
 func (a *API) enableEncryption(w http.ResponseWriter, r *http.Request) {
 	var input struct {
-		KeyID    string                   `json:"key_id"`
-		Envelope *domain.PasswordEnvelope `json:"password_envelope"`
+		KeyID    string                 `json:"key_id"`
+		Envelope *domain.PasswordConfig `json:"password_config"`
 	}
 	if decode(w, r, &input) != nil || input.Envelope == nil || input.Envelope.Validate() != nil {
 		fail(w, 400, "invalid_encryption_key_id")
@@ -74,25 +82,32 @@ func (a *API) enableEncryption(w http.ResponseWriter, r *http.Request) {
 
 func (a *API) updatePassword(w http.ResponseWriter, r *http.Request) {
 	var input struct {
-		KeyID    string                  `json:"key_id"`
-		Expected int64                   `json:"expected_revision"`
-		Envelope domain.PasswordEnvelope `json:"password_envelope"`
+		KeyID   string                `json:"key_id"`
+		Cursor  *int64                `json:"cursor"`
+		Config  domain.PasswordConfig `json:"password_config"`
+		Records []domain.Record       `json:"records"`
 	}
-	if decode(w, r, &input) != nil || input.Envelope.Validate() != nil || input.Envelope.KeyID != input.KeyID {
-		fail(w, 400, "invalid_password_envelope")
+	r.Body = http.MaxBytesReader(w, r.Body, 512<<20)
+	decoder := json.NewDecoder(r.Body)
+	decoder.DisallowUnknownFields()
+	if decoder.Decode(&input) != nil || decoder.Decode(new(any)) != io.EOF || input.Config.Validate() != nil || input.Cursor == nil || input.Records == nil {
+		fail(w, 400, "invalid_password_configuration")
 		return
 	}
-	if err := a.Store.SetPasswordEnvelope(r.Context(), input.KeyID, input.Expected, input.Envelope); err != nil {
+	a.DataMu.Lock()
+	defer a.DataMu.Unlock()
+	if err := a.Store.RotatePassword(r.Context(), r.Header.Get("X-Yggvion-Generation"), input.KeyID, *input.Cursor, input.Config, input.Records); err != nil {
 		if err == store.ErrConflict {
-			fail(w, 409, "password_changed")
+			fail(w, 409, "workspace_changed")
 			return
 		}
 		if err == store.ErrInvalid {
-			fail(w, 400, "invalid_password_envelope")
+			fail(w, 400, "invalid_password_configuration")
 			return
 		}
 		fail(w, 500, "storage_error")
 		return
 	}
-	write(w, 200, map[string]any{"revision": input.Envelope.Revision})
+	a.broadcast()
+	write(w, 200, map[string]string{"key_id": input.Config.KeyID})
 }

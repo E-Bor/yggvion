@@ -359,7 +359,6 @@ class _SynchronizationPageState extends ConsumerState<SynchronizationPage> {
           ],
         ),
         if (sync.connected) metricsCard(),
-        const EncryptionSettings(),
         if (sync.connected)
           settingsCard('Устройства', [
             if (error != null) Text(error!),
@@ -863,41 +862,6 @@ class _BackupsPageState extends ConsumerState<BackupsPage> {
     });
   }
 
-  Future<void> recoveryKey() async {
-    final result = await ref
-        .read(syncProvider)
-        .request('GET', '/api/v1/backups/recovery-key');
-    if (!mounted) return;
-    await showDialog<void>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Ключ серверного архива'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              'Этот ключ нужен для импорта серверного архива на новый VPS. Для открытия личных данных на устройстве понадобится ваш пароль шифрования. Локальные копии .ygglocal восстанавливаются только по паролю, без этого ключа.',
-            ),
-            const SizedBox(height: 16),
-            SelectableText(result['key'] as String),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () =>
-                Clipboard.setData(ClipboardData(text: result['key'] as String)),
-            child: const Text('Скопировать'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Готово'),
-          ),
-        ],
-      ),
-    );
-  }
-
   Future<void> download(String id) async {
     final sync = ref.read(syncProvider);
     final mobile = Platform.isIOS || Platform.isAndroid;
@@ -934,37 +898,14 @@ class _BackupsPageState extends ConsumerState<BackupsPage> {
   }
 
   Future<void> importBackup() async {
-    final picked = await FilePicker.platform.pickFiles();
-    if (picked == null || !mounted) return;
-    final file = File(picked.files.single.path!);
-    final key = TextEditingController();
-    final secret = await showDialog<String>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Импорт резервной копии'),
-        content: TextField(
-          controller: key,
-          obscureText: true,
-          enableSuggestions: false,
-          autocorrect: false,
-          decoration: const InputDecoration(
-            labelText: 'Ключ восстановления AGE-SECRET-KEY…',
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Отмена'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, key.text.trim()),
-            child: const Text('Проверить и загрузить'),
-          ),
-        ],
-      ),
+    final picked = await FilePicker.platform.pickFiles(
+      type: FileType.custom,
+      allowedExtensions: ['yggbackup'],
     );
-    key.dispose();
-    if (secret == null) return;
+    if (picked == null || !mounted) return;
+    final path = picked.files.single.path;
+    if (path == null) throw StateError('Не удалось открыть выбранный файл');
+    final file = File(path);
     final sync = ref.read(syncProvider);
     transfer = CancelToken();
     await sync.client.post<Object?>(
@@ -973,7 +914,6 @@ class _BackupsPageState extends ConsumerState<BackupsPage> {
       options: Options(
         headers: {
           ...sync.authHeaders,
-          'X-Yggvion-Recovery-Key': secret,
           'Content-Type': 'application/octet-stream',
           'Content-Length': await file.length(),
         },
@@ -1055,7 +995,6 @@ class _BackupsPageState extends ConsumerState<BackupsPage> {
       title: 'Резервное копирование',
       children: [
         settingsCard('Копии на этом устройстве', [const LocalBackupsPanel()]),
-        const EncryptionSettings(),
         settingsCard('Ваши данные под защитой', [
           Text(
             'Зашифрованные копии включают задачи, заметки, проекты, учёт времени и вложения, уже дошедшие до сервера. Незагруженные изменения остаются на устройствах.',
@@ -1095,13 +1034,6 @@ class _BackupsPageState extends ConsumerState<BackupsPage> {
                     ? null
                     : () => action(importBackup),
                 child: const Text('Импортировать'),
-              ),
-              TextButton.icon(
-                onPressed: !connected || running
-                    ? null
-                    : () => action(recoveryKey),
-                icon: const Icon(Icons.key_outlined),
-                label: const Text('Ключ серверного архива'),
               ),
             ],
           ),
@@ -1358,50 +1290,9 @@ class _RemoteBackupsPageState extends ConsumerState<RemoteBackupsPage> {
   }
 
   Future<void> fetch(String id) async {
-    final key = TextEditingController();
-    final value = await showDialog<String>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Вернуть копию на VPS'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Text(
-              'На прежнем сервере оставьте поле пустым. Для нового VPS укажите сохранённый ключ серверного архива.',
-            ),
-            const SizedBox(height: 16),
-            TextField(
-              controller: key,
-              obscureText: true,
-              enableSuggestions: false,
-              autocorrect: false,
-              decoration: const InputDecoration(
-                labelText: 'Ключ восстановления',
-              ),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Отмена'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, key.text.trim()),
-            child: const Text('Загрузить и проверить'),
-          ),
-        ],
-      ),
-    );
-    key.dispose();
-    if (value == null) return;
     await ref
         .read(syncProvider)
-        .request(
-          'POST',
-          '/api/v1/backups/remote/$id/fetch',
-          data: {'key': value},
-        );
+        .request('POST', '/api/v1/backups/remote/$id/fetch');
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -1419,7 +1310,7 @@ class _RemoteBackupsPageState extends ConsumerState<RemoteBackupsPage> {
     children: [
       settingsCard('Автоматическое хранение', [
         Text(
-          'На внешнее хранилище отправляются только зашифрованные архивы. Ключ восстановления сохраните отдельно. Копии вне VPS сохраняются до удаления в самом хранилище.',
+          'Личные данные в копиях защищены вашим паролем шифрования. Копии вне VPS сохраняются до удаления в самом хранилище.',
           style: TextStyle(color: context.palette.muted, height: 1.5),
         ),
         const SizedBox(height: 20),

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -99,7 +100,7 @@ func TestRestoreRejectsStaleClientsAndPreservesRevocations(t *testing.T) {
 	changed.Data = task("one", "after").Data
 	decodeResults(t, push(t, h, token, domain.Mutation{OperationID: "changed", Record: changed}))
 	path, _ := m.Path(entry.ID)
-	if err = m.Restore(ctx, path, ""); err != nil {
+	if err = m.Restore(ctx, path); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = s.Authorize(ctx, revokedToken); err == nil {
@@ -122,9 +123,72 @@ func TestRestoreRejectsStaleClientsAndPreservesRevocations(t *testing.T) {
 	if w := request(t, h, "GET", "/api/v1/state", token, nil); w.Code != 200 {
 		t.Fatal(w.Code)
 	}
-	for _, path := range []string{"/api/v1/state", "/api/v1/backups", "/api/v1/backups/recovery-key", "/api/v1/backups/remote"} {
+	for _, path := range []string{"/api/v1/state", "/api/v1/backups", "/api/v1/backups/remote"} {
 		if w := request(t, h, "GET", path, "", nil); w.Code != http.StatusUnauthorized {
 			t.Fatal("unprotected", path)
 		}
+	}
+}
+
+func TestBackupImportRequiresAuthenticationButNoArchiveKey(t *testing.T) {
+	source, _, _ := setup(t)
+	sourceAPI := New(source, strings.Repeat("test", 8), t.TempDir())
+	sourceBackups, err := backup.Open(source, t.TempDir(), sourceAPI.Files, &sourceAPI.DataMu)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	entry, err := sourceBackups.Create(ctx, "manual")
+	if err != nil {
+		t.Fatal(err)
+	}
+	path, _ := sourceBackups.Path(entry.ID)
+	contents, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	target, _, token := setupEmpty(t)
+	a := New(target, strings.Repeat("test", 8), t.TempDir())
+	a.Backups, err = backup.Open(target, t.TempDir(), a.Files, &a.DataMu)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := a.Handler()
+	for _, credential := range []string{"", token} {
+		r := httptest.NewRequest("POST", "/api/v1/backups/import", bytes.NewReader(contents))
+		r.Header.Set("Content-Type", "application/octet-stream")
+		if credential != "" {
+			authorizeTestRequest(t, h, r, credential)
+		}
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		want := http.StatusAccepted
+		if credential == "" {
+			want = http.StatusUnauthorized
+		}
+		if w.Code != want {
+			t.Fatal(w.Code, w.Body.String())
+		}
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for a.Backups.Status().Running {
+		if time.Now().After(deadline) {
+			t.Fatal("import did not finish")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	if status := a.Backups.Status(); status.Error != "" {
+		t.Fatal(status.Error)
+	}
+	copies, err := a.Backups.List()
+	if err != nil || len(copies) != 1 || copies[0].Reason != "import" {
+		t.Fatal("portable archive not imported", copies, err)
+	}
+	// Import only validates and stores a copy; restoration is a separate action.
+	if key, err := target.EncryptionKey(ctx); err != nil || key != "" {
+		t.Fatal("import modified the workspace", err)
+	}
+	if w := request(t, h, "GET", "/api/v1/backups/recovery-key", token, nil); w.Code != http.StatusNotFound && w.Code != http.StatusMethodNotAllowed {
+		t.Fatal("obsolete key endpoint remains", w.Code)
 	}
 }

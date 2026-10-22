@@ -9,11 +9,14 @@ import 'package:yggvion/data/repository.dart';
 import 'package:yggvion/data/sync.dart';
 import 'package:yggvion/ui/providers.dart';
 import 'package:yggvion/ui/server_settings.dart';
+import 'package:yggvion/ui/encryption_settings.dart';
 import 'package:yggvion/ui/theme.dart';
 
 class AdminFixture extends SyncService {
   AdminFixture(super.repo);
   int metricRequests = 0;
+  int fetchRequests = 0;
+  Object? fetchBody;
   @override
   bool get connected => true;
   @override
@@ -26,6 +29,23 @@ class AdminFixture extends SyncService {
     String path, {
     Object? data,
   }) async {
+    if (path == '/api/v1/backups/remote' && method == 'GET') {
+      return {
+        'backups': [
+          {
+            'id': 'test-copy',
+            'created': '2026-10-21T10:00:00Z',
+            'records': 12,
+            'files': 3,
+          },
+        ],
+      };
+    }
+    if (path == '/api/v1/backups/remote/test-copy/fetch') {
+      fetchRequests++;
+      fetchBody = data;
+      return {};
+    }
     if (path == '/api/v1/metrics') {
       metricRequests++;
       return {
@@ -75,6 +95,7 @@ void main() {
       );
       for (final page in <Widget>[
         const SynchronizationPage(),
+        const EncryptionPage(),
         const InstallServerPage(),
         const BackupsPage(),
         const RemoteBackupsPage(initial: {'kind': 'sftp'}),
@@ -110,6 +131,23 @@ void main() {
             1,
             reason: 'Immediate refresh uses cache',
           );
+        }
+        expect(find.text('Ключ серверного архива'), findsNothing);
+        if (page is RemoteBackupsPage) {
+          await tester.scrollUntilVisible(
+            find.text('Показать копии'),
+            500,
+            scrollable: find.byType(Scrollable).first,
+          );
+          await tester.tap(find.text('Показать копии'));
+          await tester.pumpAndSettle();
+          await tester.ensureVisible(find.byTooltip('Вернуть на VPS'));
+          await tester.tap(find.byTooltip('Вернуть на VPS'));
+          await tester.pumpAndSettle();
+          expect(sync.fetchRequests, 1);
+          expect(sync.fetchBody, isNull);
+          expect(find.byType(AlertDialog), findsNothing);
+          expect(find.text('Ключ восстановления'), findsNothing);
         }
         await tester.drag(find.byType(ListView).first, const Offset(0, -700));
         await tester.pumpAndSettle();

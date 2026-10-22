@@ -9,7 +9,7 @@ import (
 )
 
 func TestOldSchemasAreRejectedWithoutChangingData(t *testing.T) {
-	for _, version := range []int{0, 1, 2, 3, 4, 5, 999} {
+	for _, version := range []int{0, 1, 2, 3, 4, 5, 6, 999} {
 		t.Run(fmt.Sprint(version), func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "old.db")
 			old, err := sql.Open("sqlite", path)

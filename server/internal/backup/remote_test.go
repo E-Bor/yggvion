@@ -103,7 +103,7 @@ func TestSFTPCopyAndRecoveryRequireVerifiedHost(t *testing.T) {
 	if err = m.Delete(entry.ID); err != nil {
 		t.Fatal(err)
 	}
-	if err = m.FetchRemote(ctx, entry.ID, ""); err != nil {
+	if err = m.FetchRemote(ctx, entry.ID); err != nil {
 		t.Fatal(err)
 	}
 	local, err := m.List()
@@ -111,7 +111,7 @@ func TestSFTPCopyAndRecoveryRequireVerifiedHost(t *testing.T) {
 		t.Fatal("not recovered", err)
 	}
 	path, _ := m.Path(local[0].ID)
-	if err = m.Restore(ctx, path, ""); err != nil {
+	if err = m.Restore(ctx, path); err != nil {
 		t.Fatal(err)
 	}
 }

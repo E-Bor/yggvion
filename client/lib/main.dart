@@ -5,6 +5,8 @@ import 'package:flutter_timezone/flutter_timezone.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:timezone/data/latest.dart' as timezone;
 import 'data/database.dart';
+import 'data/storage_reset.dart';
+import 'package:path_provider/path_provider.dart';
 import 'data/app_icon.dart';
 import 'data/activity.dart';
 import 'data/reminders.dart';
@@ -28,16 +30,46 @@ Future<void> main() async {
     await reminders.initialize();
     final appIcons = AppIconService(repo)..start();
     final activity = ApplicationActivity(repo.db)..start();
+    late final ProviderContainer container;
+    var stopped = false;
+    Future<void> clearStorage() async {
+      runApp(_resetScreen());
+      await WidgetsBinding.instance.endOfFrame;
+      try {
+        if (!stopped) {
+          final backups = container.read(localBackupProvider);
+          await Future.wait([
+            sync.shutdown(),
+            backups.stop(),
+            reminders.clearAndStop(),
+            activity.stop(),
+          ]);
+          await repo.close();
+          appIcons.dispose();
+          container.dispose();
+          stopped = true;
+        }
+        await StorageReset.clear(await getApplicationSupportDirectory());
+        await main();
+      } catch (error) {
+        runApp(_resetScreen(error: error, retry: clearStorage));
+      }
+    }
+
+    container = ProviderContainer(
+      overrides: [
+        appProvider.overrideWith((ref) => repo),
+        syncProvider.overrideWithValue(sync),
+        remindersProvider.overrideWithValue(reminders),
+        appIconProvider.overrideWith((ref) => appIcons),
+        activityProvider.overrideWith((ref) => activity),
+        resetStorageProvider.overrideWithValue(clearStorage),
+        invitationLinksProvider.overrideWithValue(AppLinks().uriLinkStream),
+      ],
+    );
     runApp(
-      ProviderScope(
-        overrides: [
-          appProvider.overrideWith((ref) => repo),
-          syncProvider.overrideWithValue(sync),
-          remindersProvider.overrideWithValue(reminders),
-          appIconProvider.overrideWith((ref) => appIcons),
-          activityProvider.overrideWith((ref) => activity),
-          invitationLinksProvider.overrideWithValue(AppLinks().uriLinkStream),
-        ],
+      UncontrolledProviderScope(
+        container: container,
         child: const YggvionApp(),
       ),
     );
@@ -51,7 +83,7 @@ Future<void> main() async {
             child: Padding(
               padding: const EdgeInsets.all(32),
               child: SelectableText(
-                'Не удалось открыть рабочее пространство.\nДанные не удалены.\n\n$error',
+                'Не удалось открыть рабочее пространство.\n\n$error',
               ),
             ),
           ),
@@ -60,3 +92,37 @@ Future<void> main() async {
     );
   }
 }
+
+Widget _resetScreen({Object? error, Future<void> Function()? retry}) =>
+    MaterialApp(
+      theme: appTheme(),
+      home: Scaffold(
+        body: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(32),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (error == null) const CircularProgressIndicator(),
+                const SizedBox(height: 24),
+                Text(
+                  error == null
+                      ? 'Очищаем хранилище…'
+                      : 'Не удалось завершить очистку',
+                  textAlign: TextAlign.center,
+                ),
+                if (error != null) ...[
+                  const SizedBox(height: 12),
+                  SelectableText('$error', textAlign: TextAlign.center),
+                  const SizedBox(height: 24),
+                  FilledButton(
+                    onPressed: retry,
+                    child: const Text('Повторить очистку'),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ),
+      ),
+    );

@@ -90,7 +90,7 @@ class ReminderService {
   final Repository repo;
   final TargetPlatform platform = defaultTargetPlatform;
   final plugin = FlutterLocalNotificationsPlugin();
-  bool initialized = false, _busy = false, _again = false;
+  bool initialized = false, _busy = false, _again = false, _disposed = false;
   String? error;
   String? _signature;
   bool? permissionGranted;
@@ -102,6 +102,7 @@ class ReminderService {
   void Function(String taskId)? onOpenTask;
 
   void _response(NotificationResponse response) {
+    if (_disposed) return;
     final id = response.payload;
     if (id == null || repo.snapshot.task(id) == null) return;
     if (response.actionId == 'snooze') {
@@ -186,6 +187,7 @@ class ReminderService {
   }
 
   void changed() {
+    if (_disposed) return;
     _debounce?.cancel();
     _debounce = Timer(
       const Duration(milliseconds: 100),
@@ -223,12 +225,15 @@ class ReminderService {
   }
 
   Future<void> requestPermissionOnce() async {
-    if (!initialized ||
+    if (_disposed ||
+        !initialized ||
         await repo.db.meta('notification_permission_asked') == 'true') {
       return;
     }
     await requestPermission();
-    await repo.db.setMeta('notification_permission_asked', 'true');
+    if (!_disposed) {
+      await repo.db.setMeta('notification_permission_asked', 'true');
+    }
   }
 
   Future<void> requestPermission() async {
@@ -260,6 +265,7 @@ class ReminderService {
 
   Future<void> testNotification() async {
     await requestPermission();
+    if (_disposed) return;
     if (permissionGranted == false) {
       throw StateError(
         'Разрешите уведомления для Yggvion в настройках устройства',
@@ -317,7 +323,7 @@ class ReminderService {
     ),
   );
   Future<void> refresh() async {
-    if (!initialized) return;
+    if (!initialized || _disposed) return;
     if (_busy) {
       _again = true;
       return;
@@ -377,7 +383,7 @@ class ReminderService {
   }
 
   Future<void> _linuxTick() async {
-    if (_linuxBusy) return;
+    if (_linuxBusy || _disposed) return;
     _linuxBusy = true;
     try {
       final now = repo.now();
@@ -407,7 +413,26 @@ class ReminderService {
     }
   }
 
+  Future<void> clearAndStop() async {
+    dispose();
+    final deadline = DateTime.now().add(const Duration(minutes: 2));
+    while (_busy || _linuxBusy) {
+      if (DateTime.now().isAfter(deadline)) {
+        throw StateError(
+          'Не удалось остановить уведомления. Повторите очистку.',
+        );
+      }
+      await Future<void>.delayed(const Duration(milliseconds: 25));
+    }
+    if (initialized) await plugin.cancelAll();
+    scheduledCount = 0;
+  }
+
   void dispose() {
+    if (_disposed) return;
+    _disposed = true;
+    onOpenTask = null;
+    pendingTaskId = null;
     repo.removeListener(changed);
     _debounce?.cancel();
     _linuxTimer?.cancel();

@@ -3,7 +3,6 @@ import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:timezone/data/latest.dart' as tz;
 import 'package:yggvion/data/database.dart';
@@ -54,7 +53,6 @@ void main() {
     testWidgets('backup schedule and share controls work at $width px', (
       tester,
     ) async {
-      FlutterSecureStorage.setMockInitialValues({});
       tester.view.physicalSize = Size(width, 900);
       tester.view.devicePixelRatio = 1;
       late Repository repo;

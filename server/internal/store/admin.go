@@ -82,18 +82,19 @@ type Attachment struct {
 }
 
 type Snapshot struct {
-	PasswordEnvelope *domain.PasswordEnvelope `json:"password_envelope"`
-	EncryptionKeyID  string                   `json:"encryption_key_id"`
-	Format           int                      `json:"format"`
-	Created          time.Time                `json:"created"`
-	Records          []domain.Record          `json:"records"`
-	Attachments      []Attachment             `json:"attachments"`
+	Cursor          int64                  `json:"cursor"`
+	PasswordConfig  *domain.PasswordConfig `json:"password_config"`
+	EncryptionKeyID string                 `json:"encryption_key_id"`
+	Format          int                    `json:"format"`
+	Created         time.Time              `json:"created"`
+	Records         []domain.Record        `json:"records"`
+	Attachments     []Attachment           `json:"attachments"`
 }
 
 // Export uses a consistent SQLite read transaction, including committed WAL data.
 // Device credentials, invitations and TLS keys are intentionally not exported.
 func (s *Store) Export(ctx context.Context) (Snapshot, error) {
-	out := Snapshot{Format: 2, Created: time.Now().UTC(), Records: []domain.Record{}, Attachments: []Attachment{}}
+	out := Snapshot{Format: 3, Created: time.Now().UTC(), Records: []domain.Record{}, Attachments: []Attachment{}}
 	tx, err := s.DB.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
 	if err != nil {
 		return out, err
@@ -103,8 +104,11 @@ func (s *Store) Export(ctx context.Context) (Snapshot, error) {
 	if err != nil {
 		return out, err
 	}
-	out.PasswordEnvelope, err = passwordEnvelope(ctx, tx)
+	out.PasswordConfig, err = passwordConfig(ctx, tx)
 	if err != nil {
+		return out, err
+	}
+	if err = tx.QueryRowContext(ctx, "SELECT COALESCE(MAX(seq),0) FROM changes").Scan(&out.Cursor); err != nil {
 		return out, err
 	}
 	rows, err := tx.QueryContext(ctx, "SELECT id,kind,version,deleted,data,seq FROM records ORDER BY id")
@@ -126,7 +130,7 @@ func (s *Store) Export(ctx context.Context) (Snapshot, error) {
 	if err != nil {
 		return out, err
 	}
-	rows, err = tx.QueryContext(ctx, "SELECT id,name,size,media_type FROM attachments ORDER BY id")
+	rows, err = tx.QueryContext(ctx, "SELECT a.id,a.name,a.size,a.media_type FROM attachments a JOIN encrypted_uploads e ON e.id=a.id WHERE e.key_id=? ORDER BY a.id", out.EncryptionKeyID)
 	if err != nil {
 		return out, err
 	}
@@ -150,9 +154,9 @@ func (s *Store) Export(ctx context.Context) (Snapshot, error) {
 }
 
 func ValidateSnapshot(v Snapshot) error {
-	if v.Format != 2 || v.Created.IsZero() || v.Created.After(time.Now().Add(time.Minute)) ||
-		!domain.ValidHash(v.EncryptionKeyID) || v.PasswordEnvelope == nil ||
-		v.PasswordEnvelope.Validate() != nil || v.PasswordEnvelope.KeyID != v.EncryptionKeyID {
+	if v.Format != 3 || v.Created.IsZero() || v.Created.After(time.Now().Add(time.Minute)) ||
+		!domain.ValidHash(v.EncryptionKeyID) || v.PasswordConfig == nil ||
+		v.PasswordConfig.Validate() != nil || v.PasswordConfig.KeyID != v.EncryptionKeyID {
 		return ErrInvalid
 	}
 	files := make(map[string]bool, len(v.Attachments))
@@ -195,34 +199,39 @@ func (s *Store) Restore(ctx context.Context, v Snapshot) error {
 		return err
 	}
 	defer tx.Rollback()
-	keyID, err := encryptionKey(ctx, tx)
+	if err = replaceSnapshot(ctx, tx, v, "restore"); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func replaceSnapshot(ctx context.Context, tx *sql.Tx, v Snapshot, reason string) error {
+	var err error
+	if _, err = tx.ExecContext(ctx, "DELETE FROM server_meta WHERE key='password_config'"); err != nil {
+		return err
+	}
+	data, err := json.Marshal(v.PasswordConfig)
 	if err != nil {
 		return err
 	}
-	currentPassword, err := passwordEnvelope(ctx, tx)
-	if err != nil {
+	if _, err = tx.ExecContext(ctx, "INSERT INTO server_meta VALUES('password_config',?)", string(data)); err != nil {
 		return err
 	}
-	if keyID == v.EncryptionKeyID && currentPassword != nil {
-		v.PasswordEnvelope = currentPassword
+	tables := []string{"records", "changes", "operations", "attachments", "encrypted_uploads"}
+	if reason == "restore" {
+		tables = append(tables, "invitations", "calendar_shares", "guest_inbox")
 	}
-	if _, err = tx.ExecContext(ctx, "DELETE FROM server_meta WHERE key='password_envelope'"); err != nil {
-		return err
-	}
-	data, err := json.Marshal(v.PasswordEnvelope)
-	if err != nil {
-		return err
-	}
-	if _, err = tx.ExecContext(ctx, "INSERT INTO server_meta VALUES('password_envelope',?)", string(data)); err != nil {
-		return err
-	}
-	for _, table := range []string{"records", "changes", "operations", "attachments", "invitations", "calendar_shares", "guest_inbox", "encrypted_uploads"} {
+	for _, table := range tables {
 		if _, err = tx.ExecContext(ctx, "DELETE FROM "+table); err != nil {
 			return err
 		}
 	}
 	for _, r := range v.Records {
-		r.Version = 0
+		if reason == "restore" {
+			r.Version = 0
+		} else {
+			r.Version--
+		}
 		if _, err = save(ctx, tx, r); err != nil {
 			return err
 		}
@@ -240,17 +249,24 @@ func (s *Store) Restore(ctx context.Context, v Snapshot) error {
 			return err
 		}
 	}
-	if _, err = tx.ExecContext(ctx, "INSERT OR REPLACE INTO server_meta SELECT 'snapshot_cursor', CAST(COALESCE(MAX(seq),0) AS TEXT) FROM changes"); err != nil {
+	if _, err = tx.ExecContext(ctx, "INSERT OR REPLACE INTO server_meta VALUES('generation_reason',?)", reason); err != nil {
 		return err
 	}
-	if _, err = tx.ExecContext(ctx, "INSERT OR REPLACE INTO server_meta VALUES('generation_reason','restore')"); err != nil {
-		return err
-	}
-	if _, err = tx.ExecContext(ctx, "INSERT OR REPLACE INTO server_meta VALUES('snapshot_created',?)", v.Created.Format(time.RFC3339Nano)); err != nil {
-		return err
+	if reason == "restore" {
+		if _, err = tx.ExecContext(ctx, "INSERT OR REPLACE INTO server_meta SELECT 'snapshot_cursor', CAST(COALESCE(MAX(seq),0) AS TEXT) FROM changes"); err != nil {
+			return err
+		}
+		if _, err = tx.ExecContext(ctx, "INSERT OR REPLACE INTO server_meta VALUES('snapshot_created',?)", v.Created.Format(time.RFC3339Nano)); err != nil {
+			return err
+		}
+	} else {
+		if _, err = tx.ExecContext(ctx, "DELETE FROM server_meta WHERE key IN ('snapshot_created','snapshot_cursor')"); err != nil {
+			return err
+		}
 	}
 	if _, err = tx.ExecContext(ctx, "UPDATE server_meta SET value=? WHERE key='generation'", RandomSecret()); err != nil {
 		return err
 	}
-	return tx.Commit()
+
+	return nil
 }

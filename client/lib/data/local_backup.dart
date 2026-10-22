@@ -12,6 +12,7 @@ import 'package:timezone/timezone.dart' as tz;
 import '../domain/models.dart';
 import 'repository.dart';
 import 'encryption.dart';
+import 'local_credentials.dart';
 
 const _maximumSnapshot = 512 * 1024 * 1024;
 const _maximumArchive = 100 * 1024 * 1024 * 1024;
@@ -35,7 +36,7 @@ class LocalBackupEntry {
 }
 
 /// Local, portable snapshots. No network credentials or device paths are exported.
-/// Portable archives include a password wrapping of their encryption key.
+/// Archives include public KDF parameters, never passwords or secret keys.
 class LocalBackupService extends ChangeNotifier {
   LocalBackupService(this.repo, {this.directory, this.beforeRestore});
 
@@ -139,6 +140,19 @@ class LocalBackupService extends ChangeNotifier {
     }
   }
 
+  Future<void> stop() async {
+    _disposed = true;
+    final deadline = DateTime.now().add(const Duration(minutes: 2));
+    while (busy || _checking) {
+      if (DateTime.now().isAfter(deadline)) {
+        throw StateError(
+          'Дождитесь завершения резервного копирования и повторите очистку.',
+        );
+      }
+      await Future<void>.delayed(const Duration(milliseconds: 25));
+    }
+  }
+
   @override
   void dispose() {
     _disposed = true;
@@ -219,7 +233,7 @@ class LocalBackupService extends ChangeNotifier {
   Future<LocalBackupEntry> _create({
     bool automatic = false,
     WorkspaceKey? recoveryKey,
-    PasswordEnvelope? recoveryEnvelope,
+    PasswordConfig? recoveryConfig,
   }) async {
     final root = await folder();
     final data = await _snapshot();
@@ -229,19 +243,20 @@ class LocalBackupService extends ChangeNotifier {
     );
     final protection = await repo.serial(() async {
       final id = await repo.db.meta('workspace_key_id');
-      final key = id == null ? null : await WorkspaceKey.load(id);
-      final envelope = id == null
+      final config = id == null
           ? null
-          : PasswordEnvelope.fromEncoded(
-              await repo.db.meta(PasswordEnvelope.storageKey(id)),
+          : PasswordConfig.fromEncoded(
+              await repo.db.meta(PasswordConfig.storageKey(id)),
             );
-      if (key != null && envelope != null) {
-        envelope.verify(key);
-        return (key: key, envelope: envelope);
+      final password = id == null
+          ? null
+          : await LocalCredentials(repo.db).read(key: 'password_$id');
+      if (config != null && password != null) {
+        return (key: await config.unlock(password), config: config);
       }
-      if (recoveryKey != null && recoveryEnvelope != null) {
-        recoveryEnvelope.verify(recoveryKey);
-        return (key: recoveryKey, envelope: recoveryEnvelope);
+      if (recoveryKey != null && recoveryConfig != null) {
+        recoveryConfig.verify(recoveryKey);
+        return (key: recoveryKey, config: recoveryConfig);
       }
       throw StateError('Сначала создайте пароль шифрования в настройках');
     });
@@ -253,7 +268,7 @@ class LocalBackupService extends ChangeNotifier {
         File(plain),
         File('$target.part'),
         'backup',
-        prefix: protection.envelope.archiveHeader,
+        prefix: protection.config.archiveHeader,
       );
       await File('$target.part').rename(target);
     } finally {
@@ -278,13 +293,14 @@ class LocalBackupService extends ChangeNotifier {
       stage = await root.createTemp('.restore-');
       final stagePath = stage.path;
       // Validation completes before any live database or connection is changed.
-      final wrapped = await PasswordEnvelope.readArchive(File(source));
-      var restoredPassword = wrapped.envelope;
-      final restoredKey = password == null
-          ? await WorkspaceKey.load(restoredPassword.keyId)
-          : await restoredPassword.unlock(password);
-      if (restoredKey == null) throw const PasswordRequired();
-      restoredPassword.verify(restoredKey);
+      final wrapped = await PasswordConfig.readArchive(File(source));
+      final restoredConfig = wrapped.config;
+      final credentials = LocalCredentials(repo.db);
+      final restoredPassword =
+          password ??
+          await credentials.read(key: 'password_${restoredConfig.keyId}');
+      if (restoredPassword == null) throw const PasswordRequired();
+      final restoredKey = await restoredConfig.unlock(restoredPassword);
       final archive = p.join(stagePath, 'snapshot.zip');
       await restoredKey.decryptFile(
         File(source),
@@ -296,21 +312,25 @@ class LocalBackupService extends ChangeNotifier {
       final data = await _readInBackground(archive, stagePath);
       // An old archive keeps its own password, but must not roll back the
       // password used for new backups or synchronization on this device.
-      final current = PasswordEnvelope.fromEncoded(
-        await repo.db.meta(PasswordEnvelope.storageKey(restoredKey.id)),
-      );
-      if (current != null) {
-        current.verify(restoredKey);
-        if (current.revision > restoredPassword.revision) {
-          restoredPassword = current;
-        }
+      final activeId = await repo.db.meta('workspace_key_id');
+      final current = activeId == null
+          ? null
+          : PasswordConfig.fromEncoded(
+              await repo.db.meta(PasswordConfig.storageKey(activeId)),
+            );
+      final currentPassword = activeId == null
+          ? null
+          : await credentials.read(key: 'password_$activeId');
+      if (current != null && currentPassword != null) {
+        await current.unlock(currentPassword);
       }
-      await _create(
-        recoveryKey: restoredKey,
-        recoveryEnvelope: restoredPassword,
-      );
-      // Store only after full authentication and snapshot validation.
-      await restoredKey.save();
+      final activeConfig = currentPassword != null && current != null
+          ? current
+          : restoredConfig;
+      final activePassword = currentPassword != null && current != null
+          ? currentPassword
+          : restoredPassword;
+      await _create(recoveryKey: restoredKey, recoveryConfig: restoredConfig);
       if (beforeRestore != null) await beforeRestore!();
       final attachmentRoot = Directory(p.join(root.parent.path, 'attachments'));
       await attachmentRoot.create(recursive: true);
@@ -399,10 +419,14 @@ class LocalBackupService extends ChangeNotifier {
             );
           }
           await repo.db.setMeta('ordinal', '$ordinal');
-          await repo.db.setMeta('workspace_key_id', restoredKey.id);
+          await repo.db.setMeta('workspace_key_id', activeConfig.keyId);
+          await credentials.write(
+            key: 'password_${activeConfig.keyId}',
+            value: activePassword,
+          );
           await repo.db.setMeta(
-            PasswordEnvelope.storageKey(restoredKey.id),
-            restoredPassword.encoded,
+            PasswordConfig.storageKey(activeConfig.keyId),
+            activeConfig.encoded,
           );
         });
         await repo.reload();

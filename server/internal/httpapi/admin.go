@@ -53,12 +53,12 @@ func (a *API) state(w http.ResponseWriter, r *http.Request) {
 		fail(w, 500, "storage_error")
 		return
 	}
-	password, err := a.Store.PasswordEnvelope(r.Context())
+	password, err := a.Store.PasswordConfig(r.Context())
 	if err != nil {
 		fail(w, 500, "storage_error")
 		return
 	}
-	write(w, 200, map[string]any{"password_envelope": password, "e2ee": true, "encryption_key_id": keyID, "generation_reason": reason, "snapshot_created": created, "snapshot_cursor": snapshotCursor, "generation": generation, "protocol": 5, "server_schema": store.SchemaVersion, "private_ca": a.CAPEM, "backups": a.Backups != nil})
+	write(w, 200, map[string]any{"password_config": password, "e2ee": true, "encryption_key_id": keyID, "generation_reason": reason, "snapshot_created": created, "snapshot_cursor": snapshotCursor, "generation": generation, "protocol": 6, "server_schema": store.SchemaVersion, "private_ca": a.CAPEM, "backups": a.Backups != nil})
 }
 func (a *API) invite(w http.ResponseWriter, r *http.Request) {
 	var input struct{}
@@ -111,9 +111,6 @@ func (a *API) backupRoutes(mux *http.ServeMux) {
 		}
 		write(w, 200, c)
 	})
-	register("GET /api/v1/backups/recovery-key", func(w http.ResponseWriter, r *http.Request) {
-		write(w, 200, map[string]string{"key": a.Backups.RecoveryKey()})
-	})
 	register("PUT /api/v1/backups/remote", func(w http.ResponseWriter, r *http.Request) {
 		var c backup.RemoteConfig
 		if decode(w, r, &c) != nil {
@@ -139,15 +136,8 @@ func (a *API) backupRoutes(mux *http.ServeMux) {
 		write(w, 200, map[string]any{"backups": entries})
 	})
 	register("POST /api/v1/backups/remote/{id}/fetch", func(w http.ResponseWriter, r *http.Request) {
-		var input struct {
-			Key string `json:"key"`
-		}
-		if decode(w, r, &input) != nil {
-			fail(w, 400, "invalid_json")
-			return
-		}
 		id := r.PathValue("id")
-		err := a.Backups.Start(a.Lifetime, "fetch_remote", func(ctx context.Context) error { return a.Backups.FetchRemote(ctx, id, input.Key) })
+		err := a.Backups.Start(a.Lifetime, "fetch_remote", func(ctx context.Context) error { return a.Backups.FetchRemote(ctx, id) })
 		a.acceptJob(w, err)
 	})
 	register("POST /api/v1/backups", func(w http.ResponseWriter, r *http.Request) {
@@ -188,7 +178,7 @@ func (a *API) backupRoutes(mux *http.ServeMux) {
 			return
 		}
 		err = a.Backups.Start(a.Lifetime, "restore", func(ctx context.Context) error {
-			err := a.Backups.Restore(ctx, path, "")
+			err := a.Backups.Restore(ctx, path)
 			if err == nil {
 				a.broadcast()
 			}
@@ -201,7 +191,7 @@ func (a *API) backupRoutes(mux *http.ServeMux) {
 			fail(w, 409, "backup_busy")
 			return
 		}
-		// Body is an encrypted archive, never multipart paths or executable SQL.
+		// Body is an archive of E2EE records, never multipart paths or executable SQL.
 		if err := http.NewResponseController(w).SetReadDeadline(time.Now().Add(2 * time.Hour)); err != nil && !errors.Is(err, http.ErrNotSupported) {
 			fail(w, 500, "backup_error")
 			return
@@ -228,10 +218,9 @@ func (a *API) backupRoutes(mux *http.ServeMux) {
 			fail(w, 500, "backup_error")
 			return
 		}
-		key := r.Header.Get("X-Yggvion-Recovery-Key")
 		err = a.Backups.Start(a.Lifetime, "import", func(ctx context.Context) error {
 			defer os.Remove(name)
-			_, err := a.Backups.Import(ctx, name, key)
+			_, err := a.Backups.Import(ctx, name)
 			return err
 		})
 		keep = err == nil

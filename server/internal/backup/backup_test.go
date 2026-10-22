@@ -16,20 +16,14 @@ import (
 	"sync"
 	"testing"
 
-	"filippo.io/age"
 	"yggvion/server/internal/domain"
 	"yggvion/server/internal/store"
 )
 
 const backupTestKey = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 
-func passwordFixture() domain.PasswordEnvelope {
-	return domain.PasswordEnvelope{Version: 1, KeyID: backupTestKey, Revision: 1,
-		KDF: "argon2id", Memory: 19456, Iterations: 2, Parallelism: 1,
-		Salt:  base64.StdEncoding.EncodeToString(make([]byte, 16)),
-		Nonce: base64.StdEncoding.EncodeToString(make([]byte, 12)),
-		Box:   base64.StdEncoding.EncodeToString(make([]byte, 48)),
-		MAC:   base64.StdEncoding.EncodeToString(make([]byte, 32))}
+func passwordFixture() domain.PasswordConfig {
+	return domain.PasswordConfig{Version: 2, KeyID: backupTestKey, KDF: "argon2id", Memory: 19456, Iterations: 2, Parallelism: 1, Salt: base64.StdEncoding.EncodeToString(make([]byte, 16))}
 }
 func backupRecord(content string, files []string) json.RawMessage {
 	box := sha256.Sum256([]byte(content))
@@ -74,6 +68,9 @@ func TestPasswordBackupRestoresIntoFreshServer(t *testing.T) {
 		t.Fatal(err)
 	}
 	path, _ := source.Path(entry.ID)
+	if _, err = os.Stat(filepath.Join(source.Dir, "recovery.key")); !os.IsNotExist(err) {
+		t.Fatal("server must not create an archive key", err)
+	}
 	dir := t.TempDir()
 	target, err := store.Open(filepath.Join(dir, "db"))
 	if err != nil {
@@ -88,15 +85,28 @@ func TestPasswordBackupRestoresIntoFreshServer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = manager.Restore(ctx, path, source.RecoveryKey()); err != nil {
+	if err = manager.Restore(ctx, path); err != nil {
 		t.Fatal(err)
 	}
 	snapshot, err := target.Export(ctx)
-	if err != nil || snapshot.Format != 2 || snapshot.PasswordEnvelope == nil || snapshot.PasswordEnvelope.KeyID != backupTestKey || len(snapshot.Records) != 1 {
+	if err != nil || snapshot.Format != 3 || snapshot.PasswordConfig == nil || snapshot.PasswordConfig.KeyID != backupTestKey || len(snapshot.Records) != 1 {
 		t.Fatal(snapshot, err)
 	}
 	if id, err := target.Authorize(ctx, token); err != nil || id != owner {
 		t.Fatal("restore replaced device credentials", err)
+	}
+}
+
+func writeTestSnapshot(t *testing.T, writer *tar.Writer, data []byte) {
+	t.Helper()
+	ctx := context.Background()
+	if err := add(ctx, writer, "snapshot.json", int64(len(data)), bytes.NewReader(data)); err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256(data)
+	checksum := hex.EncodeToString(sum[:])
+	if err := add(ctx, writer, "snapshot.sha256", int64(len(checksum)), strings.NewReader(checksum)); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -105,20 +115,14 @@ func TestRejectsCompressedPaddingAndAdditionalGzipMembers(t *testing.T) {
 	for _, extraMember := range []bool{false, true} {
 		t.Run(fmt.Sprint(extraMember), func(t *testing.T) {
 			var out bytes.Buffer
-			encrypted, err := age.Encrypt(&out, m.identity.Recipient())
-			if err != nil {
-				t.Fatal(err)
-			}
-			gz := gzip.NewWriter(encrypted)
+			gz := gzip.NewWriter(&out)
 			tarWriter := tar.NewWriter(gz)
 			valid, err := m.Store.Export(context.Background())
 			if err != nil {
 				t.Fatal(err)
 			}
 			snapshot, _ := json.Marshal(valid)
-			if err = add(context.Background(), tarWriter, "snapshot.json", int64(len(snapshot)), bytes.NewReader(snapshot)); err != nil {
-				t.Fatal(err)
-			}
+			writeTestSnapshot(t, tarWriter, snapshot)
 			if err = tarWriter.Close(); err != nil {
 				t.Fatal(err)
 			}
@@ -126,7 +130,7 @@ func TestRejectsCompressedPaddingAndAdditionalGzipMembers(t *testing.T) {
 				if err = gz.Close(); err != nil {
 					t.Fatal(err)
 				}
-				gz = gzip.NewWriter(encrypted)
+				gz = gzip.NewWriter(&out)
 			}
 			if _, err = gz.Write(bytes.Repeat([]byte{0}, 1<<20)); err != nil {
 				t.Fatal(err)
@@ -134,14 +138,11 @@ func TestRejectsCompressedPaddingAndAdditionalGzipMembers(t *testing.T) {
 			if err = gz.Close(); err != nil {
 				t.Fatal(err)
 			}
-			if err = encrypted.Close(); err != nil {
-				t.Fatal(err)
-			}
 			path := filepath.Join(t.TempDir(), "padding.yggbackup")
 			if err = os.WriteFile(path, out.Bytes(), 0600); err != nil {
 				t.Fatal(err)
 			}
-			if err = m.Restore(context.Background(), path, ""); err == nil {
+			if err = m.Restore(context.Background(), path); err == nil {
 				t.Fatal("unexpected compressed content accepted")
 			}
 		})
@@ -169,6 +170,9 @@ func TestCreateRejectsArchivesThatExceedRestoreBudget(t *testing.T) {
 	}
 	defer tx.Rollback()
 	for i := range 342 {
+		if _, err = tx.Exec("INSERT INTO encrypted_uploads VALUES(?,?)", fmt.Sprintf("%064x", i), backupTestKey); err != nil {
+			t.Fatal(err)
+		}
 		if _, err = tx.Exec("INSERT INTO attachments VALUES(?,?,?,?)", fmt.Sprintf("%064x", i), "encrypted", 300<<20, "application/octet-stream"); err != nil {
 			t.Fatal(err)
 		}
@@ -223,7 +227,7 @@ func TestEncryptedRoundTripKeepsAuthRotatesGenerationAndPreservesFiles(t *testin
 		t.Fatal("plaintext in backup")
 	}
 	applyNote(t, m, device, "changed", 1)
-	if err = m.Restore(ctx, path, ""); err != nil {
+	if err = m.Restore(ctx, path); err != nil {
 		t.Fatal(err)
 	}
 	if got, err := m.Store.Authorize(ctx, token); err != nil || got != device {
@@ -248,12 +252,16 @@ func TestEncryptedRoundTripKeepsAuthRotatesGenerationAndPreservesFiles(t *testin
 		t.Fatal("safety backup missing", err)
 	}
 	second, _, _ := fixture(t)
-	imported, err := second.Import(ctx, path, m.RecoveryKey())
+	imported, err := second.Import(ctx, path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	importPath, _ := second.Path(imported.ID)
-	if err = second.Restore(ctx, importPath, ""); err != nil {
+	copied, err := os.ReadFile(importPath)
+	if err != nil || !bytes.Equal(copied, encrypted) {
+		t.Fatal("import must preserve the portable archive unchanged", err)
+	}
+	if err = second.Restore(ctx, importPath); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = second.Store.Authorize(ctx, token); err == nil {
@@ -276,37 +284,29 @@ func TestRejectsIncompleteCorruptAndHostileArchives(t *testing.T) {
 		t.Fatal(err)
 	}
 	path, _ := m.Path(entry.ID)
-	wrong, _ := age.GenerateX25519Identity()
-	if _, _, err = m.stage(ctx, path, wrong.String()); err == nil {
-		t.Fatal("wrong key accepted")
-	}
 	bytesOnDisk, _ := os.ReadFile(path)
 	bytesOnDisk[len(bytesOnDisk)-1] ^= 1
 	bad := filepath.Join(m.Dir, "corrupt")
 	os.WriteFile(bad, bytesOnDisk, 0600)
-	if err = m.Restore(ctx, bad, ""); err == nil {
+	if err = m.Restore(ctx, bad); err == nil {
 		t.Fatal("tampered archive accepted")
 	}
-	var encrypted bytes.Buffer
-	w, _ := age.Encrypt(&encrypted, m.identity.Recipient())
-	gz := gzip.NewWriter(w)
+	var archive bytes.Buffer
+	gz := gzip.NewWriter(&archive)
 	tw := tar.NewWriter(gz)
 	valid, err := m.Store.Export(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
 	snapshot, _ := json.Marshal(valid)
-	if err = add(ctx, tw, "snapshot.json", int64(len(snapshot)), bytes.NewReader(snapshot)); err != nil {
-		t.Fatal(err)
-	}
+	writeTestSnapshot(t, tw, snapshot)
 	if err = add(ctx, tw, "../../escape", 4, bytes.NewBufferString("evil")); err != nil {
 		t.Fatal(err)
 	}
 	tw.Close()
 	gz.Close()
-	w.Close()
-	os.WriteFile(bad, encrypted.Bytes(), 0600)
-	if err = m.Restore(ctx, bad, ""); err == nil {
+	os.WriteFile(bad, archive.Bytes(), 0600)
+	if err = m.Restore(ctx, bad); err == nil {
 		t.Fatal("path traversal accepted")
 	}
 	if _, err = os.Stat(filepath.Join(m.Dir, "..", "escape")); !os.IsNotExist(err) {

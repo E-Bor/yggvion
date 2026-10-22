@@ -4,56 +4,11 @@ import 'package:dio/dio.dart';
 import 'package:drift/drift.dart' show driftRuntimeOptions;
 import 'package:drift/native.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:timezone/data/latest.dart' as tz;
 import 'package:yggvion/data/database.dart';
 import 'package:yggvion/data/repository.dart';
 import 'package:yggvion/data/sync.dart';
-
-class DeviceKeyStore extends FlutterSecureStorage {
-  final values = <String, String>{};
-  @override
-  Future<String?> read({
-    required String key,
-    IOSOptions? iOptions,
-    AndroidOptions? aOptions,
-    LinuxOptions? lOptions,
-    WebOptions? webOptions,
-    MacOsOptions? mOptions,
-    WindowsOptions? wOptions,
-  }) async => values[key];
-  @override
-  Future<void> write({
-    required String key,
-    required String? value,
-    IOSOptions? iOptions,
-    AndroidOptions? aOptions,
-    LinuxOptions? lOptions,
-    WebOptions? webOptions,
-    MacOsOptions? mOptions,
-    WindowsOptions? wOptions,
-  }) async {
-    if (value == null) {
-      values.remove(key);
-    } else {
-      values[key] = value;
-    }
-  }
-
-  @override
-  Future<void> delete({
-    required String key,
-    IOSOptions? iOptions,
-    AndroidOptions? aOptions,
-    LinuxOptions? lOptions,
-    WebOptions? webOptions,
-    MacOsOptions? mOptions,
-    WindowsOptions? wOptions,
-  }) async {
-    values.remove(key);
-  }
-}
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -85,9 +40,9 @@ void main() {
       final base = 'http://127.0.0.1:$port', probe = Dio();
       final a = Repository(LocalDatabase(NativeDatabase.memory())),
           b = Repository(LocalDatabase(NativeDatabase.memory()));
-      final keysA = DeviceKeyStore(), keysB = DeviceKeyStore();
-      final sa = SyncService(a, secureStorage: keysA, realtime: false),
-          sb = SyncService(b, secureStorage: keysB, realtime: false);
+
+      final sa = SyncService(a, realtime: false),
+          sb = SyncService(b, realtime: false);
       var devicePath = '${dir.path}/a';
       const pathChannel = MethodChannel('plugins.flutter.io/path_provider');
       TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
@@ -119,16 +74,12 @@ void main() {
       }
       await a.initialize();
       await b.initialize();
-      final concurrentKeys = await Future.wait(
-        List.generate(10, (_) => sa.prepareWorkspaceKey()),
-      );
-      expect(concurrentKeys.map((k) => k.id).toSet(), hasLength(1));
-      expect(
-        keysA.values.keys.where((k) => k.startsWith('workspace_key_')),
-        hasLength(1),
-      );
       const password = 'Private integration password 42';
       await sa.setEncryptionPassword(password);
+      expect(
+        await sa.credentials.read(key: 'password_${sa.encryptionKeyId}'),
+        password,
+      );
       await sa.pair(base, bootstrap, 'Mac');
       expect(a.syncError, isNull);
       a.onChange = null;
@@ -168,10 +119,6 @@ void main() {
       expect(b.syncError, contains('Введите пароль'));
       expect(await b.db.customSelect('SELECT * FROM outbox').get(), isNotEmpty);
       final invite = await sa.createInvitation();
-      expect(
-        invite,
-        isNot(contains((await sa.prepareWorkspaceKey()).recovery)),
-      );
       final invitation =
           jsonDecode(utf8.decode(base64Url.decode(Uri.parse(invite).fragment)))
               as Map;
@@ -194,8 +141,8 @@ void main() {
         'PRIVATE_FILE_CONTENT',
       );
       expect(
-        keysB.values.keys.where((s) => s.startsWith('workspace_key_')),
-        hasLength(1),
+        await sb.credentials.read(key: 'password_${sb.encryptionKeyId}'),
+        password,
       );
       await expectLater(
         sb.pairInvitation(invite, 'replay'),
@@ -203,7 +150,7 @@ void main() {
       );
       // Lose one successful mutation response. The retry must reuse the exact
       // ciphertext so the server's operation fingerprint remains idempotent.
-      await b.saveNoteContent(note.id, 'OFFLINE_EDIT');
+      await b.saveNoteContent(note.id, 'OFFLINE_EDIT\n$link');
       var dropped = false;
       final interceptor = InterceptorsWrapper(
         onResponse: (response, handler) {
@@ -228,16 +175,25 @@ void main() {
       expect(b.syncError, isNull);
       await sa.sync();
       expect(a.syncError, isNull);
-      expect(a.snapshot.note(note.id)!.content, 'OFFLINE_EDIT');
-      // A lost response during rotation is retried without rolling back or
-      // changing the workspace key or existing encrypted records.
+      expect(a.snapshot.note(note.id)!.content, 'OFFLINE_EDIT\n$link');
+      // A lost rotation response is recovered from remembered credentials.
+      // Another device retains edits made offline and uses the new password.
       const nextPassword = 'Changed private password 43';
+      final timerTask = await a.createTask('Timer during password change');
+      await a.toggleCalendarTimer(timerTask);
+      final runningSessionId = a.snapshot.sessions.single.id;
+      await sa.sync();
+      await sb.sync();
+      final offlineNote = await a.createNote();
+      await a.saveNote(offlineNote.id, 'Offline during rekey', 'Unsynced text');
       final beforeRotation = await sa.request('GET', '/api/v1/changes');
       var lostRotation = false;
       final rotationObserver = InterceptorsWrapper(
         onRequest: (options, handler) {
-          expect(jsonEncode(options.data), isNot(contains(nextPassword)));
-          expect(jsonEncode(options.data), isNot(contains(password)));
+          if (options.data is Map) {
+            expect(jsonEncode(options.data), isNot(contains(nextPassword)));
+            expect(jsonEncode(options.data), isNot(contains(password)));
+          }
           handler.next(options);
         },
         onResponse: (response, handler) {
@@ -258,20 +214,39 @@ void main() {
       sb.client.interceptors.add(rotationObserver);
       await expectLater(
         sb.setEncryptionPassword(nextPassword, currentPassword: password),
-        throwsA(isA<DioException>()),
+        throwsA(
+          isA<DioException>().having(
+            (e) =>
+                '${e.requestOptions.path}: ${e.response?.statusCode} ${e.response?.data}',
+            'lost response on password endpoint',
+            endsWith('/encryption/password: null null'),
+          ),
+        ),
       );
       expect(lostRotation, isTrue);
       sb.client.interceptors.remove(rotationObserver);
       await sb.sync();
-      await sa.sync();
-      expect(a.syncError, isNull);
       expect(b.syncError, isNull);
-      final state = await sa.request('GET', '/api/v1/state');
-      expect((state['password_envelope'] as Map)['revision'], 2);
+      await sa.sync();
+      expect(a.syncError, contains('Введите пароль'));
+      expect(a.snapshot.note(offlineNote.id)!.content, 'Unsynced text');
+      final state = await sb.request('GET', '/api/v1/state');
+      expect((state['password_config'] as Map)['v'], 2);
       expect(
-        jsonEncode(await sa.request('GET', '/api/v1/changes')),
-        jsonEncode(beforeRotation),
+        jsonEncode(await sb.request('GET', '/api/v1/changes')),
+        isNot(jsonEncode(beforeRotation)),
       );
+      await expectLater(sa.unlockWithPassword(password), throwsFormatException);
+      await sa.unlockWithPassword(nextPassword);
+      expect(a.syncError, isNull);
+      expect(a.snapshot.note(offlineNote.id)!.content, 'Unsynced text');
+      expect(await a.db.customSelect('SELECT * FROM conflicts').get(), isEmpty);
+      await sb.sync();
+      expect(b.snapshot.note(offlineNote.id)!.content, 'Unsynced text');
+      for (final repository in [a, b]) {
+        expect(repository.snapshot.sessions.single.id, runningSessionId);
+        expect(repository.snapshot.sessions.single.running, isTrue);
+      }
       await expectLater(
         sa.setEncryptionPassword(
           'Another password for testing',
@@ -281,11 +256,7 @@ void main() {
       );
 
       final c = Repository(LocalDatabase(NativeDatabase.memory()));
-      final sc = SyncService(
-        c,
-        secureStorage: DeviceKeyStore(),
-        realtime: false,
-      );
+      final sc = SyncService(c, realtime: false);
       try {
         await c.initialize();
         await sc.pairInvitation(await sa.createInvitation(), 'Fresh device');
@@ -296,7 +267,13 @@ void main() {
         );
         await sc.unlockWithPassword(nextPassword);
         expect(c.syncError, isNull);
-        expect(c.snapshot.note(note.id)!.content, 'OFFLINE_EDIT');
+        expect(c.snapshot.note(note.id)!.content, 'OFFLINE_EDIT\n$link');
+        final downloaded = await c.db.customSelect('SELECT * FROM files').get();
+        expect(
+          await File(downloaded.single.read<String>('path')).readAsString(),
+          'PRIVATE_FILE_CONTENT',
+        );
+        expect(c.snapshot.sessions.single.running, isTrue);
       } finally {
         sc.dispose();
         c.onChange = null;
@@ -352,7 +329,7 @@ void main() {
       )).data!;
       expect(jsonEncode(publicView), isNot(contains('PRIVATE_')));
       expect(jsonEncode(publicView), isNot(contains(privateTask.id)));
-      expect(publicView['busy'], hasLength(1));
+      expect(publicView['busy'], hasLength(2));
       final proposedStart = end.add(const Duration(hours: 1));
       final proposedEnd = proposedStart.add(const Duration(minutes: 30));
       await probe.post<Object?>(
@@ -397,7 +374,7 @@ void main() {
           '$base/public/calendar',
           options: guestAuth,
         )).data!['busy'],
-        hasLength(2),
+        hasLength(3),
       );
       await sb.sync();
       expect(b.syncError, isNull);
@@ -414,7 +391,7 @@ void main() {
       );
       sa.client.interceptors.add(downgrade);
       await sa.sync();
-      expect(a.syncError, contains('потерял состояние E2EE'));
+      expect(a.syncError, contains('потерял настройки шифрования'));
       sa.client.interceptors.remove(downgrade);
     },
     skip: binary == null ? 'Set YGGVION_TEST_SERVER for real E2EE sync' : false,

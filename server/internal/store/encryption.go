@@ -28,7 +28,7 @@ func (s *Store) EncryptionKey(ctx context.Context) (string, error) {
 }
 
 // EnableEncryption initializes an empty workspace before its first upload.
-func (s *Store) EnableEncryption(ctx context.Context, keyID string, envelope domain.PasswordEnvelope) error {
+func (s *Store) EnableEncryption(ctx context.Context, keyID string, envelope domain.PasswordConfig) error {
 	if !domain.ValidHash(keyID) || envelope.Validate() != nil || envelope.KeyID != keyID {
 		return ErrInvalid
 	}
@@ -44,7 +44,7 @@ func (s *Store) EnableEncryption(ctx context.Context, keyID string, envelope dom
 		return err
 	}
 	if current != "" {
-		password, err := passwordEnvelope(ctx, tx)
+		password, err := passwordConfig(ctx, tx)
 		if err != nil {
 			return err
 		}
@@ -67,7 +67,7 @@ func (s *Store) EnableEncryption(ctx context.Context, keyID string, envelope dom
 	if err != nil {
 		return err
 	}
-	if _, err = tx.ExecContext(ctx, "INSERT INTO server_meta VALUES('password_envelope',?)", string(data)); err != nil {
+	if _, err = tx.ExecContext(ctx, "INSERT INTO server_meta VALUES('password_config',?)", string(data)); err != nil {
 		return err
 	}
 	return tx.Commit()

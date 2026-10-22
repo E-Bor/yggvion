@@ -4,7 +4,6 @@
 
 list(APPEND FLUTTER_PLUGIN_LIST
   app_links
-  flutter_secure_storage_windows
   flutter_timezone
   irondash_engine_context
   share_plus

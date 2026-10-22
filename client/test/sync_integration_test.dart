@@ -2,7 +2,6 @@ import 'dart:io';
 import 'package:dio/dio.dart';
 import 'package:drift/drift.dart' show driftRuntimeOptions;
 import 'package:drift/native.dart';
-import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:timezone/data/latest.dart' as tz;
 import 'package:yggvion/data/database.dart';
@@ -21,7 +20,7 @@ void main() {
     'two actual offline clients synchronize through Go and preserve note conflicts',
     () async {
       tz.initializeTimeZones();
-      FlutterSecureStorage.setMockInitialValues({});
+
       driftRuntimeOptions.dontWarnAboutMultipleDatabases = true;
       final directory = await Directory.systemTemp.createTemp('yggvion-sync-');
       final socket = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
@@ -75,6 +74,7 @@ void main() {
       await sa.setEncryptionPassword('Integration password 42');
       await sa.pair(base, pairingKey, 'Desktop');
       await sb.pair(base, pairingKey, 'Phone');
+      await sb.unlockWithPassword('Integration password 42');
       await Future<void>.delayed(const Duration(milliseconds: 100));
       expect(a.syncError, isNull);
       expect(b.syncError, isNull);

@@ -3,7 +3,6 @@ import 'dart:io';
 import 'package:dio/dio.dart';
 import 'package:drift/drift.dart' show driftRuntimeOptions;
 import 'package:drift/native.dart';
-import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:timezone/data/latest.dart' as tz;
 import 'package:yggvion/data/database.dart';
@@ -18,7 +17,7 @@ void main() {
     'private TLS, single-use invitation, backup restore and stale offline queue recovery',
     () async {
       tz.initializeTimeZones();
-      FlutterSecureStorage.setMockInitialValues({});
+
       driftRuntimeOptions.dontWarnAboutMultipleDatabases = true;
       final dir = await Directory.systemTemp.createTemp('yggvion-admin-');
       final socket = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
@@ -96,7 +95,7 @@ void main() {
         privateCA: identity['private_ca'] as String,
       );
       expect(a.syncError, isNull);
-      // The empty workspace backup already carries its password envelope.
+      // The empty workspace backup already carries its password parameters.
       final emptyBackup = await Process.run(
         binary,
         ['backup'],
@@ -105,6 +104,7 @@ void main() {
       expect(emptyBackup.exitCode, 0, reason: '${emptyBackup.stderr}');
       final invite = await sa.createInvitation();
       await sb.pairInvitation(invite, 'iPhone');
+      await sb.unlockWithPassword('Integration password 42');
       expect(b.syncError, isNull);
       await expectLater(
         sb.pairInvitation(invite, 'replay'),
@@ -131,6 +131,36 @@ void main() {
       final backups = await waitJob();
       final entries = (backups['backups'] as List).cast<Map>();
       final id = entries.singleWhere((e) => e['reason'] == 'manual')['id'];
+      final download = await sa.client.get<List<int>>(
+        '$url/api/v1/backups/$id/download',
+        options: Options(
+          headers: sa.authHeaders,
+          responseType: ResponseType.bytes,
+        ),
+      );
+      final archive = download.data!;
+      // The outer archive is readable gzip/tar. Private records remain E2EE.
+      final contents = utf8.decode(gzip.decode(archive), allowMalformed: true);
+      expect(contents, contains('snapshot.json'));
+      expect(contents, contains('snapshot.sha256'));
+      expect(contents, isNot(contains('Before backup')));
+      expect(contents, isNot(contains('Integration password 42')));
+      expect(await File('${dir.path}/backups/recovery.key').exists(), isFalse);
+      await sa.client.post<Object?>(
+        '$url/api/v1/backups/import',
+        data: Stream<List<int>>.value(archive),
+        options: Options(
+          headers: {
+            ...sa.authHeaders,
+            'Content-Type': 'application/octet-stream',
+            'Content-Length': archive.length,
+          },
+        ),
+      );
+      final imported = await waitJob();
+      final importedId = (imported['backups'] as List).cast<Map>().singleWhere(
+        (e) => e['reason'] == 'import',
+      )['id'];
       final emptyId = entries.singleWhere(
         (e) => e['reason'] == 'before_update',
       )['id'];
@@ -143,7 +173,7 @@ void main() {
       );
       await sa.request(
         'POST',
-        '/api/v1/backups/$id/restore',
+        '/api/v1/backups/$importedId/restore',
         data: {'confirm': 'restore'},
       );
       await waitJob();
@@ -152,6 +182,7 @@ void main() {
       // A newly connected device also closes a timer from the archive, even
       // without a previously stored generation. Later live timers must survive.
       await sc.pairInvitation(await sa.createInvitation(), 'Fresh device');
+      await sc.unlockWithPassword('Integration password 42');
       expect(c.syncError, isNull);
       expect(
         c.snapshot.sessions.singleWhere((s) => s.id == oldSessionId).end,

@@ -5,7 +5,7 @@ import 'package:crypto/crypto.dart';
 import 'package:dio/dio.dart';
 import 'package:dio/io.dart';
 import 'package:drift/drift.dart';
-import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'local_credentials.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import '../domain/models.dart';
@@ -22,7 +22,7 @@ class SyncService {
   SyncService(
     this.repo, {
     Dio? client,
-    FlutterSecureStorage? secureStorage,
+    LocalCredentials? credentials,
     this.realtime = true,
   }) : client =
            client ??
@@ -34,14 +34,10 @@ class SyncService {
                followRedirects: false,
              ),
            ),
-       secure =
-           secureStorage ??
-           const FlutterSecureStorage(
-             mOptions: MacOsOptions(useDataProtectionKeyChain: false),
-           );
+       credentials = credentials ?? LocalCredentials(repo.db);
   final Repository repo;
   final Dio client;
-  final FlutterSecureStorage secure;
+  final LocalCredentials credentials;
   final bool realtime;
   Timer? _timer;
   Timer? _eventRetry;
@@ -53,7 +49,7 @@ class SyncService {
   String? _url, _token;
   String? _generation, _privateCA;
   WorkspaceKey? _cipher;
-  PasswordEnvelope? _password;
+  PasswordConfig? _password;
   String? _requiredKeyId;
   int _restoredThrough = 0;
   DateTime? _snapshotCreated;
@@ -103,8 +99,8 @@ class SyncService {
       _eventCancel?.cancel();
       await _events?.cancel();
       _listening = false;
-      await secure.delete(key: 'server_token');
-      await secure.delete(key: 'server_ca');
+      await credentials.delete(key: 'server_token');
+      await credentials.delete(key: 'server_ca');
       await repo.serial(() async {
         await repo.db.transaction(() async {
           await repo.db.customStatement(
@@ -138,13 +134,19 @@ class SyncService {
 
   Future<void> initialize() async {
     try {
-      await prepareWorkspaceKey();
+      if (await repo.db.meta('workspace_key_id') != null) {
+        await prepareWorkspaceKey();
+      }
+    } on PasswordRequired catch (e) {
+      repo.syncError = '$e';
+    } on FormatException catch (e) {
+      repo.syncError = e.message;
     } on StateError catch (e) {
       repo.syncError = e.message;
     }
     _url = await repo.db.meta('server_url');
-    _token = _url == null ? null : await secure.read(key: 'server_token');
-    _privateCA = await secure.read(key: 'server_ca');
+    _token = _url == null ? null : await credentials.read(key: 'server_token');
+    _privateCA = await credentials.read(key: 'server_ca');
     _generation = await repo.db.meta('server_generation');
     if (_privateCA != null) _configureTrust(client, _privateCA!);
     repo.onChange = sync;
@@ -231,7 +233,7 @@ class SyncService {
       if (candidate != client) candidate.close(force: true);
     }
     final data = response.data!;
-    if (data['protocol'] != 5) {
+    if (data['protocol'] != 6) {
       throw StateError(
         'Несовместимая версия сервера. Нужна новая установка с парольным E2EE.',
       );
@@ -243,12 +245,15 @@ class SyncService {
     _generation = null;
     final oldId = repo.deviceId;
     final newId = data['device_id'] as String;
-    await secure.write(key: 'server_token', value: data['token'] as String);
+    await credentials.write(
+      key: 'server_token',
+      value: data['token'] as String,
+    );
     if (privateCA != null) {
-      await secure.write(key: 'server_ca', value: privateCA);
+      await credentials.write(key: 'server_ca', value: privateCA);
       _configureTrust(client, privateCA);
     } else {
-      await secure.delete(key: 'server_ca');
+      await credentials.delete(key: 'server_ca');
       if (_privateCA != null) {
         client.httpClientAdapter.close(force: true);
         client.httpClientAdapter = IOHttpClientAdapter();
@@ -454,6 +459,23 @@ class SyncService {
       }
       await repo.serial(() async {
         await repo.db.transaction(() async {
+          if (state['generation_reason'] == 'password') {
+            // Rekeying preserves record versions. Retain edits made offline;
+            // their next upload will use the new password and wire IDs.
+            for (final record in restored.values) {
+              final dirty = await repo.db
+                  .customSelect(
+                    'SELECT id FROM outbox WHERE id=? UNION SELECT id FROM conflicts WHERE id=?',
+                    variables: [Variable(record.id), Variable(record.id)],
+                  )
+                  .get();
+              if (dirty.isEmpty) await repo.db.put(record);
+            }
+            await repo.db.customStatement('DELETE FROM encrypted_outbox');
+            await repo.db.setMeta('sync_cursor', '$cursor');
+            await repo.db.setMeta('server_generation', next);
+            return;
+          }
           final records = await repo.db.entities(includeDeleted: true);
           final outbox = await repo.db
               .customSelect('SELECT * FROM outbox')
@@ -671,12 +693,30 @@ class SyncService {
     await client.delete<Object?>('$_url/api/v1/devices/$id', options: _auth);
   }
 
+  Future<void> shutdown() async {
+    dispose();
+    final deadline = DateTime.now().add(const Duration(minutes: 2));
+    while (_busy || _pairing) {
+      if (DateTime.now().isAfter(deadline)) {
+        throw StateError(
+          'Не удалось остановить синхронизацию. Повторите очистку.',
+        );
+      }
+      await Future<void>.delayed(const Duration(milliseconds: 25));
+    }
+    _cipher = null;
+    _password = null;
+    _requiredKeyId = null;
+    _url = null;
+    _token = null;
+  }
+
   void dispose() {
     _disposed = true;
     _timer?.cancel();
     _eventRetry?.cancel();
     _eventCancel?.cancel();
     _events?.cancel();
-    client.close();
+    client.close(force: true);
   }
 }

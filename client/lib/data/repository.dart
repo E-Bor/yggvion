@@ -32,9 +32,15 @@ class Repository extends ChangeNotifier {
   Future<void> _tail = Future.value();
   Future<void> Function()? onChange;
   String newId() => _uuid.v4();
-  void publish() => notifyListeners();
+  bool _closing = false;
+  Future<void>? _closeFuture;
+
+  void publish() {
+    if (!_closing) notifyListeners();
+  }
 
   Future<T> serial<T>(Future<T> Function() work) {
+    if (_closing) return Future<T>.error(StateError('Хранилище закрывается'));
     final result = _tail.then((_) => work());
     _tail = result.then<void>(
       (_) {},
@@ -94,7 +100,7 @@ class Repository extends ChangeNotifier {
                 .customSelect('SELECT count(*) AS n FROM conflicts')
                 .getSingle())
             .read<int>('n');
-    notifyListeners();
+    publish();
   }
 
   Future<List<({String id, String created})>> localRecoverySnapshots() async {
@@ -164,7 +170,7 @@ class Repository extends ChangeNotifier {
     } else {
       calendarView = view;
     }
-    notifyListeners();
+    publish();
     await serial(
       () => db.setMeta(planner ? 'planner_view' : 'calendar_view', view.name),
     );
@@ -177,19 +183,19 @@ class Repository extends ChangeNotifier {
       await db.setMeta('home_calendar_fraction', '$calendarFraction');
       await db.setMeta('home_scratchpad_fraction', '$scratchpadFraction');
     });
-    notifyListeners();
+    publish();
   }
 
   Future<void> setSidebarCollapsed(bool value) async {
     sidebarCollapsed = value;
-    notifyListeners();
+    publish();
     await serial(() => db.setMeta('sidebar_collapsed', '$value'));
   }
 
   Future<void> setLightTheme(bool value) => serial(() async {
     await db.setMeta('light_theme', '$value');
     lightTheme = value;
-    notifyListeners();
+    publish();
   });
 
   Task? get lastCalendarTask => snapshot.task(lastCalendarTaskId ?? '');
@@ -212,7 +218,7 @@ class Repository extends ChangeNotifier {
     await toggleTimer(task);
     lastCalendarTaskId = task.id;
     await db.setMeta('last_calendar_task', task.id);
-    notifyListeners();
+    publish();
   }
 
   Future<Task> createTask(
@@ -273,7 +279,10 @@ class Repository extends ChangeNotifier {
 
   Future<void> status(Task task, TaskStatus status) async {
     final changes = [
-      task.entity.change({'status': status.wire, 'completed_at': status == TaskStatus.done ? wireTime(now()) : null}),
+      task.entity.change({
+        'status': status.wire,
+        'completed_at': status == TaskStatus.done ? wireTime(now()) : null,
+      }),
     ];
     if (status == TaskStatus.done || status == TaskStatus.waiting) {
       for (final s in snapshot.sessions.where(
@@ -884,7 +893,7 @@ class Repository extends ChangeNotifier {
     }
   }
 
-  Future<String> attachFile(String sourcePath) async {
+  Future<String> attachFile(String sourcePath) => serial(() async {
     final source = File(sourcePath);
     if (await source.length() > maxAttachmentBytes) {
       throw ArgumentError(attachmentSizeError);
@@ -908,7 +917,7 @@ class Repository extends ChangeNotifier {
     if (onChange != null) unawaited(onChange!());
     final label = p.basename(sourcePath).replaceAll(RegExp(r'[\[\]\n\r]'), '');
     return '${RegExp(r'\.(png|jpe?g|gif|webp)$', caseSensitive: false).hasMatch(sourcePath) ? '!' : ''}[$label](attachment:$id)';
-  }
+  });
 
   Future<String?> attachmentPath(String id) async =>
       (await db
@@ -976,9 +985,15 @@ class Repository extends ChangeNotifier {
       data: {'task_id': taskId, 'at': wireTime(now().add(delay))},
     ),
   ]);
+  Future<void> close() {
+    _closing = true;
+    onChange = null;
+    return _closeFuture ??= _tail.then((_) => db.close());
+  }
+
   @override
   void dispose() {
-    db.close();
+    unawaited(close());
     super.dispose();
   }
 }

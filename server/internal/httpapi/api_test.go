@@ -62,7 +62,7 @@ func authorizeTestRequest(t *testing.T, h http.Handler, r *http.Request, token s
 func setup(t *testing.T) (*store.Store, http.Handler, string) {
 	t.Helper()
 	s, h, token := setupEmpty(t)
-	if err := s.EnableEncryption(context.Background(), testKeyID, testPasswordEnvelope(testKeyID, 1)); err != nil {
+	if err := s.EnableEncryption(context.Background(), testKeyID, testPasswordConfig(testKeyID, 1)); err != nil {
 		t.Fatal(err)
 	}
 	return s, h, token

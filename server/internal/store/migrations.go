@@ -5,9 +5,9 @@ import (
 	"fmt"
 )
 
-const SchemaVersion = 6
+const SchemaVersion = 7
 
-// Schema 6 is the password-E2EE baseline. Earlier databases are not migrated.
+// Schema 7 is the direct-password E2EE baseline. Earlier databases are not migrated.
 // Creating the schema and its version marker is atomic.
 func migrate(db *sql.DB, version int) error {
 	if version == SchemaVersion {

@@ -6,6 +6,170 @@ import 'providers.dart';
 import 'server_settings.dart';
 import 'theme.dart';
 
+class EncryptionPage extends ConsumerWidget {
+  const EncryptionPage({super.key});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) => SettingsDetail(
+    title: 'Шифрование',
+    children: [
+      const EncryptionSettings(),
+      settingsCard('Очистить хранилище', [
+        const Text(
+          'Удалить все данные Yggvion с этого устройства и начать заново. '
+          'Подходит, если на устройстве остался прежний формат шифрования.',
+          style: TextStyle(height: 1.5),
+        ),
+        const SizedBox(height: 16),
+        Align(
+          alignment: Alignment.centerLeft,
+          child: OutlinedButton.icon(
+            key: const ValueKey('clear-storage'),
+            style: OutlinedButton.styleFrom(
+              foregroundColor: Theme.of(context).colorScheme.error,
+            ),
+            icon: const Icon(Icons.delete_forever_outlined),
+            label: const Text('Очистить хранилище'),
+            onPressed: () => showStorageResetDialog(
+              context,
+              reset: ref.read(resetStorageProvider),
+            ),
+          ),
+        ),
+      ]),
+    ],
+  );
+}
+
+Future<bool> showStorageResetDialog(
+  BuildContext context, {
+  required Future<void> Function() reset,
+}) async =>
+    await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => _StorageResetDialog(reset: reset),
+    ) ??
+    false;
+
+class _StorageResetDialog extends StatefulWidget {
+  const _StorageResetDialog({required this.reset});
+  final Future<void> Function() reset;
+
+  @override
+  State<_StorageResetDialog> createState() => _StorageResetDialogState();
+}
+
+class _StorageResetDialogState extends State<_StorageResetDialog> {
+  static const phrase = 'Удалить хранилище';
+  final controller = TextEditingController();
+  bool busy = false;
+  String? error;
+
+  Future<void> submit() async {
+    if (busy || controller.text != phrase) return;
+    setState(() {
+      busy = true;
+      error = null;
+    });
+    try {
+      await widget.reset();
+      if (mounted) Navigator.pop(context, true);
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          busy = false;
+          error = '$e';
+        });
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => PopScope(
+    canPop: !busy,
+    child: AlertDialog(
+      title: const Text('Удалить хранилище?'),
+      icon: Icon(
+        Icons.delete_forever_outlined,
+        color: Theme.of(context).colorScheme.error,
+      ),
+      content: SizedBox(
+        width: 420,
+        child: SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text(
+                'С этого устройства будут удалены задачи, заметки, проекты, '
+                'учёт времени, вложения, локальные резервные копии, пароль и настройки. '
+                'Подключение к серверу будет сброшено.\n\n'
+                'Данные на VPS и копии, сохранённые вне приложения, останутся. '
+                'Это действие нельзя отменить.',
+                style: TextStyle(height: 1.5),
+              ),
+              const SizedBox(height: 20),
+              const Text('Для подтверждения введите «Удалить хранилище»:'),
+              const SizedBox(height: 12),
+              TextField(
+                key: const ValueKey('storage-reset-confirmation'),
+                controller: controller,
+                autofocus: true,
+                enabled: !busy,
+                autocorrect: false,
+                enableSuggestions: false,
+                textInputAction: TextInputAction.done,
+                decoration: const InputDecoration(
+                  labelText: 'Фраза подтверждения',
+                ),
+                onChanged: (_) => setState(() {}),
+                onSubmitted: (_) => submit(),
+              ),
+              if (error != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 12),
+                  child: Text(
+                    error!,
+                    style: TextStyle(
+                      color: Theme.of(context).colorScheme.error,
+                    ),
+                  ),
+                ),
+              if (busy)
+                const Padding(
+                  padding: EdgeInsets.only(top: 16),
+                  child: LinearProgressIndicator(),
+                ),
+            ],
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: busy ? null : () => Navigator.pop(context, false),
+          child: const Text('Отмена'),
+        ),
+        FilledButton(
+          key: const ValueKey('confirm-storage-reset'),
+          style: FilledButton.styleFrom(
+            backgroundColor: Theme.of(context).colorScheme.error,
+            foregroundColor: Theme.of(context).colorScheme.onError,
+          ),
+          onPressed: busy || controller.text != phrase ? null : submit,
+          child: const Text('Удалить хранилище'),
+        ),
+      ],
+    ),
+  );
+}
+
 class EncryptionSettings extends ConsumerStatefulWidget {
   const EncryptionSettings({super.key});
   @override
@@ -33,7 +197,7 @@ class _EncryptionSettingsState extends ConsumerState<EncryptionSettings> {
               locked
                   ? 'Введите пароль, чтобы открыть личные данные на этом устройстве.'
                   : configured
-                  ? 'Пароль шифрования настроен. Это устройство запоминает доступ в защищённом хранилище.'
+                  ? 'Пароль шифрования настроен. Пароль сохранён локально и используется автоматически при запуске.'
                   : 'Создайте пароль для синхронизации и резервных копий. Сохранять длинный ключ вручную больше не нужно.',
               style: const TextStyle(height: 1.5),
             ),
@@ -87,6 +251,8 @@ Future<bool> ensureEncryptionPassword(
   if (!sync.needsEncryptionKey) {
     try {
       await sync.prepareWorkspaceKey();
+    } on PasswordRequired {
+      // Ask once on a new device or after a password change.
     } on StateError {
       if (!sync.needsEncryptionKey) rethrow;
     }
@@ -157,10 +323,7 @@ class _PasswordDialogState extends State<_PasswordDialog> {
       error = null;
     });
     try {
-      PasswordEnvelope.validatePassword(
-        password.text,
-        creating: widget.creating,
-      );
+      PasswordConfig.validatePassword(password.text, creating: widget.creating);
       if (widget.creating && password.text != confirm.text) {
         throw const FormatException('Пароли не совпадают');
       }
@@ -258,7 +421,7 @@ class _PasswordDialogState extends State<_PasswordDialog> {
                   const Padding(
                     padding: EdgeInsets.only(top: 12),
                     child: Text(
-                      'Старые файлы копий сохраняют прежний пароль. Подключённые устройства продолжат работать.',
+                      'Данные на сервере будут перешифрованы. На других устройствах потребуется новый пароль. Старые копии сохраняют прежний пароль.',
                       style: TextStyle(fontSize: 12, height: 1.4),
                     ),
                   ),

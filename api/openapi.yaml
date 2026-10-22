@@ -6,10 +6,10 @@ info:
     One owner, device tokens, optimistic record versions. UTC RFC3339 timestamps;
     IANA timezone retained on blocks/series. Mutations in a batch are atomic.
     Version conflicts are returned per record without overwriting either side.
-    Protocol 5 clients initialize password-protected E2EE before the first upload, encrypt Record.data
+    Protocol 6 clients initialize password-protected E2EE before the first upload, encrypt Record.data
     and attachments on-device, and read /state before pushing. Keys never reach
-    the server in plaintext. Only an authenticated password wrapping of the random
-    workspace key is stored on the server. Private record IDs are keyed HMAC identifiers. Clients send X-Yggvion-Generation
+    the server in plaintext. Only public password KDF parameters are stored on
+    the server. Private record IDs are keyed HMAC identifiers. Clients send X-Yggvion-Generation
     on sync, changes and attachment requests. Missing or stale generations return
     409 generation_changed. Clients quarantine local records/outbox/conflicts,
     reset the cursor and fetch the restored dataset before sending new writes.
@@ -20,7 +20,7 @@ security:
 paths:
   /encryption:
     post:
-      summary: Initialize an empty workspace with a key fingerprint and password wrapping
+      summary: Initialize an empty workspace with public password KDF parameters
       description: Idempotent for the same fingerprint. Refuses a different key or an existing plaintext dataset. No old-client migration is provided.
       parameters: [{$ref: '#/components/parameters/Generation'}]
       requestBody:
@@ -30,10 +30,10 @@ paths:
             schema:
               type: object
               additionalProperties: false
-              required: [key_id, password_envelope]
+              required: [key_id, password_config]
               properties:
                 key_id: {type: string, pattern: '^[a-f0-9]{64}$'}
-                password_envelope: {$ref: '#/components/schemas/PasswordEnvelope'}
+                password_config: {$ref: '#/components/schemas/PasswordConfig'}
       responses:
         '200': {description: Fingerprint installed or already identical}
         '400': {$ref: '#/components/responses/Error'}
@@ -41,13 +41,9 @@ paths:
         '409': {$ref: '#/components/responses/Error'}
   /encryption/password:
     put:
-      summary: Replace the password wrapping without re-encrypting personal records
-      description: Compare-and-swap on expected_revision. The next revision must equal expected_revision + 1. An identical successful retry is accepted; a concurrent different change returns 409 password_changed. Passwords and derived password keys are never sent. A current generation header is always required, including before the first restore.
-      parameters:
-        - in: header
-          name: X-Yggvion-Generation
-          required: true
-          schema: {type: string}
+      summary: Atomically replace personal ciphertext after a password change
+      description: Client derives a new key, stages encrypted files, and sends the complete re-encrypted snapshot (maximum 512 MiB). Current key_id, generation and snapshot cursor must match. Concurrent changes return 409 workspace_changed. Record versions, timers and public shares are retained. A lost successful response is recovered through /state and the locally remembered password. No password or secret key is sent.
+      parameters: [{$ref: '#/components/parameters/Generation'}]
       requestBody:
         required: true
         content:
@@ -55,21 +51,24 @@ paths:
             schema:
               type: object
               additionalProperties: false
-              required: [key_id, expected_revision, password_envelope]
+              required: [key_id, cursor, password_config, records]
               properties:
-                key_id: {type: string, pattern: '^[a-f0-9]{64}$'}
-                expected_revision: {type: integer, minimum: 1, maximum: 2147483646}
-                password_envelope: {$ref: '#/components/schemas/PasswordEnvelope'}
+                key_id: {type: string, pattern: '^[a-f0-9]{64}$', description: Current fingerprint}
+                cursor: {type: integer, format: int64, minimum: 0}
+                password_config: {$ref: '#/components/schemas/PasswordConfig'}
+                records:
+                  type: array
+                  items: {$ref: '#/components/schemas/Record'}
       responses:
         '200':
-          description: Wrapping stored or retry already applied
+          description: Ciphertext replaced and generation rotated
           content:
             application/json:
               schema:
                 type: object
-                required: [revision]
+                required: [key_id]
                 properties:
-                  revision: {type: integer, minimum: 1, maximum: 2147483647}
+                  key_id: {type: string, pattern: '^[a-f0-9]{64}$'}
         '400': {$ref: '#/components/responses/Error'}
         '401': {$ref: '#/components/responses/Error'}
         '409': {$ref: '#/components/responses/Error'}
@@ -254,14 +253,14 @@ paths:
                 required: [generation, protocol, private_ca, backups]
                 properties:
                   generation: {type: string}
-                  protocol: {type: integer, const: 5}
+                  protocol: {type: integer, const: 6}
                   e2ee: {type: boolean, const: true}
-                  encryption_key_id: {type: string, description: Empty before initial setup; otherwise SHA256 of the random workspace key}
-                  password_envelope:
+                  encryption_key_id: {type: string, description: Empty before initial setup; otherwise SHA256 of the password-derived workspace key}
+                  password_config:
                     oneOf:
-                      - {$ref: '#/components/schemas/PasswordEnvelope'}
+                      - {$ref: '#/components/schemas/PasswordConfig'}
                       - {type: 'null'}
-                    description: Authenticated devices fetch this public wrapping and unlock on-device. Null before setup. Restoring a snapshot of the same workspace preserves its current wrapping.
+                    description: Public KDF parameters; the password is entered and remembered only on-device. Null before setup. Restore returns the password configuration from the archive.
                   snapshot_created: {type: string, description: Snapshot timestamp after restore; client closes restored running timers at this instant}
                   snapshot_cursor: {type: integer, format: int64, description: Last restored record sequence; only running sessions with a positive sequence at or below this boundary are closed at snapshot_created. Later sessions remain active.}
                   generation_reason: {type: string}
@@ -269,6 +268,37 @@ paths:
                   backups: {type: boolean}
                   server_schema: {type: integer}
         '401': {$ref: '#/components/responses/Error'}
+  /snapshot:
+    get:
+      summary: Export current encrypted workspace for password rotation
+      parameters: [{$ref: '#/components/parameters/Generation'}]
+      responses:
+        '200':
+          description: Format 3 snapshot with a consistent change cursor
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [format, created, cursor, encryption_key_id, password_config, records, attachments]
+                properties:
+                  format: {type: integer, const: 3}
+                  created: {type: string, format: date-time}
+                  cursor: {type: integer, format: int64, minimum: 0}
+                  encryption_key_id: {type: string}
+                  password_config: {$ref: '#/components/schemas/PasswordConfig'}
+                  records: {type: array, items: {$ref: '#/components/schemas/Record'}}
+                  attachments:
+                    type: array
+                    items:
+                      type: object
+                      required: [id, name, size, media_type]
+                      properties:
+                        id: {type: string, pattern: '^[a-f0-9]{64}$'}
+                        name: {type: string, const: encrypted}
+                        size: {type: integer, minimum: 0}
+                        media_type: {type: string, const: application/octet-stream}
+        '401': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
   /metrics:
     get:
       summary: On-demand Linux VPS resource snapshot, cached for 30 seconds
@@ -284,7 +314,7 @@ paths:
   /invitations:
     post:
       summary: Create a single-use invitation valid for ten minutes
-      description: Revoking the issuing device invalidates its unused invitations. Maximum 32 live invitations. Protocol 5 connection links contain exactly version (1), url, code, ca and expires_at; a newly connected device enters the encryption password to unlock /state.password_envelope locally. Previous link formats are rejected.
+      description: Revoking the issuing device invalidates its unused invitations. Maximum 32 live invitations. Protocol 6 connection links contain exactly version (1), url, code, ca and expires_at; a newly connected device enters the encryption password to unlock /state.password_config locally. Previous link formats are rejected.
       requestBody:
         content:
           application/json:
@@ -328,7 +358,7 @@ paths:
         '401': {$ref: '#/components/responses/Error'}
     post:
       summary: Start an encrypted user-data and attachments snapshot; replicate if configured
-      description: Requires a configured password-protected workspace. Snapshot format 2 contains an obligatory password_envelope, encryption_key_id, encrypted records and encrypted attachments. Plaintext snapshots, format 1 and key-only archives are unsupported. The age outer archive layer is independent of the on-device encryption password.
+      description: Requires a configured password-protected workspace. The portable gzip/tar archive contains snapshot.json (format 3), snapshot.sha256 and E2EE attachments. The snapshot contains password_config, cursor, encryption_key_id and encrypted records. No outer encryption or server archive key is used. Plaintext snapshots and previous archive formats are unsupported. Passwords are never sent to the server.
       responses:
         '202': {description: Job accepted; poll GET /backups for completion}
         '409': {$ref: '#/components/responses/Error'}
@@ -343,27 +373,14 @@ paths:
       responses:
         '200': {description: Configuration saved}
         '400': {$ref: '#/components/responses/Error'}
-  /backups/recovery-key:
-    get:
-      summary: Explicit authenticated export of the private age recovery key
-      responses:
-        '200':
-          description: Store outside this VPS; never include in a backup archive or log
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  key: {type: string}
-        '401': {$ref: '#/components/responses/Error'}
   /backups/{id}/download:
     parameters:
       - {$ref: '#/components/parameters/BackupID'}
     get:
-      summary: Stream encrypted archive, independent of the attachment size limit
+      summary: Stream an archive of E2EE data, independent of the attachment size limit
       responses:
         '200':
-          description: Portable age-encrypted .yggbackup file
+          description: Portable .yggbackup file (gzip/tar) containing E2EE records and attachments
           content:
             application/octet-stream: {schema: {type: string, format: binary}}
         '404': {$ref: '#/components/responses/Error'}
@@ -397,13 +414,8 @@ paths:
         '409': {$ref: '#/components/responses/Error'}
   /backups/import:
     post:
-      summary: Stream, validate and re-encrypt an archive under this server's recovery key
-      description: Maximum 100 GiB encrypted body. Imported copies do not replace current data until explicitly restored.
-      parameters:
-        - in: header
-          name: X-Yggvion-Recovery-Key
-          required: true
-          schema: {type: string, writeOnly: true}
+      summary: Stream, validate and store a portable archive without an archive key
+      description: Maximum 100 GiB body. Validates snapshot and attachment SHA-256 checksums, E2EE envelopes, gzip completion, entry paths, sizes and duplicates. Imported copies do not replace current data until explicitly restored. The client uses the password from backup creation time to decrypt restored private data.
       requestBody:
         required: true
         content:
@@ -441,14 +453,7 @@ paths:
       - {$ref: '#/components/parameters/BackupID'}
     post:
       summary: Retrieve, validate and import an external archive
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                key: {type: string, writeOnly: true, description: Empty uses current server key}
+      description: No request body or archive key is required. The same portable archive works on any VPS; authentication and configured remote storage credentials are still required.
       responses:
         '202': {description: Fetch job accepted}
         '409': {$ref: '#/components/responses/Error'}
@@ -478,7 +483,7 @@ paths:
                 properties:
                   device_id: {type: string}
                   token: {type: string}
-                  protocol: {type: integer, const: 5}
+                  protocol: {type: integer, const: 6}
         '401': {$ref: '#/components/responses/Error'}
         '429': {$ref: '#/components/responses/Error'}
   /sync:
@@ -602,7 +607,11 @@ paths:
           name: X-Yggvion-Encryption
           required: true
           schema: {type: string, pattern: '^[a-f0-9]{64}$'}
-          description: Workspace key fingerprint; must match /state.
+          description: Password-derived key fingerprint; must match /state unless staging a password change.
+        - in: header
+          name: X-Yggvion-Rekey-From
+          schema: {type: string, pattern: '^[a-f0-9]{64}$'}
+          description: Current fingerprint when uploading files encrypted with a new key. Staged files are excluded from current snapshots until the password change commits.
       requestBody:
         required: true
         content:
@@ -701,23 +710,19 @@ components:
         deleted: {type: boolean}
         seq: {type: integer, minimum: 0, description: Server change cursor}
         data: {$ref: '#/components/schemas/EncryptedEnvelope'}
-    PasswordEnvelope:
+    PasswordConfig:
       type: object
       additionalProperties: false
-      required: [v, key_id, revision, kdf, memory, iterations, parallelism, salt, nonce, box, mac]
-      description: Argon2id derives a 32-byte wrapping key from the user password and salt. AES-256-GCM wraps the random 32-byte workspace key. AAD binds the context, key fingerprint, revision, KDF parameters and salt; HMAC-SHA256 with the workspace key authenticates the complete wrapping for existing devices. Clients reject unsupported or excessive KDF parameters before deriving. Offline password guessing remains possible; use a strong passphrase.
+      required: [v, key_id, kdf, memory, iterations, parallelism, salt]
+      description: Public parameters for deriving a 32-byte encryption key directly from the password. No wrapped master key. Passwords and secret keys never leave the client. Unsupported KDF parameters are rejected before derivation.
       properties:
-        v: {type: integer, const: 1}
+        v: {type: integer, const: 2}
         key_id: {type: string, pattern: '^[a-f0-9]{64}$'}
-        revision: {type: integer, minimum: 1, maximum: 2147483647}
         kdf: {type: string, const: argon2id}
         memory: {type: integer, const: 19456, description: KiB}
         iterations: {type: integer, const: 2}
         parallelism: {type: integer, const: 1}
-        salt: {type: string, maxLength: 128, description: Base64 of 16 random bytes}
-        nonce: {type: string, maxLength: 128, description: Base64 of 12 random bytes}
-        box: {type: string, maxLength: 128, description: Base64 of 32 ciphertext bytes and 16-byte GCM tag}
-        mac: {type: string, maxLength: 128, description: Base64 of 32-byte HMAC}
+        salt: {type: string, minLength: 24, maxLength: 24, description: Base64 of 16 random bytes}
     EncryptedEnvelope:
       type: object
       additionalProperties: false

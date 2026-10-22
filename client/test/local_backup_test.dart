@@ -5,7 +5,7 @@ import 'package:crypto/crypto.dart';
 import 'package:drift/native.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:yggvion/data/local_credentials.dart';
 import 'package:timezone/data/latest.dart' as tz;
 import 'package:yggvion/data/database.dart';
 import 'package:yggvion/data/encryption.dart';
@@ -21,25 +21,26 @@ void main() {
   var disconnects = 0;
   late DateTime now;
   late WorkspaceKey workspace;
-  late PasswordEnvelope passwordEnvelope;
+  late PasswordConfig passwordEnvelope;
   const password = 'Local backup test password 42';
   setUpAll(() async {
-    workspace = WorkspaceKey.generate();
-    passwordEnvelope = await PasswordEnvelope.create(workspace, password);
+    passwordEnvelope = await PasswordConfig.create(password);
+    workspace = await passwordEnvelope.unlock(password);
   });
   const channel = MethodChannel('plugins.flutter.io/path_provider');
   setUp(() async {
-    FlutterSecureStorage.setMockInitialValues({});
     dir = await Directory.systemTemp.createTemp('yggvion-local-backup-test-');
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(channel, (_) async => dir.path);
     now = DateTime.utc(2026, 10, 22, 9);
     repo = Repository(LocalDatabase(NativeDatabase.memory()), clock: () => now);
     await repo.initialize();
-    await workspace.save();
+    await LocalCredentials(
+      repo.db,
+    ).write(key: 'password_${workspace.id}', value: password);
     await repo.db.setMeta('workspace_key_id', workspace.id);
     await repo.db.setMeta(
-      PasswordEnvelope.storageKey(workspace.id),
+      PasswordConfig.storageKey(workspace.id),
       passwordEnvelope.encoded,
     );
     disconnects = 0;
@@ -52,8 +53,8 @@ void main() {
     );
   });
   Future<String> decryptedArchive(String path) async {
-    final wrapped = await PasswordEnvelope.readArchive(File(path));
-    final key = (await WorkspaceKey.load(wrapped.envelope.keyId))!;
+    final wrapped = await PasswordConfig.readArchive(File(path));
+    final key = await wrapped.config.unlock(password);
     final target = '${dir.path}/decoded.zip';
     await key.decryptFile(
       File(path),
@@ -96,10 +97,11 @@ void main() {
       await repo.saveNote(note.id, 'Original', 'Saved content');
       final saved = await backups.create();
       await repo.saveNote(note.id, 'Current', 'Current content');
-      FlutterSecureStorage.setMockInitialValues({});
+
+      await LocalCredentials(repo.db).delete(key: 'password_${workspace.id}');
       await repo.db.customStatement('DELETE FROM metadata WHERE key IN (?,?)', [
         'workspace_key_id',
-        PasswordEnvelope.storageKey(workspace.id),
+        PasswordConfig.storageKey(workspace.id),
       ]);
       await expectLater(
         backups.restore(saved.path),
@@ -113,12 +115,15 @@ void main() {
       expect(disconnects, 0);
       await backups.restore(saved.path, password: password);
       expect(repo.snapshot.note(note.id)!.title, 'Original');
-      expect((await WorkspaceKey.load(workspace.id))!.id, workspace.id);
       expect(
-        PasswordEnvelope.fromEncoded(
-          await repo.db.meta(PasswordEnvelope.storageKey(workspace.id)),
-        )!.revision,
-        1,
+        await LocalCredentials(repo.db).read(key: 'password_${workspace.id}'),
+        password,
+      );
+      expect(
+        PasswordConfig.fromEncoded(
+          await repo.db.meta(PasswordConfig.storageKey(workspace.id)),
+        )!.keyId,
+        workspace.id,
       );
     },
   );
@@ -127,36 +132,33 @@ void main() {
     () async {
       final old = await backups.create();
       const nextPassword = 'Changed backup password 43';
-      final next = await PasswordEnvelope.create(
-        workspace,
-        nextPassword,
-        revision: 2,
-      );
+      final next = await PasswordConfig.create(nextPassword);
+      await repo.db.setMeta('workspace_key_id', next.keyId);
       await repo.db.setMeta(
-        PasswordEnvelope.storageKey(workspace.id),
+        PasswordConfig.storageKey(next.keyId),
         next.encoded,
       );
+      await LocalCredentials(
+        repo.db,
+      ).write(key: 'password_${next.keyId}', value: nextPassword);
       await backups.restore(old.path, password: password);
-      final current = PasswordEnvelope.fromEncoded(
-        await repo.db.meta(PasswordEnvelope.storageKey(workspace.id)),
+      final current = PasswordConfig.fromEncoded(
+        await repo.db.meta(PasswordConfig.storageKey(next.keyId)),
       )!;
       expect(current.encoded, next.encoded);
       final newer = await backups.create();
-      final header = await PasswordEnvelope.readArchive(File(newer.path));
-      expect((await header.envelope.unlock(nextPassword)).id, workspace.id);
-      await expectLater(
-        header.envelope.unlock(password),
-        throwsFormatException,
-      );
-      final oldHeader = await PasswordEnvelope.readArchive(File(old.path));
-      expect((await oldHeader.envelope.unlock(password)).id, workspace.id);
+      final header = await PasswordConfig.readArchive(File(newer.path));
+      expect((await header.config.unlock(nextPassword)).id, next.keyId);
+      await expectLater(header.config.unlock(password), throwsFormatException);
+      final oldHeader = await PasswordConfig.readArchive(File(old.path));
+      expect((await oldHeader.config.unlock(password)).id, workspace.id);
     },
   );
   test(
     'a backup cannot be created before choosing an encryption password',
     () async {
       await repo.db.customStatement('DELETE FROM metadata WHERE key=?', [
-        PasswordEnvelope.storageKey(workspace.id),
+        PasswordConfig.storageKey(workspace.id),
       ]);
       await expectLater(backups.create(), throwsStateError);
       expect(await backups.list(), isEmpty);
@@ -267,6 +269,8 @@ void main() {
       final json = utf8.decode(archive.findFile('snapshot.json')!.readBytes()!);
       expect(json, isNot(contains('192.0.2.123')));
       expect(json, isNot(contains(dir.path)));
+      expect(json, isNot(contains(password)));
+      expect(json, isNot(contains('credential_')));
       await stream.close();
       await repo.saveNote(note.id, 'Changed', 'later');
       await repo.deleteNoteFolder(folder);

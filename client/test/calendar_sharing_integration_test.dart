@@ -3,7 +3,6 @@ import 'dart:io';
 import 'package:dio/dio.dart';
 import 'package:drift/drift.dart' show driftRuntimeOptions;
 import 'package:drift/native.dart';
-import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:timezone/data/latest.dart' as tz;
 import 'package:yggvion/data/database.dart';
@@ -18,7 +17,7 @@ void main() {
     'guest proposal reaches two clients, accepts or replans and revokes access',
     () async {
       tz.initializeTimeZones();
-      FlutterSecureStorage.setMockInitialValues({});
+
       driftRuntimeOptions.dontWarnAboutMultipleDatabases = true;
       addTearDown(() {
         driftRuntimeOptions.dontWarnAboutMultipleDatabases = false;
@@ -78,6 +77,7 @@ void main() {
       await sa.setEncryptionPassword('Integration password 42');
       await sa.pair(base, key, 'Desktop');
       await sb.pair(base, key, 'Phone');
+      await sb.unlockWithPassword('Integration password 42');
       final private = await a.createTask(
         'PRIVATE title',
         description: 'PRIVATE description',

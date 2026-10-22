@@ -11,6 +11,7 @@ import 'task_editor.dart';
 import 'theme.dart';
 import 'birthdays.dart';
 import 'server_settings.dart';
+import 'encryption_settings.dart';
 import 'statistics.dart';
 
 class SettingsPage extends ConsumerStatefulWidget {
@@ -634,6 +635,20 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                           context,
                           MaterialPageRoute<void>(
                             builder: (_) => const SynchronizationPage(),
+                          ),
+                        ),
+                      ),
+                      ListTile(
+                        leading: const Icon(Icons.lock_outline_rounded),
+                        title: const Text('Шифрование'),
+                        subtitle: const Text(
+                          'Пароль для синхронизации и резервных копий',
+                        ),
+                        trailing: const Icon(Icons.chevron_right_rounded),
+                        onTap: () => Navigator.push(
+                          context,
+                          MaterialPageRoute<void>(
+                            builder: (_) => const EncryptionPage(),
                           ),
                         ),
                       ),

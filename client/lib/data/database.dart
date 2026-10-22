@@ -9,6 +9,7 @@ import 'package:path_provider/path_provider.dart';
 import '../domain/models.dart';
 import '../domain/fuzzy_search.dart';
 import 'search_worker.dart';
+import 'storage_reset.dart';
 
 class LocalDatabase extends GeneratedDatabase {
   LocalDatabase(super.executor);
@@ -18,6 +19,7 @@ class LocalDatabase extends GeneratedDatabase {
   static Future<LocalDatabase> open() async {
     final dir = await getApplicationSupportDirectory();
     await dir.create(recursive: true);
+    await StorageReset.finishPending(dir);
     try {
       await removeRetiredFiles(dir);
     } on FileSystemException catch (error) {

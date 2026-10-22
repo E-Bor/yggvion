@@ -9,7 +9,7 @@ void main() {
   test(
     'records hide content, authenticate metadata and use fresh nonces',
     () async {
-      final key = WorkspaceKey.generate();
+      final key = WorkspaceKey(List.filled(32, 1));
       const note = Entity(
         id: 'note1',
         kind: 'note',
@@ -39,7 +39,7 @@ void main() {
         await expectLater(key.decrypt(changed), throwsA(anything));
       }
       await expectLater(
-        WorkspaceKey.generate().decrypt(wire),
+        WorkspaceKey(List.filled(32, 2)).decrypt(wire),
         throwsFormatException,
       );
       await expectLater(key.decrypt(note), throwsFormatException);
@@ -50,7 +50,7 @@ void main() {
     () async {
       final dir = await Directory.systemTemp.createTemp('ygg-e2ee-unit-');
       addTearDown(() => dir.delete(recursive: true));
-      final key = WorkspaceKey.generate(),
+      final key = WorkspaceKey(List.filled(32, 1)),
           source = File('${dir.path}/source'),
           cipher = File('${dir.path}/cipher'),
           output = File('${dir.path}/output');
@@ -66,7 +66,9 @@ void main() {
         throwsA(anything),
       );
       await expectLater(
-        WorkspaceKey.generate().decryptFile(cipher, output, 'attachment:test'),
+        WorkspaceKey(
+          List.filled(32, 2),
+        ).decryptFile(cipher, output, 'attachment:test'),
         throwsFormatException,
       );
       final stride = WorkspaceKey.chunkSize + 16;

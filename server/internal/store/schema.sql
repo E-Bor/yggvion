@@ -35,4 +35,4 @@ CREATE TABLE guest_inbox (id TEXT PRIMARY KEY, data TEXT NOT NULL, created INTEG
 CREATE TABLE calendar_availability (
  share_id TEXT PRIMARY KEY REFERENCES calendar_shares(id) ON DELETE CASCADE, busy TEXT NOT NULL
 );
-PRAGMA user_version = 6;
+PRAGMA user_version = 7;

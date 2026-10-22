@@ -1,4 +1,4 @@
-// Package backup implements versioned, encrypted, portable user-data snapshots.
+// Package backup implements portable snapshots of end-to-end encrypted user data.
 // It never restores authentication, server identity or executable database code.
 package backup
 
@@ -19,10 +19,10 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
-	"filippo.io/age"
 	"yggvion/server/internal/store"
 )
 
@@ -56,7 +56,6 @@ type Manager struct {
 	mu         sync.Mutex
 	config     Config
 	status     Status
-	identity   *age.X25519Identity
 }
 
 func Open(s *store.Store, dir, files string, lock *sync.RWMutex) (*Manager, error) {
@@ -64,25 +63,7 @@ func Open(s *store.Store, dir, files string, lock *sync.RWMutex) (*Manager, erro
 		return nil, err
 	}
 	m := &Manager{Store: s, Dir: dir, Files: files, DataMu: lock, config: Config{24, 7, 4}}
-	keyPath := filepath.Join(dir, "recovery.key")
-	data, err := os.ReadFile(keyPath)
-	if errors.Is(err, os.ErrNotExist) {
-		m.identity, err = age.GenerateX25519Identity()
-		if err != nil {
-			return nil, err
-		}
-		if err = writeFile(keyPath, []byte(m.identity.String())); err != nil {
-			return nil, err
-		}
-	} else if err != nil {
-		return nil, err
-	} else {
-		m.identity, err = age.ParseX25519Identity(string(data))
-		if err != nil {
-			return nil, err
-		}
-	}
-	data, err = os.ReadFile(filepath.Join(dir, "schedule.json"))
+	data, err := os.ReadFile(filepath.Join(dir, "schedule.json"))
 	if err == nil {
 		if err = json.Unmarshal(data, &m.config); err != nil {
 			return nil, err
@@ -114,8 +95,8 @@ func writeFile(path string, data []byte) error {
 	}
 	return os.Rename(f.Name(), path)
 }
-func (m *Manager) RecoveryKey() string { return m.identity.String() }
-func (m *Manager) Config() Config      { m.mu.Lock(); defer m.mu.Unlock(); return m.config }
+
+func (m *Manager) Config() Config { m.mu.Lock(); defer m.mu.Unlock(); return m.config }
 func validConfig(c Config) bool {
 	return (c.EveryHours == 0 || c.EveryHours == 6 || c.EveryHours == 12 || c.EveryHours == 24 || c.EveryHours == 168) && c.KeepDaily >= 1 && c.KeepDaily <= 90 && c.KeepWeekly >= 0 && c.KeepWeekly <= 52
 }
@@ -158,7 +139,7 @@ func (m *Manager) Start(ctx context.Context, operation string, work func(context
 		m.status.Finished = &now
 		if err != nil {
 			slog.Error("backup job failed", "operation", operation, "error", err)
-			m.status.Error = "Операция не завершена. Проверьте свободное место, полноту вложений и ключ восстановления."
+			m.status.Error = "Операция не завершена. Проверьте свободное место, целостность архива и полноту вложений."
 		}
 	}()
 	return nil
@@ -268,13 +249,14 @@ func (m *Manager) Create(ctx context.Context, reason string) (Entry, error) {
 	}
 	defer os.Remove(f.Name())
 	defer f.Close()
-	encrypted, err := age.Encrypt(f, m.identity.Recipient())
-	if err != nil {
-		return entry, err
-	}
-	gz := gzip.NewWriter(encrypted)
+	gz := gzip.NewWriter(f)
 	archive := tar.NewWriter(gz)
 	if err = add(ctx, archive, "snapshot.json", int64(len(b)), bytes.NewReader(b)); err != nil {
+		return entry, err
+	}
+	sum := sha256.Sum256(b)
+	checksum := hex.EncodeToString(sum[:])
+	if err = add(ctx, archive, "snapshot.sha256", int64(len(checksum)), strings.NewReader(checksum)); err != nil {
 		return entry, err
 	}
 	for _, a := range snapshot.Attachments {
@@ -292,7 +274,7 @@ func (m *Manager) Create(ctx context.Context, reason string) (Entry, error) {
 			return entry, errors.New("attachment checksum mismatch")
 		}
 	}
-	for _, w := range []io.Closer{archive, gz, encrypted} {
+	for _, w := range []io.Closer{archive, gz} {
 		if err = w.Close(); err != nil {
 			return entry, err
 		}
@@ -342,7 +324,7 @@ func attachmentIndex(entries []store.Attachment) (map[string]store.Attachment, e
 	return index, nil
 }
 
-// Requiring EOF authenticates the age footer and gzip checksum without draining
+// Requiring EOF validates the gzip checksum without draining
 // arbitrary compressed padding or extra gzip members from an untrusted archive.
 func requireEOF(reader io.Reader) error {
 	var one [1]byte
@@ -358,26 +340,14 @@ func requireEOF(reader io.Reader) error {
 
 // stage never uses archive paths as filesystem paths. Only expected content
 // hashes are written; links, extra entries and duplicate entries are rejected.
-func (m *Manager) stage(ctx context.Context, path, key string) (store.Snapshot, string, error) {
+func (m *Manager) stage(ctx context.Context, path string) (store.Snapshot, string, error) {
 	var snapshot store.Snapshot
-	id := m.identity
-	var err error
-	if key != "" {
-		id, err = age.ParseX25519Identity(key)
-		if err != nil {
-			return snapshot, "", err
-		}
-	}
 	f, err := os.Open(path)
 	if err != nil {
 		return snapshot, "", err
 	}
 	defer f.Close()
-	reader, err := age.Decrypt(f, id)
-	if err != nil {
-		return snapshot, "", err
-	}
-	buffered := bufio.NewReader(reader)
+	buffered := bufio.NewReader(f)
 	gz, err := gzip.NewReader(buffered)
 	if err != nil {
 		return snapshot, "", err
@@ -395,6 +365,21 @@ func (m *Manager) stage(ctx context.Context, path, key string) (store.Snapshot, 
 	data, err := io.ReadAll(io.LimitReader(archive, 512<<20+1))
 	if err != nil {
 		return snapshot, "", err
+	}
+	h, err = archive.Next()
+	if err != nil {
+		return snapshot, "", err
+	}
+	if h.Name != "snapshot.sha256" || h.Typeflag != tar.TypeReg || h.Size != sha256.Size*2 {
+		return snapshot, "", errors.New("invalid snapshot checksum header")
+	}
+	checksum, err := io.ReadAll(archive)
+	if err != nil {
+		return snapshot, "", err
+	}
+	sum := sha256.Sum256(data)
+	if string(checksum) != hex.EncodeToString(sum[:]) {
+		return snapshot, "", errors.New("snapshot checksum mismatch")
 	}
 	if err = json.Unmarshal(data, &snapshot); err != nil {
 		return snapshot, "", err
@@ -465,8 +450,8 @@ func (m *Manager) stage(ctx context.Context, path, key string) (store.Snapshot, 
 	return snapshot, stage, nil
 }
 
-func (m *Manager) Restore(ctx context.Context, path, key string) error {
-	snapshot, stage, err := m.stage(ctx, path, key)
+func (m *Manager) Restore(ctx context.Context, path string) error {
+	snapshot, stage, err := m.stage(ctx, path)
 	if err != nil {
 		return err
 	}
@@ -490,7 +475,7 @@ func (m *Manager) Restore(ctx context.Context, path, key string) error {
 		}
 	} else {
 		// Create's read-lock is already owned exclusively here; keep the shared lock.
-		safety := &Manager{Store: m.Store, Dir: m.Dir, Files: m.Files, DataMu: &sync.RWMutex{}, identity: m.identity}
+		safety := &Manager{Store: m.Store, Dir: m.Dir, Files: m.Files, DataMu: &sync.RWMutex{}}
 		if _, err = safety.Create(ctx, "before_restore"); err != nil {
 			return fmt.Errorf("safety backup: %w", err)
 		}
@@ -506,44 +491,25 @@ func (m *Manager) Restore(ctx context.Context, path, key string) error {
 	return m.Store.Restore(ctx, snapshot)
 }
 
-func (m *Manager) Import(ctx context.Context, path, key string) (Entry, error) {
+func (m *Manager) Import(ctx context.Context, path string) (Entry, error) {
 	var out Entry
-	snapshot, stage, err := m.stage(ctx, path, key)
+	snapshot, stage, err := m.stage(ctx, path)
 	if err != nil {
 		return out, err
 	}
 	defer os.RemoveAll(stage)
-	// Re-encrypt imports under this server's key for future scheduled management.
-	id := m.identity
-	if key != "" {
-		id, err = age.ParseX25519Identity(key)
-		if err != nil {
-			return out, err
-		}
-	}
 	source, err := os.Open(path)
 	if err != nil {
 		return out, err
 	}
 	defer source.Close()
-	plain, err := age.Decrypt(source, id)
-	if err != nil {
-		return out, err
-	}
 	target, err := os.CreateTemp(m.Dir, ".import-*")
 	if err != nil {
 		return out, err
 	}
 	defer os.Remove(target.Name())
 	defer target.Close()
-	writer, err := age.Encrypt(target, m.identity.Recipient())
-	if err != nil {
-		return out, err
-	}
-	if _, err = copyContext(ctx, writer, plain); err != nil {
-		return out, err
-	}
-	if err = writer.Close(); err != nil {
+	if _, err = copyContext(ctx, target, source); err != nil {
 		return out, err
 	}
 	if err = target.Sync(); err != nil {
@@ -563,10 +529,14 @@ func (m *Manager) Import(ctx context.Context, path, key string) (Entry, error) {
 	}
 	data, err := json.Marshal(out)
 	if err != nil {
+		os.Remove(dest)
 		return out, err
 	}
-	err = writeFile(filepath.Join(m.Dir, out.ID+".json"), data)
-	return out, err
+	if err = writeFile(filepath.Join(m.Dir, out.ID+".json"), data); err != nil {
+		os.Remove(dest)
+		return out, err
+	}
+	return out, nil
 }
 
 func (m *Manager) Prune() error {

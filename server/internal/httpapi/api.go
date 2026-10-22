@@ -154,7 +154,7 @@ func (a *API) pair(w http.ResponseWriter, r *http.Request) {
 		fail(w, 500, "storage_error")
 		return
 	}
-	write(w, 201, map[string]any{"device_id": id, "token": token, "protocol": 5})
+	write(w, 201, map[string]any{"device_id": id, "token": token, "protocol": 6})
 }
 func (a *API) push(w http.ResponseWriter, r *http.Request) {
 	var input struct {
@@ -273,7 +273,8 @@ func (a *API) upload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	uploadedKey := r.Header.Get("X-Yggvion-Encryption")
-	if !domain.ValidHash(keyID) || uploadedKey != keyID {
+	if !domain.ValidHash(keyID) || !domain.ValidHash(uploadedKey) ||
+		(uploadedKey != keyID && r.Header.Get("X-Yggvion-Rekey-From") != keyID) {
 		fail(w, 400, "encryption_required")
 		return
 	}

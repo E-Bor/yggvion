@@ -20,8 +20,8 @@ func TestRestoreRejectsLegacySnapshotsAndPreservesCiphertext(t *testing.T) {
 	ctx := context.Background()
 	key := strings.Repeat("a", 64)
 	password := passwordFixture(key, 1)
-	snapshot := Snapshot{Format: 2, Created: time.Now().UTC().Add(-time.Hour),
-		EncryptionKeyID: key, PasswordEnvelope: &password,
+	snapshot := Snapshot{Format: 3, Created: time.Now().UTC().Add(-time.Hour),
+		EncryptionKeyID: key, PasswordConfig: &password,
 		Records: []domain.Record{sealedRecord("session", "session", key)}}
 	if err = s.Restore(ctx, snapshot); err != nil {
 		t.Fatal(err)
@@ -33,7 +33,7 @@ func TestRestoreRejectsLegacySnapshotsAndPreservesCiphertext(t *testing.T) {
 	generation, _ := s.Generation(ctx)
 	for name, mutate := range map[string]func(*Snapshot){
 		"legacy format": func(v *Snapshot) { v.Format = 1 },
-		"no password":   func(v *Snapshot) { v.PasswordEnvelope = nil },
+		"no password":   func(v *Snapshot) { v.PasswordConfig = nil },
 		"no key":        func(v *Snapshot) { v.EncryptionKeyID = "" },
 		"plaintext": func(v *Snapshot) {
 			v.Records = []domain.Record{{ID: "note", Kind: "note", Data: json.RawMessage(`{"title":"old"}`)}}

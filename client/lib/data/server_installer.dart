@@ -44,7 +44,7 @@ class ServerInstaller {
     if (user.trim().isEmpty) throw ArgumentError('Укажите SSH-пользователя');
     _cancelled = false;
     final hostKey = 'ssh_host_${host}_$sshPort';
-    final known = await sync.secure.read(key: hostKey);
+    final known = await sync.credentials.read(key: hostKey);
     String? accepted;
     onStatus('Проверяем подлинность сервера');
     final socket = await SSHSocket.connect(
@@ -77,7 +77,7 @@ class ServerInstaller {
     try {
       await ssh.authenticated.timeout(const Duration(seconds: 60));
       if (accepted != null) {
-        await sync.secure.write(key: hostKey, value: accepted!);
+        await sync.credentials.write(key: hostKey, value: accepted!);
       }
       Future<String> run(String command) async {
         final result = await ssh

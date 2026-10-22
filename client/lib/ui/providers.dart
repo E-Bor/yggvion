@@ -17,6 +17,10 @@ final selectedNoteFolderProvider = StateProvider<String>((ref) => '');
 // The native shell supplies this optional service at startup.
 final appIconProvider = ChangeNotifierProvider<AppIconService?>((ref) => null);
 
+final resetStorageProvider = Provider<Future<void> Function()>(
+  (ref) => throw StateError('Storage reset must be provided at startup'),
+);
+
 final appProvider = ChangeNotifierProvider<Repository>(
   (ref) => throw StateError('Repository must be provided at startup'),
 );

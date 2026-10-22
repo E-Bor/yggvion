@@ -1,6 +1,6 @@
 import 'dart:convert';
+import 'dart:io';
 import 'package:drift/native.dart';
-import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:timezone/data/latest.dart' as tz;
 import 'package:yggvion/data/database.dart';
@@ -11,11 +11,16 @@ import 'package:yggvion/data/sync.dart';
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   test(
-    'local password recovers a missing device key without a server',
+    'password survives restart and can unlock a device with cleared credentials',
     () async {
       tz.initializeTimeZones();
-      FlutterSecureStorage.setMockInitialValues({});
-      final repo = Repository(LocalDatabase(NativeDatabase.memory()));
+
+      final directory = await Directory.systemTemp.createTemp(
+        'yggvion-password-restart-',
+      );
+      var repo = Repository(
+        LocalDatabase(NativeDatabase(File('${directory.path}/client.db'))),
+      );
       final sync = SyncService(repo, realtime: false);
       SyncService? restarted;
       addTearDown(() async {
@@ -24,34 +29,47 @@ void main() {
         repo.onChange = null;
         await repo.db.close();
         repo.dispose();
+        await directory.delete(recursive: true);
       });
       await repo.initialize();
       const password = 'Offline remembered phrase 42';
       await sync.setEncryptionPassword(password);
       final id = sync.encryptionKeyId!;
       sync.dispose();
-      FlutterSecureStorage.setMockInitialValues({});
+      await repo.db.close();
+      repo.dispose();
+      repo = Repository(
+        LocalDatabase(NativeDatabase(File('${directory.path}/client.db'))),
+      );
+      await repo.initialize();
       restarted = SyncService(repo, realtime: false);
       await restarted.initialize();
       expect(restarted.connected, isFalse);
+      expect(restarted.needsEncryptionKey, isFalse);
+      expect((await restarted.prepareWorkspaceKey()).id, id);
+      expect(await restarted.credentials.read(key: 'password_$id'), password);
+      restarted.dispose();
+      await restarted.credentials.delete(key: 'password_$id');
+      restarted = SyncService(repo, realtime: false);
+      await restarted.initialize();
       expect(restarted.needsEncryptionKey, isTrue);
       await expectLater(
         restarted.unlockWithPassword('An incorrect phrase'),
         throwsFormatException,
       );
-      expect(await WorkspaceKey.load(id), isNull);
+      expect(await restarted.credentials.read(key: 'password_$id'), isNull);
       await restarted.unlockWithPassword(password);
       expect(restarted.needsEncryptionKey, isFalse);
       expect(repo.syncError, isNull);
       expect(restarted.passwordConfigured, isTrue);
-      expect((await WorkspaceKey.load(id))!.id, id);
+      expect(await restarted.credentials.read(key: 'password_$id'), password);
     },
   );
   test(
     'old invitations and key-only workspaces are rejected without conversion',
     () async {
       tz.initializeTimeZones();
-      FlutterSecureStorage.setMockInitialValues({});
+
       final repo = Repository(LocalDatabase(NativeDatabase.memory()));
       final sync = SyncService(repo, realtime: false);
       addTearDown(() async {
@@ -60,8 +78,7 @@ void main() {
         repo.dispose();
       });
       await repo.initialize();
-      final previous = WorkspaceKey.generate();
-      await previous.save();
+      final previous = WorkspaceKey(List.filled(32, 1));
       await repo.db.setMeta('workspace_key_id', previous.id);
       await repo.db.setMeta('encrypted_server_key_id', previous.id);
       await expectLater(
@@ -70,7 +87,7 @@ void main() {
       );
       expect(await repo.db.meta('workspace_key_id'), previous.id);
       expect(
-        await repo.db.meta(PasswordEnvelope.storageKey(previous.id)),
+        await repo.db.meta(PasswordConfig.storageKey(previous.id)),
         isNull,
       );
       final payload = {

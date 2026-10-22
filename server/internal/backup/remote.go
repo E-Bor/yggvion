@@ -304,7 +304,7 @@ func (m *Manager) RemoteList(ctx context.Context) ([]Entry, error) {
 	}
 	return out, nil
 }
-func (m *Manager) FetchRemote(ctx context.Context, id, key string) error {
+func (m *Manager) FetchRemote(ctx context.Context, id string) error {
 	if !validID.MatchString(id) {
 		return errors.New("invalid id")
 	}
@@ -338,6 +338,6 @@ func (m *Manager) FetchRemote(ctx context.Context, id, key string) error {
 	if err = tmp.Close(); err != nil {
 		return err
 	}
-	_, err = m.Import(ctx, tmp.Name(), key)
+	_, err = m.Import(ctx, tmp.Name())
 	return err
 }

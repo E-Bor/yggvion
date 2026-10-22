@@ -6,45 +6,25 @@ extension EncryptedSync on SyncService {
   bool get needsEncryptionKey =>
       _requiredKeyId != null && _cipher?.id != _requiredKeyId;
 
-  Future<WorkspaceKey> prepareWorkspaceKey() => repo.serial(() async {
-    final stored = await repo.db.meta('workspace_key_id');
-    final key = stored == null
-        ? WorkspaceKey.generate()
-        : (_cipher?.id == stored
-              ? _cipher
-              : await WorkspaceKey.load(stored, secure));
-    if (key == null) {
-      _requiredKeyId = stored;
-      _cipher = null;
-      _password = PasswordEnvelope.fromEncoded(
-        await repo.db.meta(PasswordEnvelope.storageKey(stored!)),
-      );
-      throw StateError('Введите пароль шифрования для восстановления доступа');
-    }
-    if (stored == null) {
-      await key.save(secure);
-      await repo.db.setMeta('workspace_key_id', key.id);
-    }
-    _cipher = key;
-    _password = PasswordEnvelope.fromEncoded(
-      await repo.db.meta(PasswordEnvelope.storageKey(key.id)),
+  Future<WorkspaceKey> prepareWorkspaceKey() async {
+    final id = await repo.db.meta('workspace_key_id');
+    if (id == null) throw const PasswordRequired();
+    _password = PasswordConfig.fromEncoded(
+      await repo.db.meta(PasswordConfig.storageKey(id)),
     );
-    _password?.verify(key);
     if (_password == null) {
-      final cached = await repo.db
-          .customSelect(
-            'SELECT (SELECT count(*) FROM encrypted_outbox) + (SELECT count(*) FROM encrypted_files) AS count',
-          )
-          .getSingle();
-      if (cached.read<int>('count') > 0 ||
-          await repo.db.meta('encrypted_server_key_id') != null) {
-        throw StateError(
-          'Данные прежнего формата E2EE не поддерживаются. Перенос не предусмотрен.',
-        );
-      }
+      throw StateError('Прежний формат шифрования не поддерживается');
     }
-    return key;
-  });
+    if (_cipher?.id == id) {
+      _password!.verify(_cipher!);
+      return _cipher!;
+    }
+    _requiredKeyId = id;
+    final password = await credentials.read(key: 'password_$id');
+    if (password == null) throw const PasswordRequired();
+    _cipher = await _password!.unlock(password);
+    return _cipher!;
+  }
 
   bool get passwordConfigured => _password != null;
 
@@ -56,45 +36,31 @@ extension EncryptedSync on SyncService {
     try {
       if (connected) {
         final state = await request('GET', '/api/v1/state');
-        final raw = state['password_envelope'];
+        if (state['protocol'] != 6) {
+          throw StateError('Нужна новая версия сервера');
+        }
+        final raw = state['password_config'];
         if (raw is! Map<String, dynamic>) {
           throw StateError('На сервере ещё не настроен пароль шифрования');
         }
-        _password = PasswordEnvelope.fromJson(raw);
+        _password = PasswordConfig.fromJson(raw);
         if (_password!.keyId != state['encryption_key_id']) {
-          throw const FormatException('Неверная защита паролем');
+          throw const FormatException('Некорректные параметры шифрования');
         }
+      } else {
+        final id = await repo.db.meta('workspace_key_id');
+        _password = id == null
+            ? null
+            : PasswordConfig.fromEncoded(
+                await repo.db.meta(PasswordConfig.storageKey(id)),
+              );
       }
       if (_password == null) {
-        throw StateError(
-          'Сначала подключитесь к серверу или выберите резервную копию',
-        );
-      }
-      final pinned = await repo.db.meta('encrypted_server_key_id');
-      if (connected && pinned != null && pinned != _password!.keyId) {
-        throw StateError(
-          'Изменился ключ сервера. Переподключитесь с доверенного устройства',
-        );
+        throw StateError('Сначала подключитесь к серверу или выберите копию');
       }
       final key = await _password!.unlock(password);
-      final cached = PasswordEnvelope.fromEncoded(
-        await repo.db.meta(PasswordEnvelope.storageKey(key.id)),
-      );
-      if (cached != null && cached.revision > _password!.revision) {
-        throw StateError('Сервер вернул устаревшую защиту паролем');
-      }
-      await key.save(secure);
-      await repo.db.setMeta('workspace_key_id', key.id);
-      await repo.db.setMeta(
-        PasswordEnvelope.storageKey(key.id),
-        _password!.encoded,
-      );
-      _cipher = key;
-      _requiredKeyId = key.id;
-      if (!connected) {
-        repo.syncError = null;
-        repo.syncStatus = 'Локально';
-      }
+      await _rememberPassword(_password!, password, key);
+      repo.syncError = null;
     } finally {
       _busy = false;
       repo.publish();
@@ -109,58 +75,58 @@ extension EncryptedSync on SyncService {
     if (_busy || _pairing) {
       throw StateError('Дождитесь завершения синхронизации');
     }
-    PasswordEnvelope.validatePassword(password, creating: true);
+    PasswordConfig.validatePassword(password, creating: true);
     _busy = true;
     try {
-      final key = await prepareWorkspaceKey();
-      Map<String, dynamic>? state;
-      var current = _password;
-      if (connected) {
-        state = await request('GET', '/api/v1/state');
-        if (state['protocol'] != 5) {
-          throw StateError('Обновите сервер для защиты паролем');
-        }
-        final serverKey = state['encryption_key_id'] as String? ?? '';
-        if (serverKey.isNotEmpty && serverKey != key.id) {
-          throw StateError('Сначала введите пароль существующего пространства');
-        }
-        if (serverKey.isNotEmpty &&
-            state['password_envelope'] is! Map<String, dynamic>) {
-          throw StateError(
-            'Пространство без парольного E2EE не поддерживается. Создайте новое.',
-          );
-        }
-        if (state['password_envelope'] case final Map<String, dynamic> raw) {
-          current = PasswordEnvelope.fromJson(raw);
-          current.verify(key);
-        }
+      final stored = await repo.db.meta('workspace_key_id');
+      final current = stored == null
+          ? null
+          : PasswordConfig.fromEncoded(
+              await repo.db.meta(PasswordConfig.storageKey(stored)),
+            );
+      if (stored != null && current == null) {
+        throw StateError('Прежний формат шифрования не поддерживается');
       }
       if (current != null) {
         if (currentPassword == null) {
           throw const FormatException('Введите текущий пароль');
         }
-        final unlocked = await current.unlock(currentPassword);
-        if (unlocked.id != key.id) {
-          throw const FormatException('Неверный текущий пароль');
+        _cipher = await current.unlock(currentPassword);
+        _password = current;
+      }
+      if (connected && current != null) {
+        _busy = false;
+        await sync();
+        _busy = true;
+        if (repo.syncError != null) throw StateError(repo.syncError!);
+      }
+      Map<String, dynamic>? state;
+      if (connected) {
+        state = await request('GET', '/api/v1/state');
+        if (state['protocol'] != 6) {
+          throw StateError('Нужна новая версия сервера');
+        }
+        if ((state['encryption_key_id'] as String).isNotEmpty) {
+          if (current == null || state['encryption_key_id'] != current.keyId) {
+            throw StateError(
+              'Сначала введите пароль существующего пространства',
+            );
+          }
         }
       }
-      final next = await PasswordEnvelope.create(
-        key,
-        password,
-        revision: (current?.revision ?? 0) + 1,
-      );
-      if (state != null &&
-          (state['encryption_key_id'] as String? ?? '').isNotEmpty) {
-        // Durable retry: losing a successful HTTP response cannot lose the new password wrapping.
-        await repo.db.setMeta('pending_password_${key.id}', next.encoded);
-        await _flushPassword(state, key);
-      } else {
+      final config = await PasswordConfig.create(password);
+      final key = await config.unlock(password);
+      if (state != null && (state['encryption_key_id'] as String).isNotEmpty) {
+        // Persist the user's new password before committing remotely. A lost reply
+        // is recovered from /state using this local value after an app restart.
+        await credentials.write(key: 'password_${key.id}', value: password);
         await repo.db.setMeta(
-          PasswordEnvelope.storageKey(key.id),
-          next.encoded,
+          PasswordConfig.storageKey(key.id),
+          config.encoded,
         );
-        _password = next;
+        await _rotatePassword(config, key);
       }
+      await _rememberPassword(config, password, key);
     } finally {
       _busy = false;
       repo.publish();
@@ -168,101 +134,72 @@ extension EncryptedSync on SyncService {
     if (connected) await sync();
   }
 
-  Future<Map<String, dynamic>> _flushPassword(
-    Map<String, dynamic> state,
+  Future<void> _rotatePassword(PasswordConfig config, WorkspaceKey key) async {
+    final snapshot = await request('GET', '/api/v1/snapshot');
+    final records = <Entity>[];
+    for (final raw in snapshot['records'] as List) {
+      records.add(await _decodeRecord(raw as Map<String, dynamic>));
+    }
+    await _downloadEncryptedFiles(records: records);
+    await _uploadEncryptedFiles(key: key, rekeyFrom: _cipher!.id);
+    final encrypted = <Map<String, dynamic>>[];
+    for (final record in records) {
+      encrypted.add(
+        (await key.encrypt(
+          record,
+          await _attachmentMap(record, key: key),
+        )).toJson(),
+      );
+    }
+    await client.put<Object?>(
+      '$_url/api/v1/encryption/password',
+      options: Options(
+        headers: authHeaders,
+        sendTimeout: const Duration(minutes: 15),
+        receiveTimeout: const Duration(minutes: 15),
+      ),
+      data: {
+        'key_id': _cipher!.id,
+        'cursor': snapshot['cursor'],
+        'password_config': config.value,
+        'records': encrypted,
+      },
+    );
+  }
+
+  Future<void> _rememberPassword(
+    PasswordConfig config,
+    String password,
     WorkspaceKey key,
   ) async {
-    final pending = PasswordEnvelope.fromEncoded(
-      await repo.db.meta('pending_password_${key.id}'),
-    );
-    if (pending == null) return state;
-    pending.verify(key);
-    final remote = state['password_envelope'] is Map<String, dynamic>
-        ? PasswordEnvelope.fromJson(
-            state['password_envelope'] as Map<String, dynamic>,
-          )
-        : null;
-    if (remote == null) {
-      throw StateError(
-        "Сервер не поддерживает парольное шифрование. Нужна чистая установка.",
-      );
-    }
-    remote.verify(key);
-    if (!const DeepCollectionEquality().equals(remote.value, pending.value)) {
-      if (remote.revision != pending.revision - 1) {
-        await repo.db.customStatement('DELETE FROM metadata WHERE key=?', [
-          'pending_password_${key.id}',
-        ]);
-        throw StateError(
-          'Пароль изменён на другом устройстве. Обновите синхронизацию и повторите смену.',
-        );
-      }
-      await client.put<Object?>(
-        '$_url/api/v1/encryption/password',
-        options: Options(
-          headers: {
-            ...authHeaders,
-            'X-Yggvion-Generation': state['generation'],
-          },
-        ),
-        data: {
-          'key_id': key.id,
-          'expected_revision': pending.revision - 1,
-          'password_envelope': pending.value,
-        },
-      );
-      state = {...state, 'password_envelope': pending.value};
-    }
+    config.verify(key);
     await repo.db.transaction(() async {
-      await repo.db.setMeta(
-        PasswordEnvelope.storageKey(key.id),
-        pending.encoded,
-      );
-      await repo.db.customStatement('DELETE FROM metadata WHERE key=?', [
-        'pending_password_${key.id}',
-      ]);
+      final old = await repo.db.meta('workspace_key_id');
+      await credentials.write(key: 'password_${key.id}', value: password);
+      await repo.db.setMeta(PasswordConfig.storageKey(key.id), config.encoded);
+      await repo.db.setMeta('workspace_key_id', key.id);
+      if (old != key.id) {
+        await repo.db.customStatement('DELETE FROM encrypted_outbox');
+        if (old != null) await credentials.delete(key: 'password_$old');
+      }
     });
-    _password = pending;
-    return state;
+    _cipher = key;
+    _password = config;
+    _requiredKeyId = key.id;
   }
 
   Future<Map<String, dynamic>> _checkEncryption(
     Map<String, dynamic> state,
   ) async {
-    if (state['e2ee'] != true || state['protocol'] != 5) {
-      throw StateError('Обновите сервер: необходима поддержка E2EE');
+    if (state['e2ee'] != true || state['protocol'] != 6) {
+      throw StateError('Нужна новая версия сервера с парольным шифрованием');
     }
-    var keyId = state['encryption_key_id'] as String? ?? '';
+    var keyId = state['encryption_key_id'] as String;
     if (keyId.isEmpty) {
-      // A fresh VPS is initialized before any local records or files leave the
-      // device. Existing plaintext servers are not silently adopted.
-      final pinned = await repo.db.meta('encrypted_server_key_id');
-      if (pinned != null) {
-        throw StateError(
-          'Сервер потерял состояние E2EE. Синхронизация остановлена',
-        );
-      }
-      final page = await client.get<Map<String, dynamic>>(
-        '$_url/api/v1/changes',
-        queryParameters: {'after': 0},
-        options: Options(
-          headers: {
-            ...authHeaders,
-            'X-Yggvion-Generation': state['generation'],
-          },
-        ),
-      );
-      if ((page.data!['records'] as List).isNotEmpty) {
-        throw StateError(
-          'Этот сервер содержит открытые данные. Для нового E2EE-пространства нужен пустой сервер',
-        );
+      if (await repo.db.meta('encrypted_server_key_id') != null) {
+        throw StateError('Сервер потерял настройки шифрования');
       }
       final key = await prepareWorkspaceKey();
-      if (_password == null) {
-        throw StateError(
-          'Создайте пароль шифрования в настройках синхронизации',
-        );
-      }
       await client.post<Object?>(
         '$_url/api/v1/encryption',
         options: Options(
@@ -271,64 +208,43 @@ extension EncryptedSync on SyncService {
             'X-Yggvion-Generation': state['generation'],
           },
         ),
-        data: {'key_id': key.id, 'password_envelope': _password!.value},
+        data: {'key_id': key.id, 'password_config': _password!.value},
       );
       state = await request('GET', '/api/v1/state');
       keyId = state['encryption_key_id'] as String;
-      // The initial empty generation must not replace the first device's data.
       _generation = state['generation'] as String;
       await repo.db.setMeta('server_generation', _generation!);
     }
-    if (!RegExp(r'^[a-f0-9]{64}$').hasMatch(keyId)) {
-      throw const FormatException('Неверный идентификатор ключа сервера');
+    final config = PasswordConfig.fromJson(
+      state['password_config'] as Map<String, dynamic>,
+    );
+    if (config.keyId != keyId) {
+      throw const FormatException('Повреждены параметры шифрования');
     }
+    _password = config;
     _requiredKeyId = keyId;
-    if (_cipher?.id != keyId) _cipher = await WorkspaceKey.load(keyId, secure);
-    if (_cipher != null) state = await _flushPassword(state, _cipher!);
-    final rawPassword = state['password_envelope'];
-    _password = rawPassword is Map<String, dynamic>
-        ? PasswordEnvelope.fromJson(rawPassword)
-        : null;
-    if (_password != null && _password!.keyId != keyId) {
-      throw const FormatException('Неверная защита паролем сервера');
+    final password = await credentials.read(key: 'password_$keyId');
+    if (password == null) {
+      _cipher = null;
+      throw StateError('Введите пароль в разделе «Шифрование» в настройках');
     }
-    if (_cipher == null) {
-      throw StateError('Введите пароль шифрования в настройках синхронизации');
-    }
-    if (_password == null) {
-      throw StateError(
-        'Пространство без парольного E2EE не поддерживается. Создайте новое.',
-      );
-    }
-    _password!.verify(_cipher!);
-    final cached = PasswordEnvelope.fromEncoded(
-      await repo.db.meta(PasswordEnvelope.storageKey(keyId)),
-    );
-    if (cached != null && cached.revision > _password!.revision) {
-      throw StateError(
-        'Сервер вернул устаревшую защиту паролем. Синхронизация остановлена.',
-      );
-    }
-    await repo.db.setMeta(
-      PasswordEnvelope.storageKey(keyId),
-      _password!.encoded,
-    );
+    final key = _cipher?.id == keyId ? _cipher! : await config.unlock(password);
+    config.verify(key);
+    await _rememberPassword(config, password, key);
     final pinned = await repo.db.meta('encrypted_server_key_id');
-    if (pinned != null && pinned != keyId) {
-      throw StateError(
-        'Изменился ключ сервера. Переподключитесь с доверенного устройства',
-      );
-    }
     if (_generation == null && pinned == null) {
       _generation = state['generation'] as String;
       await repo.db.setMeta('server_generation', _generation!);
     }
-    await repo.db.setMeta('workspace_key_id', keyId);
     await repo.db.setMeta('encrypted_server_key_id', keyId);
     return state;
   }
 
-  Future<Map<String, String>> _attachmentMap(Entity entity) async {
+  Future<Map<String, String>> _attachmentMap(
+    Entity entity, {
+    WorkspaceKey? key,
+  }) async {
+    key ??= _cipher!;
     final result = <String, String>{};
     for (final match in RegExp(
       r'attachment:([a-f0-9]{64})',
@@ -337,7 +253,7 @@ extension EncryptedSync on SyncService {
       final row = await repo.db
           .customSelect(
             'SELECT cipher_id FROM encrypted_files WHERE key_id=? AND id=?',
-            variables: [Variable(_cipher!.id), Variable(id)],
+            variables: [Variable(key.id), Variable(id)],
           )
           .getSingleOrNull();
       if (row == null) {
@@ -390,11 +306,15 @@ extension EncryptedSync on SyncService {
     return result.record;
   }
 
-  Future<void> _uploadEncryptedFiles() async {
+  Future<void> _uploadEncryptedFiles({
+    WorkspaceKey? key,
+    String? rekeyFrom,
+  }) async {
+    final cipher = key ?? _cipher!;
     final rows = await repo.db
         .customSelect(
           'SELECT f.*,e.cipher_id FROM files f LEFT JOIN encrypted_files e ON e.id=f.id AND e.key_id=?',
-          variables: [Variable(_cipher!.id)],
+          variables: [Variable(cipher.id)],
         )
         .get();
     for (final row in rows) {
@@ -413,7 +333,7 @@ extension EncryptedSync on SyncService {
       final temp = await Directory.systemTemp.createTemp('yggvion-encrypted-');
       try {
         final file = File(p.join(temp.path, 'blob'));
-        await _cipher!.encryptFile(source, file, 'attachment:$id');
+        await cipher.encryptFile(source, file, 'attachment:$id');
         final cipherId = (await sha256.bind(file.openRead()).first).toString();
         await client.put<Object?>(
           '$_url/api/v1/attachments/$cipherId',
@@ -422,16 +342,17 @@ extension EncryptedSync on SyncService {
             sendTimeout: const Duration(minutes: 15),
             headers: {
               ...authHeaders,
+              "X-Yggvion-Rekey-From": ?rekeyFrom,
               'Content-Type': 'application/octet-stream',
               'Content-Length': await file.length(),
-              'X-Yggvion-Encryption': _cipher!.id,
+              'X-Yggvion-Encryption': cipher.id,
             },
           ),
         );
         await repo.db.transaction(() async {
           await repo.db.customStatement(
             'INSERT OR REPLACE INTO encrypted_files VALUES(?,?,?)',
-            [_cipher!.id, id, cipherId],
+            [cipher.id, id, cipherId],
           );
           await repo.db.customStatement(
             'UPDATE files SET uploaded=1 WHERE id=?',
@@ -444,8 +365,8 @@ extension EncryptedSync on SyncService {
     }
   }
 
-  Future<void> _downloadEncryptedFiles() async {
-    final entities = await repo.db.entities();
+  Future<void> _downloadEncryptedFiles({List<Entity>? records}) async {
+    final entities = records ?? await repo.db.entities();
     final names = <String, String>{};
     for (final entity in entities) {
       for (final match in RegExp(

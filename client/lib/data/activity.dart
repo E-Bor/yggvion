@@ -121,6 +121,16 @@ class ApplicationActivity extends ChangeNotifier with WidgetsBindingObserver {
     unawaited(setForeground(state == AppLifecycleState.resumed));
   }
 
+  Future<void> stop() async {
+    _timer?.cancel();
+    if (_observing) {
+      WidgetsBinding.instance.removeObserver(this);
+      HardwareKeyboard.instance.removeHandler(_key);
+      _observing = false;
+    }
+    await setForeground(false);
+  }
+
   @override
   void dispose() {
     _disposed = true;

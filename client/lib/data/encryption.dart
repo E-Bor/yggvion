@@ -6,7 +6,6 @@ import 'dart:typed_data';
 import 'package:crypto/crypto.dart' as digest;
 import 'package:cryptography/cryptography.dart';
 import 'package:cryptography/dart.dart';
-import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import '../domain/models.dart';
 
 part 'password.dart';
@@ -17,32 +16,9 @@ class WorkspaceKey {
   WorkspaceKey(List<int> bytes) : _bytes = Uint8List.fromList(bytes) {
     if (_bytes.length != 32) throw const FormatException('Неверный ключ');
   }
-  factory WorkspaceKey.generate() =>
-      WorkspaceKey(List<int>.generate(32, (_) => Random.secure().nextInt(256)));
-  factory WorkspaceKey.parse(String value) {
-    if (!value.trim().startsWith('yggkey1:')) {
-      throw const FormatException('Нужен ключ восстановления Yggvion');
-    }
-    return WorkspaceKey(base64Url.decode(value.trim().substring(8)));
-  }
+
   final Uint8List _bytes;
   String get id => digest.sha256.convert(_bytes).toString();
-  String get recovery => 'yggkey1:${base64Url.encode(_bytes)}';
-  static const secure = FlutterSecureStorage(
-    mOptions: MacOsOptions(useDataProtectionKeyChain: false),
-  );
-  Future<void> save([FlutterSecureStorage storage = secure]) =>
-      storage.write(key: 'workspace_key_$id', value: recovery);
-  static Future<WorkspaceKey?> load(
-    String id, [
-    FlutterSecureStorage storage = secure,
-  ]) async {
-    final value = await storage.read(key: 'workspace_key_$id');
-    if (value == null) return null;
-    final result = WorkspaceKey.parse(value);
-    if (result.id != id) throw const FormatException('Ключ повреждён');
-    return result;
-  }
 
   Future<SecretKey> _derive(String purpose, {List<int> salt = const []}) =>
       Hkdf(hmac: Hmac.sha256(), outputLength: 32).deriveKey(
