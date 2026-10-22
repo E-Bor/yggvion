@@ -14,6 +14,7 @@ import 'providers.dart';
 import 'task_editor.dart';
 import 'theme.dart';
 import 'birthdays.dart';
+import 'month_planning.dart';
 
 class CalendarToolbar extends StatelessWidget {
   const CalendarToolbar({
@@ -200,6 +201,8 @@ class CalendarPane extends ConsumerStatefulWidget {
     this.entries = const [],
     this.onEntriesChanged,
     this.initialTime,
+    this.planningPreview = false,
+    this.selectionMinutes,
   });
   final Task? selectedTask;
   final VoidCallback? onPlaced;
@@ -212,6 +215,10 @@ class CalendarPane extends ConsumerStatefulWidget {
   final List<TimeBlock> entries;
   final ValueChanged<List<TimeBlock>>? onEntriesChanged;
   final DateTime? initialTime;
+
+  /// A local, single-block planning draft. Existing events remain read-only.
+  final bool planningPreview;
+  final int? selectionMinutes;
   @override
   ConsumerState<CalendarPane> createState() => _CalendarPaneState();
 }
@@ -246,7 +253,8 @@ class _CalendarPaneState extends ConsumerState<CalendarPane>
   int expansion = 0;
   double swipeDistance = 0, overscrollDistance = 0;
   CalendarView entryView = CalendarView.day;
-  bool get enteringTime => widget.onEntriesChanged != null;
+  bool get editingDrafts => widget.onEntriesChanged != null;
+  bool get enteringTime => editingDrafts && !widget.planningPreview;
   bool get mobile =>
       defaultTargetPlatform == TargetPlatform.iOS ||
       defaultTargetPlatform == TargetPlatform.android;
@@ -300,7 +308,7 @@ class _CalendarPaneState extends ConsumerState<CalendarPane>
       date = _midnight(widget.initialDate!);
       expand();
     }
-    if (enteringTime &&
+    if (editingDrafts &&
         widget.initialTime != null &&
         widget.initialTime != old.initialTime) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -317,7 +325,7 @@ class _CalendarPaneState extends ConsumerState<CalendarPane>
   }
 
   void expand() {
-    if (enteringTime) return;
+    if (editingDrafts) return;
     final generation = ++expansion;
     RecurrenceService(ref.read(appProvider))
         .expand(
@@ -346,6 +354,7 @@ class _CalendarPaneState extends ConsumerState<CalendarPane>
   }
 
   void swipePage(CalendarView view, double distance, [double velocity = 0]) {
+    if (widget.planningPreview) return;
     if (drag != null || selectionAnchor != null) return;
     if (distance.abs() < 60 && !(distance.abs() > 20 && velocity.abs() > 500)) {
       return;
@@ -449,7 +458,9 @@ class _CalendarPaneState extends ConsumerState<CalendarPane>
         0,
         interactionCount - 1,
       );
-      final days = active.kind == CalendarDragKind.move
+      final days = widget.planningPreview
+          ? 0
+          : active.kind == CalendarDragKind.move
           ? ((point.dx - active.origin.dx) / interactionWidth).round()
           : column(point.dx) - column(active.origin.dx);
       final minutes =
@@ -467,6 +478,22 @@ class _CalendarPaneState extends ConsumerState<CalendarPane>
           end = shift(end, days, minutes);
           final earliest = start.add(const Duration(minutes: 5));
           if (end.isBefore(earliest)) end = earliest;
+      }
+      if (widget.planningPreview && active.kind != CalendarDragKind.end) {
+        // This editor chooses a time within the date selected in the month.
+        // Keep the start on that date; the duration may extend past midnight.
+        final lastStart = _date(
+          interactionFirst.year,
+          interactionFirst.month,
+          interactionFirst.day,
+          23,
+          55,
+        );
+        if (start.isBefore(interactionFirst)) start = interactionFirst;
+        if (start.isAfter(lastStart)) start = lastStart;
+        if (active.kind == CalendarDragKind.move) {
+          end = start.add(active.block.duration);
+        }
       }
       if (start != active.start || end != active.end) {
         setState(() {
@@ -570,7 +597,7 @@ class _CalendarPaneState extends ConsumerState<CalendarPane>
             active.end == active.block.end)) {
       return;
     }
-    if (enteringTime) {
+    if (editingDrafts) {
       widget.onEntriesChanged!([
         for (final block in widget.entries)
           if (block.id == active.block.id)
@@ -598,9 +625,9 @@ class _CalendarPaneState extends ConsumerState<CalendarPane>
   }
 
   Future<void> place(DateTime start, DateTime end) async {
-    if (enteringTime) {
+    if (editingDrafts) {
       widget.onEntriesChanged!([
-        ...widget.entries,
+        if (!widget.planningPreview) ...widget.entries,
         TimeBlock(
           TimeBlock.create(
             ref.read(appProvider).newId(),
@@ -624,10 +651,31 @@ class _CalendarPaneState extends ConsumerState<CalendarPane>
     }
   }
 
+  Future<void> placeInMonth(DateTime day) async {
+    final repo = ref.read(appProvider);
+    final task = widget.selectedTask;
+    if (task == null) {
+      final start = _date(day.year, day.month, day.day, 9);
+      await place(
+        start,
+        start.add(Duration(minutes: repo.snapshot.settings.defaultMinutes)),
+      );
+      return;
+    }
+    final range = await chooseMonthPlan(context, task: task, day: day);
+    if (!mounted || range == null) return;
+    await guard(context, () async {
+      final current = repo.snapshot.task(task.id);
+      if (current == null) throw StateError('Задача уже удалена');
+      await repo.schedule(current, range.start, range.end);
+      if (mounted) widget.onPlaced?.call();
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     final repo = ref.watch(appProvider),
-        view = enteringTime
+        view = editingDrafts
             ? entryView
             : widget.planner
             ? repo.plannerView
@@ -644,17 +692,20 @@ class _CalendarPaneState extends ConsumerState<CalendarPane>
                     widget.projectId.isEmpty ||
                     t.projectId == widget.projectId);
           }).toList();
+    if (widget.planningPreview) blocks.addAll(widget.entries);
     return GestureDetector(
       key: const ValueKey('calendar-swipe'),
       supportedDevices: const {
         PointerDeviceKind.touch,
         PointerDeviceKind.stylus,
       },
-      onHorizontalDragStart: !mobile ? null : (_) => swipeDistance = 0,
-      onHorizontalDragUpdate: !mobile
+      onHorizontalDragStart: !mobile || widget.planningPreview
+          ? null
+          : (_) => swipeDistance = 0,
+      onHorizontalDragUpdate: !mobile || widget.planningPreview
           ? null
           : (d) => swipeDistance += d.delta.dx,
-      onHorizontalDragEnd: !mobile
+      onHorizontalDragEnd: !mobile || widget.planningPreview
           ? null
           : (d) => swipePage(view, swipeDistance, d.primaryVelocity ?? 0),
       child: NotificationListener<ScrollNotification>(
@@ -697,10 +748,10 @@ class _CalendarPaneState extends ConsumerState<CalendarPane>
                     view: view,
                     now: _clock,
                     timezone: repo.snapshot.settings.timezone,
-                    allowMonth: !enteringTime,
+                    allowMonth: !editingDrafts,
                     onDateChanged: changeDate,
                     onViewChanged: (value) {
-                      if (enteringTime) {
+                      if (editingDrafts) {
                         setState(() => entryView = value);
                         return;
                       }
@@ -744,40 +795,42 @@ class _CalendarPaneState extends ConsumerState<CalendarPane>
                                 width: fullWidth,
                                 child: Column(
                                   children: [
-                                    SizedBox(
-                                      height: 59,
-                                      child: Row(
-                                        children: [
-                                          const SizedBox(width: gutter),
-                                          for (var i = 0; i < count; i++)
-                                            SizedBox(
-                                              width: width,
-                                              child: _dayHeader(
+                                    if (!widget.planningPreview)
+                                      SizedBox(
+                                        height: 59,
+                                        child: Row(
+                                          children: [
+                                            const SizedBox(width: gutter),
+                                            for (var i = 0; i < count; i++)
+                                              SizedBox(
+                                                width: width,
+                                                child: _dayHeader(
+                                                  _date(
+                                                    first.year,
+                                                    first.month,
+                                                    first.day + i,
+                                                  ),
+                                                ),
+                                              ),
+                                          ],
+                                        ),
+                                      ),
+                                    if (!widget.planningPreview &&
+                                        blocks.any(
+                                          (b) =>
+                                              repo.snapshot
+                                                      .task(b.taskId)
+                                                      ?.isBirthday ==
+                                                  true &&
+                                              b.start.isBefore(
                                                 _date(
                                                   first.year,
                                                   first.month,
-                                                  first.day + i,
+                                                  first.day + count,
                                                 ),
-                                              ),
-                                            ),
-                                        ],
-                                      ),
-                                    ),
-                                    if (blocks.any(
-                                      (b) =>
-                                          repo.snapshot
-                                                  .task(b.taskId)
-                                                  ?.isBirthday ==
-                                              true &&
-                                          b.start.isBefore(
-                                            _date(
-                                              first.year,
-                                              first.month,
-                                              first.day + count,
-                                            ),
-                                          ) &&
-                                          b.end.isAfter(first),
-                                    ))
+                                              ) &&
+                                              b.end.isAfter(first),
+                                        ))
                                       birthdayRow(
                                         repo,
                                         blocks,
@@ -803,6 +856,8 @@ class _CalendarPaneState extends ConsumerState<CalendarPane>
                                                 key: const ValueKey(
                                                   'calendar-grid-gestures',
                                                 ),
+                                                allowTouchTap:
+                                                    widget.planningPreview,
                                                 onTap: (global) {
                                                   final position =
                                                       contentPosition(global);
@@ -819,10 +874,13 @@ class _CalendarPaneState extends ConsumerState<CalendarPane>
                                                     start,
                                                     start.add(
                                                       Duration(
-                                                        minutes: repo
-                                                            .snapshot
-                                                            .settings
-                                                            .defaultMinutes,
+                                                        minutes:
+                                                            widget
+                                                                .selectionMinutes ??
+                                                            repo
+                                                                .snapshot
+                                                                .settings
+                                                                .defaultMinutes,
                                                       ),
                                                     ),
                                                   );
@@ -848,15 +906,17 @@ class _CalendarPaneState extends ConsumerState<CalendarPane>
                                                     );
                                                     selectionStart =
                                                         selectionAnchor;
-                                                    selectionEnd =
-                                                        selectionStart!.add(
-                                                          Duration(
-                                                            minutes: repo
+                                                    selectionEnd = selectionStart!.add(
+                                                      Duration(
+                                                        minutes:
+                                                            widget
+                                                                .selectionMinutes ??
+                                                            repo
                                                                 .snapshot
                                                                 .settings
                                                                 .defaultMinutes,
-                                                          ),
-                                                        );
+                                                      ),
+                                                    );
                                                   });
                                                 },
                                                 onUpdate: updateInteraction,
@@ -927,7 +987,7 @@ class _CalendarPaneState extends ConsumerState<CalendarPane>
                                                         first,
                                                         count,
                                                       ),
-                                                    if (!enteringTime)
+                                                    if (!editingDrafts)
                                                       for (
                                                         var day = 0;
                                                         day < count;
@@ -1229,20 +1289,58 @@ class _CalendarPaneState extends ConsumerState<CalendarPane>
           // This segment owns the active gesture even when its preview moves
           // off screen or continues into another day.
           opacity: drag?.block.id == b.id ? 0 : 1,
-          child: CalendarBlock(
-            block: b,
-            day: day,
-            onDragStart: (kind, global) =>
-                beginDrag(b, kind, global, width, count, first),
-            onDragUpdate: updateInteraction,
-            onDragEnd: finishDrag,
-            onDragCancel: cancelInteraction,
-            onDelete: enteringTime
-                ? () => widget.onEntriesChanged!(
-                    widget.entries.where((entry) => entry.id != b.id).toList(),
-                  )
-                : null,
-          ),
+          child:
+              widget.planningPreview &&
+                  !widget.entries.any((entry) => entry.id == b.id)
+              ? IgnorePointer(
+                  child: Container(
+                    key: ValueKey('planning-busy-${b.id}'),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 9,
+                      vertical: 2,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Palette.raised,
+                      border: Border(
+                        left: BorderSide(
+                          color: Color(
+                            repo.snapshot.taskColor(
+                              repo.snapshot.task(b.taskId)!,
+                            ),
+                          ).withValues(alpha: .55),
+                          width: 2,
+                        ),
+                      ),
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: Text(
+                      '${DateFormat('HH:mm').format(start)} · ${repo.snapshot.task(b.taskId)!.title}',
+                      maxLines: height > 48 ? 2 : 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: Palette.muted,
+                        fontSize: 11,
+                      ),
+                    ),
+                  ),
+                )
+              : CalendarBlock(
+                  block: b,
+                  day: day,
+                  planning: widget.planningPreview,
+                  onDragStart: (kind, global) =>
+                      beginDrag(b, kind, global, width, count, first),
+                  onDragUpdate: updateInteraction,
+                  onDragEnd: finishDrag,
+                  onDragCancel: cancelInteraction,
+                  onDelete: enteringTime
+                      ? () => widget.onEntriesChanged!(
+                          widget.entries
+                              .where((entry) => entry.id != b.id)
+                              .toList(),
+                        )
+                      : null,
+                ),
         ),
       );
     }).toList();
@@ -1493,15 +1591,8 @@ class _CalendarPaneState extends ConsumerState<CalendarPane>
               .floor()
               .clamp(1, 3);
           return InkWell(
-            onTap: () => place(
-              day.add(const Duration(hours: 9)),
-              day.add(
-                Duration(
-                  hours: 9,
-                  minutes: repo.snapshot.settings.defaultMinutes,
-                ),
-              ),
-            ),
+            key: ValueKey('calendar-month-day-${dayKey(day)}'),
+            onTap: () => placeInMonth(day),
             child: Container(
               decoration: BoxDecoration(
                 border: Border(
@@ -1605,10 +1696,12 @@ class CalendarGestureSurface extends StatelessWidget {
     required this.onEnd,
     required this.onCancel,
     required this.child,
+    this.allowTouchTap = false,
   });
   final ValueChanged<Offset> onTap, onStart, onUpdate;
   final VoidCallback onEnd, onCancel;
   final Widget child;
+  final bool allowTouchTap;
   @override
   Widget build(BuildContext context) => Listener(
     onPointerCancel: (_) => onCancel(),
@@ -1618,6 +1711,7 @@ class CalendarGestureSurface extends StatelessWidget {
         PointerDeviceKind.stylus,
       },
       behavior: HitTestBehavior.opaque,
+      onTapUp: allowTouchTap ? (d) => onTap(d.globalPosition) : null,
       onLongPressStart: (d) {
         HapticFeedback.mediumImpact();
         onStart(d.globalPosition);
@@ -1727,6 +1821,7 @@ class CalendarBlock extends ConsumerStatefulWidget {
     required this.onDragEnd,
     required this.onDragCancel,
     this.onDelete,
+    this.planning = false,
   });
   final TimeBlock block;
   final DateTime day;
@@ -1734,6 +1829,7 @@ class CalendarBlock extends ConsumerStatefulWidget {
   final ValueChanged<Offset> onDragUpdate;
   final VoidCallback onDragEnd, onDragCancel;
   final VoidCallback? onDelete;
+  final bool planning;
   @override
   ConsumerState<CalendarBlock> createState() => _CalendarBlockState();
 }
@@ -1830,7 +1926,7 @@ class _CalendarBlockState extends ConsumerState<CalendarBlock> {
                   },
               ),
         },
-        child: !mobile || !editing
+        child: !widget.planning && (!mobile || !editing)
             ? const SizedBox.expand()
             : Align(
                 alignment: beginning
@@ -1867,7 +1963,7 @@ class _CalendarBlockState extends ConsumerState<CalendarBlock> {
     final running = repo.snapshot.sessions.any(
       (s) => s.taskId == task.id && s.running,
     );
-    final canPan = !mobile || editing;
+    final canPan = !mobile || editing || widget.planning;
     return Listener(
       onPointerCancel: (_) {
         if (gestureOwner != null) {
@@ -1897,13 +1993,13 @@ class _CalendarBlockState extends ConsumerState<CalendarBlock> {
                 PointerDeviceKind.stylus,
               },
               onTap: () {
-                if (widget.onDelete == null) {
+                if (widget.onDelete == null && !widget.planning) {
                   openTask(context, task: task, blockId: widget.block.id);
                 } else {
                   setState(() => editing = true);
                 }
               },
-              onSecondaryTapDown: widget.onDelete == null
+              onSecondaryTapDown: widget.onDelete == null && !widget.planning
                   ? (d) => menu(d.globalPosition)
                   : null,
               dragStartBehavior: DragStartBehavior.down,
@@ -1938,12 +2034,14 @@ class _CalendarBlockState extends ConsumerState<CalendarBlock> {
                   color: Palette.taskSurface(
                     color,
                     subdued: task.done || widget.block.historical,
-                    selected: editing,
+                    selected: editing || widget.planning,
                   ),
                   borderRadius: BorderRadius.circular(8),
                   border: Border.all(
-                    color: editing ? color : color.withValues(alpha: .28),
-                    width: editing ? 1.5 : .7,
+                    color: editing || widget.planning
+                        ? color
+                        : color.withValues(alpha: .28),
+                    width: editing || widget.planning ? 1.5 : .7,
                   ),
                   boxShadow: editing
                       ? [
@@ -2024,6 +2122,7 @@ class _CalendarBlockState extends ConsumerState<CalendarBlock> {
                                       ),
                                     ),
                                   if (widget.onDelete == null &&
+                                      !widget.planning &&
                                       c.maxWidth >= 60) ...[
                                     SizedBox(
                                       width: 25,
@@ -2098,13 +2197,15 @@ class _CalendarBlockState extends ConsumerState<CalendarBlock> {
                             ],
                           ),
                         ),
-                        if (!mobile || editing) ...[
+                        if (!mobile || editing || widget.planning) ...[
                           if (!widget.block.start.isBefore(widget.day))
                             handle(
                               true,
                               color,
                               height,
-                              widget.onDelete != null
+                              widget.planning
+                                  ? 0
+                                  : widget.onDelete != null
                                   ? 29
                                   : c.maxWidth >= 60
                                   ? (task.done ? 29 : 54)
@@ -2115,7 +2216,9 @@ class _CalendarBlockState extends ConsumerState<CalendarBlock> {
                               false,
                               color,
                               height,
-                              widget.onDelete != null
+                              widget.planning
+                                  ? 0
+                                  : widget.onDelete != null
                                   ? 29
                                   : c.maxWidth >= 60
                                   ? (task.done ? 29 : 54)

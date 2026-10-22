@@ -11,6 +11,7 @@ final activityProvider = ChangeNotifierProvider<ApplicationActivity?>(
 );
 final invitationLinksProvider = Provider<Stream<Uri>?>((ref) => null);
 final openNoteProvider = StateProvider<String?>((ref) => null);
+final selectedNoteFolderProvider = StateProvider<String>((ref) => '');
 
 // The native shell supplies this optional service at startup.
 final appIconProvider = ChangeNotifierProvider<AppIconService?>((ref) => null);

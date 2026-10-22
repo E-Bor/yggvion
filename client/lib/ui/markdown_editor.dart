@@ -3,12 +3,15 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:markdown/markdown.dart' as md;
 import 'package:open_filex/open_filex.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../data/clipboard.dart';
 import '../domain/models.dart';
+import '../domain/note_links.dart';
 import 'providers.dart';
 import 'theme.dart';
+import 'wiki_autocomplete.dart';
 
 class MarkdownPreview extends ConsumerWidget {
   const MarkdownPreview({
@@ -20,17 +23,26 @@ class MarkdownPreview extends ConsumerWidget {
   final bool selectable;
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final match = RegExp(
+    final legacy = RegExp(
       r'^\[([^\]]*)\]\(note:([a-zA-Z0-9_-]+)\)$',
     ).firstMatch(text.trim());
-    if (match != null) {
-      final note = ref.watch(appProvider).snapshot.note(match[2]!);
+    final wikiMatch = WikiLink.pattern.matchAsPrefix(text.trim());
+    final wiki = wikiMatch != null && wikiMatch.end == text.trim().length
+        ? WikiLink.fromMatch(wikiMatch)
+        : null;
+    if (legacy != null || wiki != null) {
+      final snapshot = ref.watch(appProvider).snapshot;
+      final note = legacy != null
+          ? snapshot.note(legacy[2]!)
+          : WikiNoteIndex(snapshot).resolve(wiki!.target);
       return Material(
         color: Palette.raised,
         borderRadius: BorderRadius.circular(12),
         child: InkWell(
           borderRadius: BorderRadius.circular(12),
-          onTap: () => showNotePreview(context, match[2]!),
+          onTap: () => legacy != null
+              ? showNotePreview(context, legacy[2]!)
+              : _openWikiLink(context, ref, wiki!.target),
           child: Padding(
             padding: const EdgeInsets.all(14),
             child: Row(
@@ -46,7 +58,10 @@ class MarkdownPreview extends ConsumerWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        note?.displayLabel ?? match[1]!,
+                        note?.displayLabel ??
+                            wiki?.label ??
+                            wiki?.target ??
+                            legacy![1]!,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(fontWeight: FontWeight.w600),
@@ -79,6 +94,7 @@ class MarkdownPreview extends ConsumerWidget {
     }
     return MarkdownBody(
       data: text,
+      inlineSyntaxes: [_WikiLinkSyntax()],
       selectable: selectable,
       styleSheet: MarkdownStyleSheet.fromTheme(Theme.of(context)).copyWith(
         p: const TextStyle(height: 1.65, color: Palette.text),
@@ -97,7 +113,9 @@ class MarkdownPreview extends ConsumerWidget {
         if (href == null) return;
         guard(context, () async {
           final uri = Uri.parse(href);
-          if (uri.scheme == 'note' ||
+          if (uri.scheme == 'wiki') {
+            await _openWikiLink(context, ref, Uri.decodeComponent(uri.path));
+          } else if (uri.scheme == 'note' ||
               (uri.scheme == 'yggvion' && uri.host == 'note')) {
             await showNotePreview(
               context,
@@ -156,6 +174,49 @@ class MarkdownPreview extends ConsumerWidget {
   }
 }
 
+class _WikiLinkSyntax extends md.InlineSyntax {
+  _WikiLinkSyntax() : super(WikiLink.pattern.pattern, startCharacter: 0x5b);
+  @override
+  bool onMatch(md.InlineParser parser, Match match) {
+    final link = WikiLink.fromMatch(match);
+    final node = md.Element.text('a', link.label ?? link.target);
+    node.attributes['href'] = Uri(scheme: 'wiki', path: link.target).toString();
+    parser.addNode(node);
+    return true;
+  }
+}
+
+Future<void> _openWikiLink(
+  BuildContext context,
+  WidgetRef ref,
+  String target,
+) async {
+  final matches = WikiNoteIndex(ref.read(appProvider).snapshot).matches(target);
+  final note = matches.length > 1
+      ? await pickNote(context, onlyIds: matches.map((n) => n.id).toSet())
+      : matches.singleOrNull;
+  if (!context.mounted || (matches.length > 1 && note == null)) return;
+  if (note != null) {
+    await showNotePreview(context, note.id);
+  } else {
+    await showDialog<void>(
+      context: context,
+      builder: (dialog) => AlertDialog(
+        title: const Text('Заметка не найдена'),
+        content: Text(
+          '«$target» удалена, переименована на другом устройстве или ещё не синхронизирована.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialog),
+            child: const Text('Закрыть'),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 /// The focused Markdown block exposes source; other blocks render immediately.
 /// Raw text remains authoritative, preserving Markdown that the renderer cannot display.
 class LiveMarkdownEditor extends ConsumerStatefulWidget {
@@ -171,12 +232,14 @@ class LiveMarkdownEditor extends ConsumerStatefulWidget {
     this.onEditingChanged,
     this.toolbarLeading,
     this.toolbarTrailing,
+    this.noteId,
   });
   final String value, placeholder, toolbarLabel;
   final ValueChanged<String> onChanged;
   final bool readOnly, toolbar, editOnLongPress;
   final ValueChanged<bool>? onEditingChanged;
   final Widget? toolbarLeading, toolbarTrailing;
+  final String? noteId;
   @override
   ConsumerState<LiveMarkdownEditor> createState() => LiveMarkdownEditorState();
 }
@@ -373,11 +436,13 @@ class LiveMarkdownEditorState extends ConsumerState<LiveMarkdownEditor> {
 
   Future<void> _linkNote() async {
     final selection = _selection;
-    final note = await pickNote(context);
+    final note = await pickNote(context, excludeId: widget.noteId);
     if (note == null || !mounted || widget.readOnly) return;
-    final label = note.displayLabel.replaceAll(RegExp(r'[\[\]\\\r\n]'), ' ');
     _insert(
-      ClipboardPaste('[$label](note:${note.id})', hasAttachments: false),
+      ClipboardPaste(
+        WikiNoteIndex(ref.read(appProvider).snapshot).linkFor(note),
+        hasAttachments: false,
+      ),
       selection,
     );
   }
@@ -454,7 +519,6 @@ class LiveMarkdownEditorState extends ConsumerState<LiveMarkdownEditor> {
         ),
     },
     child: TextFieldTapRegion(
-      enabled: widget.editOnLongPress,
       groupId: _focus,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -530,59 +594,63 @@ class LiveMarkdownEditorState extends ConsumerState<LiveMarkdownEditor> {
               ),
             )
           else if (_source)
-            TextField(
-              controller: _controller,
-              focusNode: _focus,
-              groupId: widget.editOnLongPress ? _focus : EditableText,
-              onTapOutside: widget.editOnLongPress
-                  ? (_) => finishEditing()
-                  : null,
-              readOnly: _pasting,
-              contextMenuBuilder: _contextMenu,
-              maxLines: null,
-              minLines: 5,
-              style: const TextStyle(
-                fontFamily: 'monospace',
-                fontSize: 13,
-                height: 1.6,
+            _autocomplete(
+              TextField(
+                controller: _controller,
+                focusNode: _focus,
+                groupId: _focus,
+                onTapOutside: widget.editOnLongPress
+                    ? (_) => finishEditing()
+                    : null,
+                readOnly: _pasting,
+                contextMenuBuilder: _contextMenu,
+                maxLines: null,
+                minLines: 5,
+                style: const TextStyle(
+                  fontFamily: 'monospace',
+                  fontSize: 13,
+                  height: 1.6,
+                ),
+                decoration: InputDecoration(
+                  hintText: widget.placeholder,
+                  border: InputBorder.none,
+                  enabledBorder: InputBorder.none,
+                  focusedBorder: InputBorder.none,
+                  fillColor: Colors.transparent,
+                ),
+                onChanged: _changed,
               ),
-              decoration: InputDecoration(
-                hintText: widget.placeholder,
-                border: InputBorder.none,
-                enabledBorder: InputBorder.none,
-                focusedBorder: InputBorder.none,
-                fillColor: Colors.transparent,
-              ),
-              onChanged: _changed,
             )
           else
             ...List.generate(
               _blocks.length,
               (index) => _active == index
-                  ? TextField(
-                      controller: _controller,
-                      focusNode: _focus,
-                      groupId: widget.editOnLongPress ? _focus : EditableText,
-                      onTapOutside: widget.editOnLongPress
-                          ? (_) => finishEditing()
-                          : null,
-                      readOnly: _pasting,
-                      contextMenuBuilder: _contextMenu,
-                      maxLines: null,
-                      minLines: 1,
-                      style: const TextStyle(fontSize: 14, height: 1.65),
-                      decoration: InputDecoration(
-                        hintText: widget.placeholder,
-                        filled: false,
-                        border: InputBorder.none,
-                        enabledBorder: InputBorder.none,
-                        focusedBorder: InputBorder.none,
-                        contentPadding: const EdgeInsets.symmetric(
-                          vertical: 9,
-                          horizontal: 3,
+                  ? _autocomplete(
+                      TextField(
+                        controller: _controller,
+                        focusNode: _focus,
+                        groupId: _focus,
+                        onTapOutside: widget.editOnLongPress
+                            ? (_) => finishEditing()
+                            : null,
+                        readOnly: _pasting,
+                        contextMenuBuilder: _contextMenu,
+                        maxLines: null,
+                        minLines: 1,
+                        style: const TextStyle(fontSize: 14, height: 1.65),
+                        decoration: InputDecoration(
+                          hintText: widget.placeholder,
+                          filled: false,
+                          border: InputBorder.none,
+                          enabledBorder: InputBorder.none,
+                          focusedBorder: InputBorder.none,
+                          contentPadding: const EdgeInsets.symmetric(
+                            vertical: 9,
+                            horizontal: 3,
+                          ),
                         ),
+                        onChanged: _changed,
                       ),
-                      onChanged: _changed,
                     )
                   : GestureDetector(
                       behavior: HitTestBehavior.opaque,
@@ -626,13 +694,30 @@ class LiveMarkdownEditorState extends ConsumerState<LiveMarkdownEditor> {
       ),
     ),
   );
+
+  Widget _autocomplete(Widget child) => WikiAutocomplete(
+    controller: _controller,
+    focusNode: _focus,
+    onChanged: _changed,
+    readOnly: _pasting || widget.readOnly,
+    noteId: widget.noteId,
+    child: child,
+  );
 }
 
-Future<Note?> pickNote(BuildContext context) =>
-    showDialog<Note>(context: context, builder: (_) => const _NotePicker());
+Future<Note?> pickNote(
+  BuildContext context, {
+  Set<String>? onlyIds,
+  String? excludeId,
+}) => showDialog<Note>(
+  context: context,
+  builder: (_) => _NotePicker(onlyIds: onlyIds, excludeId: excludeId),
+);
 
 class _NotePicker extends ConsumerStatefulWidget {
-  const _NotePicker();
+  const _NotePicker({this.onlyIds, this.excludeId});
+  final Set<String>? onlyIds;
+  final String? excludeId;
   @override
   ConsumerState<_NotePicker> createState() => _NotePickerState();
 }
@@ -641,15 +726,13 @@ class _NotePickerState extends ConsumerState<_NotePicker> {
   String query = '';
   @override
   Widget build(BuildContext context) {
-    final notes = ref
-        .watch(appProvider)
-        .snapshot
-        .notes
-        .where(
-          (n) => n.displayLabel.toLowerCase().contains(query.toLowerCase()),
-        )
-        .take(100)
-        .toList();
+    final index = WikiNoteIndex(ref.watch(appProvider).snapshot);
+    final notes = index.search(
+      query,
+      limit: 100,
+      onlyIds: widget.onlyIds,
+      excludeId: widget.excludeId,
+    );
     return AlertDialog(
       title: const Text('Ссылка на заметку'),
       content: SizedBox(
@@ -681,7 +764,7 @@ class _NotePickerState extends ConsumerState<_NotePicker> {
                             overflow: TextOverflow.ellipsis,
                           ),
                           subtitle: Text(
-                            note.content.replaceAll('\n', ' '),
+                            '${index.folderLabel(note)} · ${note.content.replaceAll('\n', ' ')}',
                             maxLines: 2,
                             overflow: TextOverflow.ellipsis,
                           ),

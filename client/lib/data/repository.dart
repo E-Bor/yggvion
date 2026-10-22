@@ -8,6 +8,7 @@ import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:uuid/uuid.dart';
 import '../domain/models.dart';
+import '../domain/note_links.dart';
 import 'database.dart';
 
 class Repository extends ChangeNotifier {
@@ -498,25 +499,71 @@ class Repository extends ChangeNotifier {
   }
 
   Future<Note> createNote({String folderId = ''}) async {
-    final siblings = snapshot.notesInFolder(folderId);
-    final note = Note.create(newId(), 'Новая заметка').change({
-      'folder_id': folderId,
-      'sort_order': (siblings.lastOrNull?.sortOrder ?? 0) + 1024,
+    late Entity note;
+    await commitComputed(() async {
+      if (folderId.isNotEmpty &&
+          !snapshot.noteFolders.any((folder) => folder.id == folderId)) {
+        throw ArgumentError('Папка уже удалена');
+      }
+      final siblings = snapshot.notesInFolder(folderId);
+      note = Note.create(newId(), 'Новая заметка').change({
+        'folder_id': folderId,
+        'sort_order': (siblings.lastOrNull?.sortOrder ?? 0) + 1024,
+      });
+      return [note];
     });
-    await commit([note]);
     return Note(note);
+  }
+
+  /// Keep readable wiki links attached to their original notes when a title,
+  /// heading or folder changes. These text edits share the same sync transaction.
+  List<Entity> _preserveNoteLinks(List<Entity> changes) {
+    final changed = {for (final entity in changes) entity.id: entity};
+    final affectsNames = changes.any((entity) {
+      if (entity.kind == 'note_folder') return true;
+      if (entity.kind != 'note' || entity.deleted) return false;
+      final old = snapshot.note(entity.id);
+      final next = Note(entity);
+      return old != null &&
+          (old.displayLabel != next.displayLabel ||
+              old.folderId != next.folderId);
+    });
+    if (!affectsNames) return changes;
+    final existingIds = snapshot.entities.map((e) => e.id).toSet();
+    final after = Snapshot([
+      for (final entity in snapshot.entities)
+        if (!(changed[entity.id] ?? entity).deleted)
+          changed[entity.id] ?? entity,
+      for (final entity in changes)
+        if (!entity.deleted && !existingIds.contains(entity.id)) entity,
+    ]);
+    final beforeLinks = WikiNoteIndex(snapshot),
+        afterLinks = WikiNoteIndex(after);
+    for (final entity in after.entities) {
+      final field = switch (entity.kind) {
+        'note' => 'content',
+        'task' || 'series' => 'description',
+        _ => null,
+      };
+      if (field == null) continue;
+      final text = entity.data[field] as String? ?? '';
+      if (!text.contains('[[')) continue;
+      final updated = beforeLinks.relink(text, afterLinks);
+      if (updated != text) changed[entity.id] = entity.change({field: updated});
+    }
+    return changed.values.toList();
   }
 
   Future<void> saveNote(String id, String title, String content) =>
       commitComputed(() async {
         final entity = await db.entity(id);
         if (entity == null || entity.deleted) return [];
-        return [
+        return _preserveNoteLinks([
           entity.change({
             'title': title.trim().isEmpty ? 'Новая заметка' : title.trim(),
             'content': content,
           }),
-        ];
+        ]);
       });
 
   Future<void> renameNote(String id, String title) => commitComputed(() async {
@@ -525,20 +572,20 @@ class Repository extends ChangeNotifier {
     }
     final entity = await db.entity(id);
     if (entity == null || entity.deleted || entity.kind != 'note') return [];
-    return [
+    return _preserveNoteLinks([
       entity.change({
         'title': title.trim().isEmpty ? 'Новая заметка' : title.trim(),
       }),
-    ];
+    ]);
   });
 
   Future<void> saveNoteContent(String id, String content) => commitComputed(
     () async {
       final entity = await db.entity(id);
       if (entity == null || entity.deleted || entity.kind != 'note') return [];
-      return [
+      return _preserveNoteLinks([
         entity.change({'content': content}),
-      ];
+      ]);
     },
   );
 
@@ -546,26 +593,28 @@ class Repository extends ChangeNotifier {
     if (title.trim().isEmpty || utf8.encode(title.trim()).length > 1000) {
       throw ArgumentError('Введите название папки до 250 символов');
     }
-    await commit([
-      folder?.entity.change({'title': title.trim()}) ??
-          Entity(
-            id: newId(),
-            kind: 'note_folder',
-            data: {
-              'title': title.trim(),
-              'sort_order':
-                  (snapshot.noteFolders.lastOrNull?.sortOrder ?? 0) + 1024,
-            },
-          ),
-    ]);
+    await commitComputed(
+      () async => _preserveNoteLinks([
+        folder?.entity.change({'title': title.trim()}) ??
+            Entity(
+              id: newId(),
+              kind: 'note_folder',
+              data: {
+                'title': title.trim(),
+                'sort_order':
+                    (snapshot.noteFolders.lastOrNull?.sortOrder ?? 0) + 1024,
+              },
+            ),
+      ]),
+    );
   }
 
   Future<void> deleteNoteFolder(NoteFolder folder) => commitComputed(
-    () async => [
+    () async => _preserveNoteLinks([
       for (final note in snapshot.notes.where((n) => n.folderId == folder.id))
         note.entity.change({'folder_id': ''}),
       folder.entity.tombstone(),
-    ],
+    ]),
   );
 
   Future<void> moveNote(String id, String folderId, {String? beforeId}) =>
@@ -591,21 +640,21 @@ class Repository extends ChangeNotifier {
             ? lower + 2048
             : siblings[index].sortOrder;
         if (upper - lower > 1 && lower.abs() < 1000000000000) {
-          return [
+          return _preserveNoteLinks([
             note.entity.change({
               'folder_id': folderId,
               'sort_order': (lower + upper) ~/ 2,
             }),
-          ];
+          ]);
         }
         siblings.insert(index, note);
-        return [
+        return _preserveNoteLinks([
           for (var i = 0; i < siblings.length; i++)
             siblings[i].entity.change({
               'folder_id': folderId,
               'sort_order': (i + 1) * 1024,
             }),
-        ];
+        ]);
       });
 
   Future<void> reorderNoteFolders(List<String> ids) => commitComputed(

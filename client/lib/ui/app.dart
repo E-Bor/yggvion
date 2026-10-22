@@ -233,7 +233,15 @@ class _WorkspaceState extends ConsumerState<Workspace>
   }
 
   Future<void> createNote() => guard(context, () async {
-    final note = await ref.read(appProvider).createNote();
+    final repo = ref.read(appProvider);
+    final folder = page == PageKind.notes
+        ? ref.read(selectedNoteFolderProvider)
+        : '';
+    final note = await repo.createNote(
+      folderId: repo.snapshot.noteFolders.any((f) => f.id == folder)
+          ? folder
+          : '',
+    );
     if (!mounted) return;
     setState(() {
       page = PageKind.notes;

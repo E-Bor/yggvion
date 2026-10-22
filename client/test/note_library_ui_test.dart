@@ -43,7 +43,7 @@ void main() {
         await settle(tester);
         await tester.tap(find.text('Сохранить'));
         await settle(tester);
-        expect(repo.snapshot.tasks.single.description, contains('(note:$id)'));
+        expect(repo.snapshot.tasks.single.description, '[[Материалы встречи]]');
         await tester.runAsync(() async {
           await repo.saveNoteContent('scratchpad', '[Материалы](note:$id)');
         });

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../domain/models.dart';
+import '../domain/note_links.dart';
 import 'markdown_editor.dart';
 import 'providers.dart';
 import 'theme.dart';
@@ -76,6 +77,7 @@ class _NotePanelState extends ConsumerState<NotePanel> {
     final editor = LiveMarkdownEditor(
       key: editorKey,
       value: note.content,
+      noteId: note.id,
       readOnly: readOnly,
       editOnLongPress: mobile,
       onEditingChanged: mobile
@@ -191,11 +193,33 @@ class NotesPage extends ConsumerStatefulWidget {
 class _NotesPageState extends ConsumerState<NotesPage> {
   String? selected;
   String? pendingEdit;
+  final mobileScroll = ScrollController();
   @override
   void initState() {
     super.initState();
     selected = widget.initialId;
     pendingEdit = widget.editId;
+    if (selected != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        ref.read(selectedNoteFolderProvider.notifier).state =
+            ref.read(appProvider).snapshot.note(selected!)?.folderId ?? '';
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    mobileScroll.dispose();
+    super.dispose();
+  }
+
+  void openNote(String id, {bool edit = false}) {
+    setState(() {
+      selected = id;
+      pendingEdit = edit ? id : null;
+    });
+    if (mobileScroll.hasClients) mobileScroll.jumpTo(0);
   }
 
   @override
@@ -211,6 +235,7 @@ class _NotesPageState extends ConsumerState<NotesPage> {
       final opened = regular.where((note) => note.id == selected).firstOrNull;
       return ListView(
         key: const ValueKey('mobile-notes-list'),
+        controller: mobileScroll,
         padding: const EdgeInsets.all(16),
         children: [
           if (opened != null) ...[
@@ -254,7 +279,11 @@ class _NotesPageState extends ConsumerState<NotesPage> {
                         selected: selected,
                         onSelect: (id) {
                           Navigator.pop(sheet);
-                          setState(() => selected = id);
+                          openNote(id);
+                        },
+                        onCreate: (id) {
+                          Navigator.pop(sheet);
+                          openNote(id, edit: true);
                         },
                       ),
                     ),
@@ -283,7 +312,8 @@ class _NotesPageState extends ConsumerState<NotesPage> {
           width: 256,
           child: NoteLibrary(
             selected: id,
-            onSelect: (value) => setState(() => selected = value),
+            onSelect: openNote,
+            onCreate: (id) => openNote(id, edit: true),
           ),
         ),
         const VerticalDivider(width: 1),
@@ -304,15 +334,29 @@ class _NotesPageState extends ConsumerState<NotesPage> {
 }
 
 class NoteLibrary extends ConsumerStatefulWidget {
-  const NoteLibrary({super.key, this.selected, required this.onSelect});
+  const NoteLibrary({
+    super.key,
+    this.selected,
+    required this.onSelect,
+    required this.onCreate,
+  });
   final String? selected;
   final ValueChanged<String> onSelect;
+  final ValueChanged<String> onCreate;
   @override
   ConsumerState<NoteLibrary> createState() => _NoteLibraryState();
 }
 
 class _NoteLibraryState extends ConsumerState<NoteLibrary> {
   final collapsed = <String>{};
+
+  Future<void> createInFolder(String id) => guard(context, () async {
+    final note = await ref.read(appProvider).createNote(folderId: id);
+    if (!mounted) return;
+    ref.read(selectedNoteFolderProvider.notifier).state = id;
+    setState(() => collapsed.remove(id));
+    widget.onCreate(note.id);
+  });
 
   Future<void> editFolder([NoteFolder? folder]) async {
     final controller = TextEditingController(text: folder?.title ?? '');
@@ -354,8 +398,9 @@ class _NoteLibraryState extends ConsumerState<NoteLibrary> {
     if (action.startsWith('folder:')) {
       await repo.moveNote(note.id, action.substring(7));
     } else if (action == 'copy') {
-      final label = note.displayLabel.replaceAll(RegExp(r'[\[\]\\\r\n]'), ' ');
-      await Clipboard.setData(ClipboardData(text: '[$label](note:${note.id})'));
+      await Clipboard.setData(
+        ClipboardData(text: WikiNoteIndex(repo.snapshot).linkFor(note)),
+      );
     } else if (action == 'delete') {
       final yes = await showDialog<bool>(
         context: context,
@@ -414,7 +459,10 @@ class _NoteLibraryState extends ConsumerState<NoteLibrary> {
         style: const TextStyle(fontSize: 13, height: 1.2),
       ),
     ),
-    onTap: () => widget.onSelect(note.id),
+    onTap: () {
+      ref.read(selectedNoteFolderProvider.notifier).state = note.folderId;
+      widget.onSelect(note.id);
+    },
     trailing: PopupMenuButton<String>(
       tooltip: 'Действия с заметкой',
       padding: EdgeInsets.zero,
@@ -447,9 +495,13 @@ class _NoteLibraryState extends ConsumerState<NoteLibrary> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         ListTile(
+          key: ValueKey('note-folder-$id'),
           dense: true,
           minTileHeight: 42,
           contentPadding: const EdgeInsets.only(left: 4),
+          selected: ref.watch(selectedNoteFolderProvider) == id,
+          selectedTileColor: context.accentColor.withValues(alpha: .07),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
           leading: Icon(
             collapsed.contains(id)
                 ? Icons.chevron_right_rounded
@@ -470,17 +522,24 @@ class _NoteLibraryState extends ConsumerState<NoteLibrary> {
                   style: const TextStyle(fontSize: 11),
                 )
               : null,
-          onTap: () => setState(
-            () => collapsed.contains(id)
-                ? collapsed.remove(id)
-                : collapsed.add(id),
-          ),
+          onTap: () {
+            ref.read(selectedNoteFolderProvider.notifier).state = id;
+            setState(
+              () => collapsed.contains(id)
+                  ? collapsed.remove(id)
+                  : collapsed.add(id),
+            );
+          },
           trailing: folder == null
               ? null
               : PopupMenuButton<String>(
                   iconSize: 17,
                   tooltip: 'Действия с папкой',
                   onSelected: (action) => guard(context, () async {
+                    if (action == 'create') {
+                      await createInFolder(id);
+                      return;
+                    }
                     if (action == 'rename') {
                       await editFolder(folder);
                       return;
@@ -521,6 +580,11 @@ class _NoteLibraryState extends ConsumerState<NoteLibrary> {
                     await repo.reorderNoteFolders(ids);
                   }),
                   itemBuilder: (_) => const [
+                    PopupMenuItem(
+                      value: 'create',
+                      child: Text('Создать заметку'),
+                    ),
+                    PopupMenuDivider(),
                     PopupMenuItem(
                       value: 'rename',
                       child: Text('Переименовать'),
