@@ -384,22 +384,36 @@ class ProposedTaskCard extends ConsumerWidget {
                   ),
                 ),
               const SizedBox(height: 12),
-              Text(
-                label,
-                style: TextStyle(
-                  fontSize: 11,
-                  fontWeight: FontWeight.w500,
-                  color: context.accentColor,
-                ),
-              ),
-              const SizedBox(height: 10),
-              FilledButton.tonal(
-                key: ValueKey('accept-proposal-${task.id}'),
-                onPressed: () => guard(context, () async {
-                  await repo.acceptProposal(task);
-                  if (context.mounted) onResolved?.call();
-                }),
-                child: const Text('Принять'),
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      label,
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w500,
+                        color: context.accentColor,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  FilledButton.tonal(
+                    key: ValueKey('accept-proposal-${task.id}'),
+                    style: FilledButton.styleFrom(
+                      minimumSize: const Size(0, 32),
+                      padding: const EdgeInsets.symmetric(horizontal: 12),
+                      textStyle: const TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    onPressed: () => guard(context, () async {
+                      await repo.acceptProposal(task);
+                      if (context.mounted) onResolved?.call();
+                    }),
+                    child: const Text('Принять'),
+                  ),
+                ],
               ),
             ],
           ),
