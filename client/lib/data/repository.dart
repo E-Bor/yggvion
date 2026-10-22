@@ -194,6 +194,20 @@ class Repository extends ChangeNotifier {
 
   Task? get lastCalendarTask => snapshot.task(lastCalendarTaskId ?? '');
 
+  /// The shared running timer takes precedence over this device's last choice.
+  Task? get globalTimerTask {
+    WorkSession? latest;
+    for (final session in snapshot.sessions) {
+      if (!session.running) continue;
+      final task = snapshot.task(session.taskId);
+      if (task == null || task.done) continue;
+      if (latest == null || session.start.isAfter(latest.start)) {
+        latest = session;
+      }
+    }
+    return latest == null ? lastCalendarTask : snapshot.task(latest.taskId);
+  }
+
   Future<void> toggleCalendarTimer(Task task) async {
     await toggleTimer(task);
     lastCalendarTaskId = task.id;

@@ -225,6 +225,48 @@ func TestOnlineTimerStopsPrevious(t *testing.T) {
 	}
 }
 
+func TestAnotherDeviceCanStopTimerWithoutChangingItsOrigin(t *testing.T) {
+	s, h, firstToken := setup(t)
+	firstDevice, err := s.Authorize(context.Background(), firstToken)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, secondToken, err := s.Pair(context.Background(), "Second device")
+	if err != nil {
+		t.Fatal(err)
+	}
+	decodeResults(t, push(t, h, firstToken, domain.Mutation{OperationID: "create-task", Record: task("task", "Shared timer")}))
+	start := time.Now().UTC().Add(-time.Hour)
+	data, err := json.Marshal(domain.Session{TaskID: "task", DeviceID: firstDevice, Start: start})
+	if err != nil {
+		t.Fatal(err)
+	}
+	started := decodeResults(t, push(t, h, firstToken, domain.Mutation{OperationID: "start", Record: domain.Record{ID: "session", Kind: "session", Data: data}}))[0].Record
+	end := start.Add(25 * time.Minute)
+	started.Data, err = json.Marshal(domain.Session{TaskID: "task", DeviceID: firstDevice, Start: start, End: &end})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stop := domain.Mutation{OperationID: "stop-from-second-device", Record: started}
+	if response := push(t, h, "invalid-token", stop); response.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthenticated stop: %d", response.Code)
+	}
+	// Retrying the same stop is safe and retains the originating device and interval.
+	for range 2 {
+		result := decodeResults(t, push(t, h, secondToken, stop))[0]
+		if result.Status != "applied" || result.Record.Version != started.Version+1 {
+			t.Fatalf("unexpected stop result: %+v", result)
+		}
+		var session domain.Session
+		if err = json.Unmarshal(result.Record.Data, &session); err != nil {
+			t.Fatal(err)
+		}
+		if session.DeviceID != firstDevice || !session.Start.Equal(start) || session.End == nil || !session.End.Equal(end) {
+			t.Fatalf("changed timer origin or interval: %+v", session)
+		}
+	}
+}
+
 func TestAttachmentValidation(t *testing.T) {
 	_, h, token := setup(t)
 	r := httptest.NewRequest("PUT", "/api/v1/attachments/"+strings.Repeat("0", 64), strings.NewReader("not the expected hash"))

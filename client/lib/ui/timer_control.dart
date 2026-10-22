@@ -6,7 +6,7 @@ import 'theme.dart';
 
 void toggleLastCalendarTimer(BuildContext context, WidgetRef ref) {
   final repo = ref.read(appProvider),
-      task = ref.read(appProvider).lastCalendarTask;
+      task = ref.read(appProvider).globalTimerTask;
   if (task == null || task.done) return;
   guard(context, () => repo.toggleCalendarTimer(task));
 }
@@ -39,7 +39,7 @@ class _TimerControlState extends ConsumerState<TimerControl> {
 
   @override
   Widget build(BuildContext context) {
-    final repo = ref.watch(appProvider), task = repo.lastCalendarTask;
+    final repo = ref.watch(appProvider), task = repo.globalTimerTask;
     final running =
         task != null &&
         repo.snapshot.sessions.any((s) => s.taskId == task.id && s.running);
