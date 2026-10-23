@@ -283,6 +283,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
   Widget build(BuildContext context) {
     final repo = ref.watch(appProvider),
         notifications = ref.read(remindersProvider);
+    final tracking = ref.watch(systemTrackingProvider);
     return ListView(
       padding: const EdgeInsets.all(24),
       children: [
@@ -588,6 +589,13 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                               : context.palette.green,
                         ),
                       ),
+                      if (tracking?.error != null)
+                        Text(
+                          tracking!.error!,
+                          style: TextStyle(
+                            color: Theme.of(context).colorScheme.error,
+                          ),
+                        ),
                       if (notifications.error != null)
                         Text(
                           notifications.error!,

@@ -8,6 +8,7 @@ import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:uuid/uuid.dart';
 import '../domain/models.dart';
+import '../domain/tracking_action.dart';
 import '../domain/note_links.dart';
 import 'database.dart';
 
@@ -29,6 +30,7 @@ class Repository extends ChangeNotifier {
   double calendarFraction = .64, scratchpadFraction = .62;
   double plannerFraction = .30;
   String? lastCalendarTaskId;
+  String? _trackedTaskId;
   int conflictCount = 0;
   Future<void> _tail = Future.value();
   Future<void> Function()? onChange;
@@ -77,6 +79,7 @@ class Repository extends ChangeNotifier {
         ? plannerWidth.clamp(.2, .6)
         : .30;
     lastCalendarTaskId = await db.meta('last_calendar_task');
+    _trackedTaskId = await db.meta('tracked_task');
     await reload();
     final initial = <Entity>[];
     for (final record in workspaceDefaults(timezone)) {
@@ -107,6 +110,14 @@ class Repository extends ChangeNotifier {
                 .customSelect('SELECT count(*) AS n FROM conflicts')
                 .getSingle())
             .read<int>('n');
+    final active = activeTimerTask;
+    final previous = snapshot.task(_trackedTaskId ?? '');
+    final trackedId =
+        active?.id ?? (previous != null && !previous.done ? previous.id : null);
+    if (_trackedTaskId != trackedId) {
+      await db.setMeta('tracked_task', trackedId ?? '');
+      _trackedTaskId = trackedId;
+    }
     publish();
   }
 
@@ -214,7 +225,7 @@ class Repository extends ChangeNotifier {
   Task? get lastCalendarTask => snapshot.task(lastCalendarTaskId ?? '');
 
   /// The shared running timer takes precedence over this device's last choice.
-  Task? get globalTimerTask {
+  Task? get activeTimerTask {
     WorkSession? latest;
     for (final session in snapshot.sessions) {
       if (!session.running) continue;
@@ -224,8 +235,15 @@ class Repository extends ChangeNotifier {
         latest = session;
       }
     }
-    return latest == null ? lastCalendarTask : snapshot.task(latest.taskId);
+    return latest == null ? null : snapshot.task(latest.taskId);
   }
+
+  Task? get trackedTask {
+    final task = activeTimerTask ?? snapshot.task(_trackedTaskId ?? '');
+    return task?.done == false ? task : null;
+  }
+
+  Task? get globalTimerTask => activeTimerTask ?? lastCalendarTask;
 
   Future<void> toggleCalendarTimer(Task task) async {
     await toggleTimer(task);
@@ -458,32 +476,118 @@ class Repository extends ChangeNotifier {
   DateTime _safeEnd(WorkSession s, DateTime value) => value.isAfter(s.start)
       ? value
       : s.start.add(const Duration(milliseconds: 1));
-  Future<void> toggleTimer(Task task) async {
-    if (task.done) throw StateError('Сначала верните задачу в работу');
+  Future<void> toggleTimer(Task task) => _changeTimer(task, null);
+
+  Future<void> setTimerRunning(Task task, bool running) =>
+      _changeTimer(task, running);
+
+  Future<void> stopTracking(Task task) async {
+    await setTimerRunning(task, false);
+    await serial(() async {
+      if (_trackedTaskId != task.id ||
+          snapshot.sessions.any((s) => s.taskId == task.id && s.running)) {
+        return;
+      }
+      await db.setMeta('tracked_task', '');
+      _trackedTaskId = null;
+      publish();
+    });
+  }
+
+  Future<void> _changeTimer(Task task, bool? requested) {
     final time = now();
-    final changes = <Entity>[];
-    final running = snapshot.sessions.where((s) => s.running).toList();
-    final stopping = running.any((s) => s.taskId == task.id);
-    for (final s in running) {
-      changes.add(s.entity.change({'end': wireTime(_safeEnd(s, time))}));
-    }
-    if (!stopping) {
-      changes.add(task.entity.change({'status': 'in_progress'}));
-      if (snapshot.unscheduled(task, time)) {
+    return commitComputed(() async {
+      final current = snapshot.task(task.id);
+      final running = snapshot.sessions.where((s) => s.running).toList();
+      final alreadyRunning = running.any((s) => s.taskId == task.id);
+      final start = requested ?? !alreadyRunning;
+      if (start && (current == null || current.done)) {
+        throw StateError('Сначала верните задачу в работу');
+      }
+      if (requested != null && start == alreadyRunning) return [];
+      final changes = <Entity>[
+        for (final s in running)
+          if (start || requested == null || s.taskId == task.id)
+            s.entity.change({'end': wireTime(_safeEnd(s, time))}),
+      ];
+      if (start) {
+        changes.add(current!.entity.change({'status': 'in_progress'}));
+        if (snapshot.unscheduled(current, time)) {
+          changes.add(
+            TimeBlock.create(
+              newId(),
+              current.id,
+              time,
+              time.add(Duration(minutes: snapshot.settings.defaultMinutes)),
+              timezone: snapshot.settings.timezone,
+              reminders: const [],
+            ),
+          );
+        }
         changes.add(
-          TimeBlock.create(
-            newId(),
-            task.id,
-            time,
-            time.add(Duration(minutes: snapshot.settings.defaultMinutes)),
-            timezone: snapshot.settings.timezone,
-            reminders: const [],
-          ),
+          WorkSession.create(newId(), current.id, deviceId, time, null),
         );
       }
-      changes.add(WorkSession.create(newId(), task.id, deviceId, time, null));
+      return changes;
+    });
+  }
+
+  /// Replay native interactions using the time of the tap, not app resumption.
+  Future<void> applyTrackingAction(TrackingAction action) async {
+    // A restored/replaced local profile must not inherit another profile's queue.
+    if (action.deviceId != deviceId) return;
+    await commitComputed(() async {
+      final task = snapshot.task(action.taskId);
+      if (task == null) return [];
+      final at = action.at.isAfter(now()) ? now() : action.at;
+      if (action.action == 'resume') {
+        if (task.done) return [];
+        if (await db.entity(action.newSessionId!) != null) return [];
+        // If a newer timer already exists, preserve it and record only the
+        // historical interval. Never let a delayed lock-screen tap stop it.
+        final later =
+            snapshot.sessions
+                .where((s) => !s.discarded && s.start.isAfter(at))
+                .map((s) => s.start)
+                .toList()
+              ..sort();
+        return [
+          for (final s in snapshot.sessions)
+            if (s.running && !s.start.isAfter(at))
+              s.entity.change({'end': wireTime(_safeEnd(s, at))}),
+          if (later.isEmpty) task.entity.change({'status': 'in_progress'}),
+          WorkSession.create(
+            action.newSessionId!,
+            task.id,
+            deviceId,
+            at,
+            later.firstOrNull,
+          ),
+        ];
+      }
+      return [
+        for (final s in snapshot.sessions)
+          if (s.taskId == task.id &&
+              !s.discarded &&
+              action.sessionIds.contains(s.id) &&
+              !s.start.isAfter(at) &&
+              (s.end == null || s.end!.isAfter(at)))
+            s.entity.change({'end': wireTime(_safeEnd(s, at))}),
+      ];
+    });
+    if (action.action == 'stop') {
+      await serial(() async {
+        if (_trackedTaskId != action.taskId ||
+            snapshot.sessions.any(
+              (s) => s.taskId == action.taskId && s.running,
+            )) {
+          return;
+        }
+        _trackedTaskId = null;
+        await db.setMeta('tracked_task', '');
+        publish();
+      });
     }
-    await commit(changes);
   }
 
   Future<void> saveSession(

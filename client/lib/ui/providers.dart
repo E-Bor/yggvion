@@ -4,9 +4,13 @@ import '../data/sync.dart';
 import '../data/reminders.dart';
 import '../data/clipboard.dart';
 import '../data/app_icon.dart';
+import '../data/system_tracking.dart';
 import '../data/activity.dart';
 import '../data/local_backup.dart';
 
+final systemTrackingProvider = ChangeNotifierProvider<SystemTrackingService?>(
+  (ref) => null,
+);
 final activityProvider = ChangeNotifierProvider<ApplicationActivity?>(
   (ref) => null,
 );

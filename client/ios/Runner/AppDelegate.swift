@@ -7,6 +7,7 @@ import UserNotifications
   private var iconChannel: FlutterMethodChannel?
   private var notificationSettingsChannel: FlutterMethodChannel?
   private var storagePolicyChannel: FlutterMethodChannel?
+  private var trackingChannel: TrackingChannel?
 
   override func application(
     _ application: UIApplication,
@@ -16,6 +17,7 @@ import UserNotifications
     GeneratedPluginRegistrant.register(with: self)
     let launched = super.application(application, didFinishLaunchingWithOptions: launchOptions)
     if let controller = window?.rootViewController as? FlutterViewController {
+      trackingChannel = TrackingChannel(messenger: controller.binaryMessenger)
       let storage = FlutterMethodChannel(name: "dev.yggvion/storage_policy",
                                          binaryMessenger: controller.binaryMessenger)
       storage.setMethodCallHandler { call, result in

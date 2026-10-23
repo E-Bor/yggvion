@@ -12,6 +12,7 @@ import 'data/activity.dart';
 import 'data/reminders.dart';
 import 'data/repository.dart';
 import 'data/sync.dart';
+import 'data/system_tracking.dart';
 import 'ui/app.dart';
 import 'ui/providers.dart';
 import 'ui/theme.dart';
@@ -24,6 +25,8 @@ Future<void> main() async {
     final localZone = await FlutterTimezone.getLocalTimezone();
     final repo = Repository(await LocalDatabase.open());
     await repo.initialize(timezone: localZone.identifier);
+    final tracking = SystemTrackingService(repo);
+    await tracking.initialize();
     final sync = SyncService(repo);
     await sync.initialize();
     final reminders = ReminderService(repo);
@@ -42,6 +45,7 @@ Future<void> main() async {
             sync.shutdown(),
             backups.stop(),
             reminders.clearAndStop(),
+            tracking.clearAndStop(),
             activity.stop(),
           ]);
           await repo.close();
@@ -62,6 +66,7 @@ Future<void> main() async {
         syncProvider.overrideWithValue(sync),
         remindersProvider.overrideWithValue(reminders),
         appIconProvider.overrideWith((ref) => appIcons),
+        systemTrackingProvider.overrideWith((ref) => tracking),
         activityProvider.overrideWith((ref) => activity),
         resetStorageProvider.overrideWithValue(clearStorage),
         invitationLinksProvider.overrideWithValue(AppLinks().uriLinkStream),

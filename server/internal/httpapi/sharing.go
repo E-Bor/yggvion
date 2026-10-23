@@ -84,7 +84,7 @@ func (a *API) shareNow() time.Time {
 
 func (a *API) calendarShareRoutes(mux *http.ServeMux) {
 	mux.Handle("POST /api/v1/calendar-shares", a.auth(a.current(http.HandlerFunc(a.createCalendarShare))))
-	mux.Handle("DELETE /api/v1/calendar-shares/{id}", a.auth(http.HandlerFunc(a.revokeCalendarShare)))
+	mux.Handle("DELETE /api/v1/calendar-shares/{id}", a.auth(http.HandlerFunc(a.revokeCalendarShare)))бв
 	a.publicCalendarRoutes(mux)
 }
 

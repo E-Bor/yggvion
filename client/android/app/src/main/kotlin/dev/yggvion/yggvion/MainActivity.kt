@@ -11,6 +11,20 @@ import io.flutter.plugin.common.MethodChannel
 class MainActivity : FlutterActivity() {
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        val tracking = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "dev.yggvion/tracking")
+        TrackingNotification.bridge = tracking
+        tracking.setMethodCallHandler { call, result ->
+            try {
+                when (call.method) {
+                    "pending" -> result.success(TrackingNotification.pending(this))
+                    "publish" -> result.success(TrackingNotification.publish(this, call.arguments as Map<*, *>))
+                    "clear" -> { TrackingNotification.clear(this); result.success(null) }
+                    else -> result.notImplemented()
+                }
+            } catch (error: Exception) {
+                result.error("tracking_failed", "Не удалось обновить таймер на экране блокировки", null)
+            }
+        }
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger,
             "dev.yggvion/notification_settings").setMethodCallHandler { call, result ->
             if (call.method != "open") {
@@ -31,5 +45,11 @@ class MainActivity : FlutterActivity() {
                 result.error("settings_unavailable", "Notification settings are unavailable", null)
             }
         }
+    }
+
+    override fun cleanUpFlutterEngine(flutterEngine: FlutterEngine) {
+        TrackingNotification.bridge?.setMethodCallHandler(null)
+        TrackingNotification.bridge = null
+        super.cleanUpFlutterEngine(flutterEngine)
     }
 }

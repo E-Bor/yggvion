@@ -15,7 +15,7 @@ void main() {
   final binary = Platform.environment['YGGVION_TEST_SERVER'];
 
   test(
-    'two devices stop and resume the same task, retaining an offline stop time',
+    'two devices pause, resume and stop tracking, retaining an offline stop time',
     () async {
       tz.initializeTimeZones();
 
@@ -101,7 +101,10 @@ void main() {
       // The starting device does not need to be online when another stops it.
       now = now.add(const Duration(minutes: 25));
       final stoppedAt = now;
-      await b.toggleCalendarTimer(b.globalTimerTask!);
+      expect(b.trackedTask?.id, task.id);
+      await b.setTimerRunning(b.trackedTask!, false);
+      expect(b.trackedTask?.id, task.id);
+      expect(b.activeTimerTask, isNull);
       expect(b.snapshot.sessions.single.end, stoppedAt);
       expect(a.snapshot.sessions.single.running, isTrue);
       await sb.sync();
@@ -115,7 +118,7 @@ void main() {
       // Resume on the phone after a break, then stop locally on the desktop.
       now = now.add(const Duration(minutes: 10));
       final resumedAt = now;
-      await b.toggleCalendarTimer(b.globalTimerTask!);
+      await b.setTimerRunning(b.trackedTask!, true);
       await sb.sync();
       await sa.sync();
       final resumed = a.snapshot.sessions.singleWhere((s) => s.running);
@@ -125,7 +128,8 @@ void main() {
 
       now = now.add(const Duration(minutes: 15));
       final offlineStop = now;
-      await a.toggleCalendarTimer(a.globalTimerTask!);
+      await a.stopTracking(a.trackedTask!);
+      expect(a.trackedTask, isNull);
       now = now.add(const Duration(minutes: 20));
       // Reconnecting later must retain the time of the tap, not the sync time.
       await sa.sync();
