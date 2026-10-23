@@ -1,5 +1,8 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
+import 'package:flutter/services.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'package:flutter/foundation.dart';
 import 'package:crypto/crypto.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
@@ -233,6 +236,42 @@ class ReminderService {
     await requestPermission();
     if (!_disposed) {
       await repo.db.setMeta('notification_permission_asked', 'true');
+    }
+  }
+
+  Future<void> openSettings() async {
+    if (platform == TargetPlatform.iOS ||
+        platform == TargetPlatform.macOS ||
+        platform == TargetPlatform.android) {
+      final opened = await const MethodChannel(
+        'dev.yggvion/notification_settings',
+      ).invokeMethod<bool>('open');
+      if (opened != true) {
+        throw StateError('Не удалось открыть системные настройки уведомлений.');
+      }
+    } else if (platform == TargetPlatform.windows) {
+      if (!await launchUrl(Uri.parse('ms-settings:notifications'))) {
+        throw StateError('Не удалось открыть настройки уведомлений Windows.');
+      }
+    } else {
+      for (final command in [
+        ['gnome-control-center', 'notifications'],
+        ['systemsettings', 'kcm_notifications'],
+      ]) {
+        try {
+          await Process.start(
+            command.first,
+            command.skip(1).toList(),
+            mode: ProcessStartMode.detached,
+          );
+          return;
+        } on ProcessException {
+          // Try the other supported desktop settings application.
+        }
+      }
+      throw StateError(
+        'Откройте раздел уведомлений в настройках рабочего окружения.',
+      );
     }
   }
 

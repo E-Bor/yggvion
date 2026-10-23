@@ -85,6 +85,30 @@ void main() {
   });
 
   test(
+    'notification settings opens the native screen and reports launch failures',
+    () async {
+      const settings = MethodChannel('dev.yggvion/notification_settings');
+      var opened = 0;
+      var available = true;
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(settings, (call) async {
+            expect(call.method, 'open');
+            opened++;
+            return available;
+          });
+      addTearDown(
+        () => TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+            .setMockMethodCallHandler(settings, null),
+      );
+      permission = false;
+      await service.openSettings();
+      expect(opened, 1);
+      available = false;
+      await expectLater(service.openSettings(), throwsStateError);
+    },
+  );
+
+  test(
     'native schedule follows local creation, movement and unscheduling',
     () async {
       final task = await repo.createTask(

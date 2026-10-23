@@ -125,6 +125,25 @@ func (a *API) backupRoutes(mux *http.ServeMux) {
 		}
 		write(w, 200, map[string]string{"status": "configured"})
 	})
+	register("POST /api/v1/backups/dropbox/connect", func(w http.ResponseWriter, r *http.Request) {
+		var input struct {
+			AppKey   string `json:"app_key"`
+			Code     string `json:"code"`
+			Verifier string `json:"code_verifier"`
+			Redirect string `json:"redirect_uri"`
+		}
+		if decode(w, r, &input) != nil {
+			fail(w, 400, "invalid_dropbox_authorization")
+			return
+		}
+		ctx, cancel := context.WithTimeout(r.Context(), 25*time.Second)
+		defer cancel()
+		if err := a.Backups.ConfigureDropbox(ctx, input.AppKey, input.Code, input.Verifier, input.Redirect); err != nil {
+			fail(w, 400, "dropbox_connection_failed")
+			return
+		}
+		write(w, 200, map[string]string{"status": "configured"})
+	})
 	register("GET /api/v1/backups/remote", func(w http.ResponseWriter, r *http.Request) {
 		ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 		defer cancel()

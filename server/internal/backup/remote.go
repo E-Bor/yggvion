@@ -21,15 +21,16 @@ import (
 )
 
 type RemoteConfig struct {
-	Kind        string `json:"kind"` // disabled, s3, sftp
-	Endpoint    string `json:"endpoint"`
-	Bucket      string `json:"bucket"`
-	Region      string `json:"region"`
-	Prefix      string `json:"prefix"`
-	Username    string `json:"username"`
-	Secret      string `json:"secret,omitempty"`
-	PrivateKey  string `json:"private_key,omitempty"`
-	Fingerprint string `json:"fingerprint"`
+	Kind          string `json:"kind"` // disabled, s3, sftp, dropbox
+	DropboxAppKey string `json:"dropbox_app_key,omitempty"`
+	Endpoint      string `json:"endpoint"`
+	Bucket        string `json:"bucket"`
+	Region        string `json:"region"`
+	Prefix        string `json:"prefix"`
+	Username      string `json:"username"`
+	Secret        string `json:"secret,omitempty"`
+	PrivateKey    string `json:"private_key,omitempty"`
+	Fingerprint   string `json:"fingerprint"`
 }
 
 func validateRemote(c RemoteConfig) error {
@@ -43,6 +44,10 @@ func validateRemote(c RemoteConfig) error {
 		u, err := url.Parse(c.Endpoint)
 		if err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil || u.Path != "" || u.RawQuery != "" || u.Fragment != "" || c.Bucket == "" || c.Username == "" || c.Secret == "" {
 			return errors.New("invalid S3 configuration")
+		}
+	} else if c.Kind == "dropbox" {
+		if !dropboxAppKey.MatchString(c.DropboxAppKey) || c.Secret == "" || len(c.Secret) > 16384 || c.Prefix != "/" {
+			return errors.New("invalid Dropbox configuration")
 		}
 	} else if c.Kind == "sftp" {
 		host, port, err := net.SplitHostPort(c.Endpoint)
@@ -67,12 +72,14 @@ func (m *Manager) RemoteConfig() (RemoteConfig, error) {
 	return c, err
 }
 func (m *Manager) ConfigureRemote(ctx context.Context, c RemoteConfig) error {
+	m.remoteMu.Lock()
+	defer m.remoteMu.Unlock()
 	old, err := m.RemoteConfig()
 	if err != nil {
 		return err
 	}
 	// Empty fields preserve credentials only for the same destination.
-	if old.Kind == c.Kind && old.Endpoint == c.Endpoint && old.Username == c.Username && old.Bucket == c.Bucket {
+	if old.Kind == c.Kind && old.Endpoint == c.Endpoint && old.Username == c.Username && old.Bucket == c.Bucket && old.DropboxAppKey == c.DropboxAppKey {
 		if c.Secret == "" {
 			c.Secret = old.Secret
 		}
@@ -94,6 +101,13 @@ func (m *Manager) ConfigureRemote(ctx context.Context, c RemoteConfig) error {
 			return err
 		}
 	}
+	if c.Kind == "disabled" {
+		c = RemoteConfig{Kind: "disabled"}
+	}
+	return m.saveRemote(c)
+}
+
+func (m *Manager) saveRemote(c RemoteConfig) error {
 	b, err := json.Marshal(c)
 	if err != nil {
 		return err
@@ -191,6 +205,9 @@ func (s *sftpRemote) list(ctx context.Context) ([]string, error) {
 func openRemote(ctx context.Context, c RemoteConfig) (remoteStore, error) {
 	if err := validateRemote(c); err != nil {
 		return nil, err
+	}
+	if c.Kind == "dropbox" {
+		return openDropbox(ctx, c)
 	}
 	if c.Kind == "s3" {
 		u, _ := url.Parse(c.Endpoint)

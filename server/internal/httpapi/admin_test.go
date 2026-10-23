@@ -18,6 +18,36 @@ import (
 	"yggvion/server/internal/store"
 )
 
+func TestDropboxConnectRequiresAuthorizationAndValidPKCE(t *testing.T) {
+	s, _, token := setup(t)
+	a := New(s, strings.Repeat("test", 8), t.TempDir())
+	m, err := backup.Open(s, t.TempDir(), a.Files, &a.DataMu)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.Backups = m
+	h := a.Handler()
+	if w := request(t, h, "POST", "/api/v1/backups/dropbox/connect", "", nil); w.Code != 401 {
+		t.Fatal("unprotected OAuth exchange")
+	}
+	for _, input := range []any{
+		map[string]string{"app_key": "test-app", "code": "code", "code_verifier": "short"},
+		map[string]string{"app_key": "test-app", "code": "code", "code_verifier": strings.Repeat("v", 43), "redirect_uri": "https://attacker.invalid"},
+	} {
+		if w := request(t, h, "POST", "/api/v1/backups/dropbox/connect", token, input); w.Code != 400 {
+			t.Fatal(w.Code, w.Body.String())
+		}
+	}
+	// Credentials stored for the scheduler must never be exposed by settings.
+	if err = os.WriteFile(filepath.Join(m.Dir, "remote.json"), []byte(`{"kind":"dropbox","dropbox_app_key":"test-app","prefix":"/","secret":"synthetic-refresh"}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	w := request(t, h, "GET", "/api/v1/backups", token, nil)
+	if w.Code != 200 || strings.Contains(w.Body.String(), "synthetic-refresh") || !strings.Contains(w.Body.String(), "dropbox_app_key") {
+		t.Fatal("unsafe remote config response")
+	}
+}
+
 func TestInvitationSingleUseExpiryAndRevocation(t *testing.T) {
 	s, h, token := setup(t)
 	ctx := context.Background()

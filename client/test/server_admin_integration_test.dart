@@ -106,10 +106,7 @@ void main() {
       await sb.pairInvitation(invite, 'iPhone');
       await sb.unlockWithPassword('Integration password 42');
       expect(b.syncError, isNull);
-      await expectLater(
-        sb.pairInvitation(invite, 'replay'),
-        throwsA(isA<DioException>()),
-      );
+      await expectLater(sb.pairInvitation(invite, 'replay'), throwsStateError);
       final task = await a.createTask('Before backup');
       await a.toggleTimer(task);
       final oldSessionId = a.snapshot.sessions.single.id;

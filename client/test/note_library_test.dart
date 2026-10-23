@@ -24,6 +24,23 @@ void main() {
       );
       expect(make('', 'Heading\n======').displayLabel, 'Heading');
       expect(make('', 'plain text\nbody').displayLabel, 'plain text');
+      expect(
+        make('', '    # Code heading\n\n## Real heading').displayLabel,
+        'Real heading',
+      );
+      expect(make('  ', '\n  First line\nbody').displayLabel, 'First line');
+      expect(
+        make('', '````md\n```\n# Hidden\n~~~\n````\n## Visible').displayLabel,
+        'Visible',
+      );
+      expect(
+        make('', '~~~md\n```\n# Hidden\n~~~\n## Visible').displayLabel,
+        'Visible',
+      );
+      expect(
+        make('', 'first\n\n## Actual heading').displayLabel,
+        'Actual heading',
+      );
     },
   );
   test(

@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'package:timezone/timezone.dart' as tz;
+import 'markdown_blocks.dart';
 
 enum TaskStatus {
   todo('To Do'),
@@ -251,21 +252,26 @@ class Note {
   String get displayLabel {
     if (pinned.isNotEmpty) return title;
     if (explicitTitle.isNotEmpty) return explicitTitle;
-    String? fence;
+    MarkdownFence? fence;
     String? previous;
     for (final line in const LineSplitter().convert(content)) {
       final text = line.trim();
-      final marker = RegExp(r'^(`{3,}|~{3,})').firstMatch(text);
-      if (marker != null) {
-        final char = marker[1]![0];
-        fence = fence == char ? null : fence ?? char;
+      if (fence != null) {
+        if (fence.closes(line)) fence = null;
+        continue;
+      }
+      fence = MarkdownFence.open(line);
+      if (fence != null) {
         previous = null;
         continue;
       }
-      if (fence != null) continue;
+      if (RegExp(r'^( {4}|	)').hasMatch(line)) {
+        previous = null;
+        continue;
+      }
       final heading = RegExp(r'^#{1,6}\s+(.+?)\s*#*\s*$').firstMatch(text);
       if (heading != null) return heading[1]!;
-      if (previous != null && RegExp(r'^(={3,}|-{3,})$').hasMatch(text)) {
+      if (previous != null && RegExp(r'^(=+|-+)$').hasMatch(text)) {
         return previous;
       }
       previous = text.isEmpty ? null : text;

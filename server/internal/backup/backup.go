@@ -54,6 +54,7 @@ type Manager struct {
 	Dir, Files string
 	DataMu     *sync.RWMutex
 	mu         sync.Mutex
+	remoteMu   sync.Mutex
 	config     Config
 	status     Status
 }

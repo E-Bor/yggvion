@@ -5,6 +5,7 @@ import UserNotifications
 @main
 @objc class AppDelegate: FlutterAppDelegate {
   private var iconChannel: FlutterMethodChannel?
+  private var notificationSettingsChannel: FlutterMethodChannel?
 
   override func application(
     _ application: UIApplication,
@@ -14,6 +15,20 @@ import UserNotifications
     GeneratedPluginRegistrant.register(with: self)
     let launched = super.application(application, didFinishLaunchingWithOptions: launchOptions)
     if let controller = window?.rootViewController as? FlutterViewController {
+      let settings = FlutterMethodChannel(name: "dev.yggvion/notification_settings",
+                                          binaryMessenger: controller.binaryMessenger)
+      settings.setMethodCallHandler { call, result in
+        guard call.method == "open" else { result(FlutterMethodNotImplemented); return }
+        let address: String
+        if #available(iOS 16.0, *) {
+          address = UIApplication.openNotificationSettingsURLString
+        } else {
+          address = UIApplication.openSettingsURLString
+        }
+        guard let url = URL(string: address) else { result(false); return }
+        application.open(url, options: [:]) { opened in result(opened) }
+      }
+      notificationSettingsChannel = settings
       let channel = FlutterMethodChannel(name: "dev.yggvion/app_icon",
                                          binaryMessenger: controller.binaryMessenger)
       channel.setMethodCallHandler { call, result in

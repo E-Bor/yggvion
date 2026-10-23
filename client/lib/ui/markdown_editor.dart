@@ -8,6 +8,8 @@ import 'package:open_filex/open_filex.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../data/clipboard.dart';
 import '../domain/models.dart';
+import '../domain/markdown_blocks.dart';
+import 'markdown_code_block.dart';
 import '../domain/note_links.dart';
 import 'providers.dart';
 import 'theme.dart';
@@ -94,6 +96,8 @@ class MarkdownPreview extends ConsumerWidget {
     }
     return MarkdownBody(
       data: text,
+      builders: {'pre': CodeBlockBuilder(selectable: selectable)},
+      fitContent: false,
       inlineSyntaxes: [_WikiLinkSyntax()],
       selectable: selectable,
       styleSheet: MarkdownStyleSheet.fromTheme(Theme.of(context)).copyWith(
@@ -297,10 +301,15 @@ class LiveMarkdownEditorState extends ConsumerState<LiveMarkdownEditor> {
   static List<String> _split(String value) {
     final parts = <String>[];
     var buffer = <String>[];
-    bool fenced = false;
+    MarkdownFence? fence;
     for (final line in value.split('\n')) {
-      if (RegExp(r'^\s*(```|~~~)').hasMatch(line)) fenced = !fenced;
-      if (line.isEmpty && !fenced && buffer.isNotEmpty) {
+      if (fence != null) {
+        buffer.add(line);
+        if (fence.closes(line)) fence = null;
+        continue;
+      }
+      fence = MarkdownFence.open(line);
+      if (line.isEmpty && fence == null && buffer.isNotEmpty) {
         parts.add(buffer.join('\n'));
         buffer = [];
       } else {

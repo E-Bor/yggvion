@@ -3,6 +3,7 @@ import FlutterMacOS
 
 class MainFlutterWindow: NSWindow {
   private var iconChannel: FlutterMethodChannel?
+  private var notificationSettingsChannel: FlutterMethodChannel?
 
   override func awakeFromNib() {
     let flutterViewController = FlutterViewController()
@@ -14,6 +15,23 @@ class MainFlutterWindow: NSWindow {
     self.center()
 
     RegisterGeneratedPlugins(registry: flutterViewController)
+
+    let settings = FlutterMethodChannel(name: "dev.yggvion/notification_settings",
+                                        binaryMessenger: flutterViewController.engine.binaryMessenger)
+    settings.setMethodCallHandler { call, result in
+      guard call.method == "open" else { result(FlutterMethodNotImplemented); return }
+      let pane: String
+      if #available(macOS 13.0, *) {
+        pane = "com.apple.Notifications-Settings.extension"
+      } else {
+        pane = "com.apple.preference.notifications"
+      }
+      guard let url = URL(string: "x-apple.systempreferences:\(pane)?id=dev.yggvion.yggvion") else {
+        result(false); return
+      }
+      result(NSWorkspace.shared.open(url))
+    }
+    notificationSettingsChannel = settings
 
     let channel = FlutterMethodChannel(name: "dev.yggvion/app_icon",
                                        binaryMessenger: flutterViewController.engine.binaryMessenger)

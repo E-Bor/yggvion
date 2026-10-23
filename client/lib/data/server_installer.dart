@@ -34,6 +34,18 @@ class ServerInstaller {
     required Future<bool> Function(String fingerprint, bool changed) verifyHost,
     required void Function(String status) onStatus,
   }) async {
+    if (operation == ServerOperation.install) {
+      sync.requireDisconnected();
+    } else {
+      final current = Uri.tryParse(sync.url ?? '');
+      if (!sync.connected ||
+          current?.host != host ||
+          current?.port != httpsPort) {
+        throw StateError(
+          'Обновлять и очищать можно только подключённый сервер.',
+        );
+      }
+    }
     if (InternetAddress.tryParse(host) == null ||
         sshPort < 1 ||
         sshPort > 65535 ||

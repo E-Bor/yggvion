@@ -125,6 +125,7 @@ void main() {
       expect(invitation.containsKey('wrapping_key'), isFalse);
       expect(invitation.values, isNot(contains(password)));
       devicePath = '${dir.path}/b';
+      await sb.disconnect();
       await sb.pairInvitation(invite, 'Phone');
       expect(b.syncError, contains('Введите пароль'));
       await expectLater(
@@ -144,10 +145,7 @@ void main() {
         await sb.credentials.read(key: 'password_${sb.encryptionKeyId}'),
         password,
       );
-      await expectLater(
-        sb.pairInvitation(invite, 'replay'),
-        throwsA(isA<DioException>()),
-      );
+      await expectLater(sb.pairInvitation(invite, 'replay'), throwsStateError);
       // Lose one successful mutation response. The retry must reuse the exact
       // ciphertext so the server's operation fingerprint remains idempotent.
       await b.saveNoteContent(note.id, 'OFFLINE_EDIT\n$link');

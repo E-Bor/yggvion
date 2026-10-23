@@ -187,12 +187,21 @@ class SyncService {
     dio.options.followRedirects = false;
   }
 
+  void requireDisconnected() {
+    if (connected) {
+      throw StateError(
+        'Сначала забудьте текущий сервер в разделе «Синхронизация».',
+      );
+    }
+  }
+
   Future<void> pair(
     String url,
     String key,
     String name, {
     String? privateCA,
   }) async {
+    requireDisconnected();
     if (_pairing) throw StateError('Подключение уже выполняется');
     _pairing = true;
     try {
@@ -388,6 +397,7 @@ class SyncService {
   }
 
   Future<void> pairInvitation(String link, String name) async {
+    requireDisconnected();
     final uri = Uri.parse(link.trim());
     if (link.length > 16000 ||
         uri.scheme != 'yggvion' ||

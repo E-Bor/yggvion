@@ -7,6 +7,7 @@ import 'package:timezone/data/latest.dart' as tz;
 import 'package:yggvion/data/database.dart';
 import 'package:yggvion/data/repository.dart';
 import 'package:yggvion/data/sync.dart';
+import 'package:yggvion/data/server_installer.dart';
 import 'package:yggvion/ui/providers.dart';
 import 'package:yggvion/ui/server_settings.dart';
 import 'package:yggvion/ui/encryption_settings.dart';
@@ -17,10 +18,17 @@ class AdminFixture extends SyncService {
   int metricRequests = 0;
   int fetchRequests = 0;
   Object? fetchBody;
+  bool linked = true;
   @override
-  bool get connected => true;
+  bool get connected => linked;
   @override
   String get url => 'https://192.0.2.1';
+  @override
+  Future<void> disconnect() async {
+    await super.disconnect();
+    linked = false;
+  }
+
   @override
   Future<List<Map<String, dynamic>>> devices() async => [];
   @override
@@ -73,6 +81,50 @@ void main() {
     tz.initializeTimeZones();
     await initializeDateFormatting('ru');
   });
+  test(
+    'connection and installation cannot replace an existing server',
+    () async {
+      final repo = Repository(LocalDatabase(NativeDatabase.memory()));
+      await repo.initialize();
+      final sync = AdminFixture(repo);
+      addTearDown(() async {
+        sync.dispose();
+        await repo.db.close();
+      });
+      await expectLater(
+        sync.pair('https://192.0.2.2', 'code', 'device'),
+        throwsStateError,
+      );
+      await expectLater(
+        sync.pairInvitation('yggvion://connect', 'device'),
+        throwsStateError,
+      );
+      final installer = ServerInstaller(sync);
+      for (final operation in ServerOperation.values) {
+        await expectLater(
+          installer.install(
+            operation: operation,
+            host: '192.0.2.2',
+            sshPort: 22,
+            httpsPort: 443,
+            user: 'root',
+            password: '',
+            deviceName: 'device',
+            verifyHost: (_, _) async => throw StateError('Must not connect'),
+            onStatus: (_) {},
+          ),
+          throwsStateError,
+        );
+      }
+      final note = await repo.createNote();
+      await repo.saveNoteContent(note.id, 'Keep local content');
+      await sync.disconnect();
+      expect(sync.connected, isFalse);
+      expect(repo.snapshot.note(note.id)?.content, 'Keep local content');
+      expect(await repo.db.meta('server_url'), isNull);
+      expect(() => sync.requireDisconnected(), returnsNormally);
+    },
+  );
   for (final width in [390.0, 1440.0]) {
     testWidgets('server and backup settings remain usable at $width px', (
       tester,
@@ -116,6 +168,12 @@ void main() {
           reason: '${page.runtimeType} initial layout',
         );
         if (page is SynchronizationPage) {
+          expect(find.text('Подключиться по приглашению'), findsNothing);
+          expect(find.text('Установить на VPS'), findsNothing);
+          expect(
+            find.text('Существующий сервер с публичным HTTPS'),
+            findsNothing,
+          );
           expect(find.text('Сервер доступен'), findsOneWidget);
           expect(find.text('12.5%'), findsOneWidget);
           expect(sync.metricRequests, 1);
@@ -131,6 +189,38 @@ void main() {
             1,
             reason: 'Immediate refresh uses cache',
           );
+          await tester.scrollUntilVisible(
+            find.text('Забыть сервер'),
+            350,
+            scrollable: find.byType(Scrollable).first,
+          );
+          expect(find.text('Очистить сервер'), findsOneWidget);
+          expect(find.text('Обновить серверную часть'), findsOneWidget);
+          await tester.pumpAndSettle();
+          await tester.tap(find.text('Забыть сервер'));
+          await tester.pumpAndSettle();
+          expect(find.text('Забыть сервер?'), findsOneWidget);
+          await tester.tap(
+            find.descendant(
+              of: find.byType(AlertDialog),
+              matching: find.text('Забыть сервер'),
+            ),
+          );
+          await tester.pump();
+          await tester.runAsync(
+            () => Future<void>.delayed(const Duration(milliseconds: 80)),
+          );
+          await tester.pumpAndSettle();
+          expect(sync.connected, isFalse);
+          await tester.scrollUntilVisible(
+            find.text('Подключиться по приглашению'),
+            350,
+            scrollable: find.byType(Scrollable).first,
+          );
+          await tester.pumpAndSettle();
+          expect(find.text('Подключиться по приглашению'), findsOneWidget);
+          expect(find.text('Управление сервером'), findsNothing);
+          sync.linked = true;
         }
         expect(find.text('Ключ серверного архива'), findsNothing);
         if (page is RemoteBackupsPage) {

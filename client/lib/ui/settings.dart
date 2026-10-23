@@ -598,7 +598,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                       const SizedBox(height: 14),
                       OutlinedButton.icon(
                         onPressed: () =>
-                            guard(context, notifications.requestPermission),
+                            guard(context, notifications.openSettings),
                         icon: const Icon(Icons.notifications_active_outlined),
                         label: const Text('Разрешить уведомления'),
                       ),

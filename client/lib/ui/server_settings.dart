@@ -12,6 +12,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:share_plus/share_plus.dart';
 import '../data/server_installer.dart';
+import '../data/dropbox_authorization.dart';
 import '../data/sync.dart';
 import '../domain/models.dart';
 import 'providers.dart';
@@ -96,9 +97,7 @@ class SynchronizationPage extends ConsumerStatefulWidget {
 }
 
 class _SynchronizationPageState extends ConsumerState<SynchronizationPage> {
-  final link = TextEditingController(),
-      url = TextEditingController(),
-      key = TextEditingController();
+  final link = TextEditingController();
   late final TextEditingController name;
   bool busy = false;
   List<Map<String, dynamic>> devices = [];
@@ -117,7 +116,7 @@ class _SynchronizationPageState extends ConsumerState<SynchronizationPage> {
 
   @override
   void dispose() {
-    for (final c in [link, url, key, name]) {
+    for (final c in [link, name]) {
       c.dispose();
     }
     super.dispose();
@@ -167,6 +166,30 @@ class _SynchronizationPageState extends ConsumerState<SynchronizationPage> {
       }(),
     ]);
     if (mounted) setState(() => refreshing = false);
+  }
+
+  Future<void> forget() async {
+    if (!await confirmServerAction(
+          context,
+          'Забыть сервер?',
+          'Устройство перейдёт в локальный режим. Заметки, задачи и файлы останутся здесь. На сервере ничего не удалится, остальные устройства продолжат синхронизацию.',
+          action: 'Забыть сервер',
+        ) ||
+        !mounted) {
+      return;
+    }
+    await action(() async {
+      await ref.read(syncProvider).disconnect();
+      if (mounted) {
+        setState(() {
+          devices = [];
+          metrics = null;
+          reachable = null;
+          error = null;
+          metricsError = null;
+        });
+      }
+    });
   }
 
   void manage(ServerOperation operation) {
@@ -358,6 +381,12 @@ class _SynchronizationPageState extends ConsumerState<SynchronizationPage> {
             ],
           ],
         ),
+        if (sync.connected && widget.invitation != null)
+          settingsCard('Сервер уже подключён', [
+            const Text(
+              'Чтобы использовать приглашение другого сервера, сначала нажмите «Забыть сервер». Локальные данные сохранятся.',
+            ),
+          ]),
         if (sync.connected) metricsCard(),
         if (sync.connected)
           settingsCard('Устройства', [
@@ -393,7 +422,7 @@ class _SynchronizationPageState extends ConsumerState<SynchronizationPage> {
         if (sync.connected)
           settingsCard('Управление сервером', [
             Text(
-              'Обновление сохраняет базу, вложения, сертификат и подключённые устройства.',
+              'Обновление сохраняет данные. Очистка полностью удаляет Yggvion с VPS. «Забыть» отключает только это устройство.',
               style: TextStyle(color: context.palette.muted, height: 1.5),
             ),
             const SizedBox(height: 12),
@@ -404,105 +433,83 @@ class _SynchronizationPageState extends ConsumerState<SynchronizationPage> {
                 OutlinedButton.icon(
                   onPressed: busy ? null : () => manage(ServerOperation.update),
                   icon: const Icon(Icons.system_update_alt_rounded),
-                  label: const Text('Обновить / переустановить'),
+                  label: const Text('Обновить серверную часть'),
                 ),
                 TextButton.icon(
                   onPressed: busy
                       ? null
                       : () => manage(ServerOperation.uninstall),
                   icon: const Icon(Icons.delete_outline_rounded),
-                  label: const Text('Удалить сервер'),
+                  label: const Text('Очистить сервер'),
+                ),
+                TextButton.icon(
+                  onPressed: busy ? null : forget,
+                  icon: const Icon(Icons.link_off_rounded),
+                  label: const Text('Забыть сервер'),
                 ),
               ],
             ),
           ]),
-        settingsCard('Установить на VPS', [
-          Text(
-            'Ubuntu / Debian · x86_64 или ARM64\nSSH нужен только для установки и обновления. Домен не требуется.',
-            style: TextStyle(color: context.palette.muted, height: 1.5),
-          ),
-          const SizedBox(height: 16),
-          Align(
-            alignment: Alignment.centerLeft,
-            child: OutlinedButton.icon(
-              onPressed: busy
-                  ? null
-                  : () => Navigator.push(
-                      context,
-                      MaterialPageRoute<void>(
-                        builder: (_) => const InstallServerPage(),
-                      ),
-                    ).then((_) => refresh()),
-              icon: const Icon(Icons.dns_outlined),
-              label: Text(
-                sync.connected
-                    ? 'Установить / обновить сервер'
-                    : 'Настроить VPS',
-              ),
+        if (!sync.connected)
+          settingsCard('Установить на VPS', [
+            Text(
+              'Ubuntu / Debian · x86_64 или ARM64\nSSH нужен только для установки и обновления. Домен не требуется.',
+              style: TextStyle(color: context.palette.muted, height: 1.5),
             ),
-          ),
-        ]),
-        settingsCard('Подключиться по приглашению', [
-          TextField(
-            controller: name,
-            decoration: const InputDecoration(labelText: 'Это устройство'),
-          ),
-          const SizedBox(height: 12),
-          TextField(
-            controller: link,
-            maxLines: 3,
-            decoration: const InputDecoration(
-              labelText: 'Ссылка приглашения',
-              hintText: 'yggvion://connect…',
-            ),
-          ),
-          const SizedBox(height: 16),
-          Wrap(
-            spacing: 12,
-            children: [
-              FilledButton(
+            const SizedBox(height: 16),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: OutlinedButton.icon(
                 onPressed: busy
                     ? null
-                    : () => action(() async {
-                        await sync.pairInvitation(link.text, name.text);
-                        link.clear();
-                      }),
-                child: const Text('Подключиться'),
+                    : () => Navigator.push(
+                        context,
+                        MaterialPageRoute<void>(
+                          builder: (_) => const InstallServerPage(),
+                        ),
+                      ).then((_) => refresh()),
+                icon: const Icon(Icons.dns_outlined),
+                label: const Text('Настроить VPS'),
               ),
-              if (Platform.isIOS || Platform.isAndroid || Platform.isMacOS)
-                TextButton.icon(
-                  onPressed: busy ? null : scan,
-                  icon: const Icon(Icons.qr_code_scanner_rounded),
-                  label: const Text('Сканировать QR'),
+            ),
+          ]),
+        if (!sync.connected)
+          settingsCard('Подключиться по приглашению', [
+            TextField(
+              controller: name,
+              decoration: const InputDecoration(labelText: 'Это устройство'),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: link,
+              maxLines: 3,
+              decoration: const InputDecoration(
+                labelText: 'Ссылка приглашения',
+                hintText: 'yggvion://connect…',
+              ),
+            ),
+            const SizedBox(height: 16),
+            Wrap(
+              spacing: 12,
+              children: [
+                FilledButton(
+                  onPressed: busy
+                      ? null
+                      : () => action(() async {
+                          await sync.pairInvitation(link.text, name.text);
+                          link.clear();
+                        }),
+                  child: const Text('Подключиться'),
                 ),
-            ],
-          ),
-        ]),
-        ExpansionTile(
-          title: const Text('Существующий сервер с публичным HTTPS'),
-          children: [
-            TextField(
-              controller: url,
-              decoration: const InputDecoration(labelText: 'https://…'),
+                if (Platform.isIOS || Platform.isAndroid || Platform.isMacOS)
+                  TextButton.icon(
+                    onPressed: busy ? null : scan,
+                    icon: const Icon(Icons.qr_code_scanner_rounded),
+                    label: const Text('Сканировать QR'),
+                  ),
+              ],
             ),
-            TextField(
-              controller: key,
-              obscureText: true,
-              enableSuggestions: false,
-              autocorrect: false,
-              decoration: const InputDecoration(labelText: 'Ключ подключения'),
-            ),
-            TextButton(
-              onPressed: busy
-                  ? null
-                  : () => action(() async {
-                      await sync.pair(url.text, key.text, name.text);
-                      key.clear();
-                    }),
-              child: const Text('Подключить'),
-            ),
-          ],
-        ),
+          ]),
         if (repo.conflictCount > 0 ||
             sessionConflicts(repo.snapshot.sessions, repo.now()).isNotEmpty)
           settingsCard('Конфликты', [const ConflictsPanel()]),
@@ -559,7 +566,6 @@ class _InstallServerPageState extends ConsumerState<InstallServerPage> {
   String? privateKey, keyName;
   String status = '';
   bool busy = false;
-  bool deleteData = false;
   @override
   void initState() {
     super.initState();
@@ -596,18 +602,12 @@ class _InstallServerPageState extends ConsumerState<InstallServerPage> {
         context: context,
         builder: (dialog) => StatefulBuilder(
           builder: (dialog, set) => AlertDialog(
-            title: Text(
-              deleteData
-                  ? 'Удалить сервер и все его данные?'
-                  : 'Удалить сервер?',
-            ),
+            title: const Text('Очистить сервер?'),
             content: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
                 Text(
-                  deleteData
-                      ? 'База, вложения, серверные резервные копии и ключи на VPS будут удалены. Данные на устройствах останутся. Введите IP сервера для подтверждения.'
-                      : 'Сервис и бинарник будут удалены. База, вложения и ключи останутся на VPS. Введите IP сервера для подтверждения.',
+                  'Yggvion, его база, вложения, сертификаты, настройки и резервные копии на VPS будут удалены. Данные на устройствах и внешние копии останутся. Введите IP сервера для подтверждения.',
                 ),
                 const SizedBox(height: 16),
                 TextField(
@@ -628,7 +628,7 @@ class _InstallServerPageState extends ConsumerState<InstallServerPage> {
                         host.text.trim().isNotEmpty
                     ? () => Navigator.pop(dialog, true)
                     : null,
-                child: const Text('Удалить'),
+                child: const Text('Очистить сервер'),
               ),
             ],
           ),
@@ -641,7 +641,7 @@ class _InstallServerPageState extends ConsumerState<InstallServerPage> {
     await guard(context, () async {
       await installer.install(
         operation: widget.operation,
-        deleteData: deleteData,
+        deleteData: widget.operation == ServerOperation.uninstall,
         host: host.text.trim(),
         sshPort: int.tryParse(sshPort.text) ?? 0,
         httpsPort: int.tryParse(httpsPort.text) ?? 0,
@@ -671,6 +671,9 @@ class _InstallServerPageState extends ConsumerState<InstallServerPage> {
           (sync.needsEncryptionKey || !sync.passwordConfigured)) {
         await ensureEncryptionPassword(context, ref);
       }
+      if (mounted) {
+        Navigator.pop(context);
+      }
     });
     if (mounted) setState(() => busy = false);
   }
@@ -680,7 +683,7 @@ class _InstallServerPageState extends ConsumerState<InstallServerPage> {
     title: switch (widget.operation) {
       ServerOperation.install => 'Настроить VPS',
       ServerOperation.update => 'Обновить сервер',
-      ServerOperation.uninstall => 'Удалить сервер',
+      ServerOperation.uninstall => 'Очистить сервер',
     },
     children: [
       settingsCard('Подключение по SSH', [
@@ -701,6 +704,9 @@ class _InstallServerPageState extends ConsumerState<InstallServerPage> {
             child: TextField(
               controller: item.$1,
               enabled: !busy,
+              readOnly:
+                  item.$1 == host &&
+                  widget.operation != ServerOperation.install,
               decoration: InputDecoration(labelText: item.$2),
             ),
           ),
@@ -749,17 +755,9 @@ class _InstallServerPageState extends ConsumerState<InstallServerPage> {
         TextField(
           controller: httpsPort,
           enabled: !busy,
+          readOnly: widget.operation != ServerOperation.install,
           decoration: const InputDecoration(labelText: 'HTTPS-порт'),
         ),
-        if (widget.operation == ServerOperation.uninstall)
-          CheckboxListTile(
-            contentPadding: EdgeInsets.zero,
-            value: deleteData,
-            onChanged: busy ? null : (v) => setState(() => deleteData = v!),
-            title: const Text(
-              'Также удалить базу, вложения, бэкапы и ключи с VPS',
-            ),
-          ),
         const SizedBox(height: 20),
         if (busy) const LinearProgressIndicator(),
         if (status.isNotEmpty)
@@ -772,7 +770,7 @@ class _InstallServerPageState extends ConsumerState<InstallServerPage> {
           child: Text(switch (widget.operation) {
             ServerOperation.install => 'Установить и подключить',
             ServerOperation.update => 'Обновить сервер',
-            ServerOperation.uninstall => 'Удалить сервер',
+            ServerOperation.uninstall => 'Очистить сервер',
           }),
         ),
         if (busy)
@@ -995,7 +993,7 @@ class _BackupsPageState extends ConsumerState<BackupsPage> {
       title: 'Резервное копирование',
       children: [
         settingsCard('Копии на этом устройстве', [const LocalBackupsPanel()]),
-        settingsCard('Ваши данные под защитой', [
+        settingsCard('Серверные копии', [
           Text(
             'Зашифрованные копии включают задачи, заметки, проекты, учёт времени и вложения, уже дошедшие до сервера. Незагруженные изменения остаются на устройствах.',
             style: TextStyle(color: context.palette.muted, height: 1.5),
@@ -1018,17 +1016,6 @@ class _BackupsPageState extends ConsumerState<BackupsPage> {
             spacing: 12,
             runSpacing: 8,
             children: [
-              FilledButton.icon(
-                onPressed: !connected || running
-                    ? null
-                    : () => action(() async {
-                        await ref
-                            .read(syncProvider)
-                            .request('POST', '/api/v1/backups');
-                      }),
-                icon: const Icon(Icons.backup_outlined),
-                label: const Text('Создать копию'),
-              ),
               OutlinedButton(
                 onPressed: !connected || running
                     ? null
@@ -1045,7 +1032,7 @@ class _BackupsPageState extends ConsumerState<BackupsPage> {
               decoration: const InputDecoration(labelText: 'Частота'),
               items: [
                 for (final entry in {
-                  0: 'Вручную',
+                  0: 'Выключено',
                   6: 'Каждые 6 часов',
                   12: 'Каждые 12 часов',
                   24: 'Ежедневно',
@@ -1061,7 +1048,7 @@ class _BackupsPageState extends ConsumerState<BackupsPage> {
             ),
             const SizedBox(height: 16),
             Text(
-              'Храним ${config['keep_daily']} ежедневных и ${config['keep_weekly']} еженедельных копий. Ручные копии сохраняются до удаления.',
+              'Храним ${config['keep_daily']} ежедневных и ${config['keep_weekly']} еженедельных копий. Импортированные и страховочные копии сохраняются до удаления.',
             ),
             for (final entry in {
               'keep_daily': 'Ежедневных',
@@ -1175,7 +1162,7 @@ class _BackupsPageState extends ConsumerState<BackupsPage> {
             title: const Text('Вторая копия вне VPS'),
             subtitle: Text(
               (data!['remote'] as Map?)?['kind'] == 'disabled'
-                  ? 'S3 или SFTP · защита при потере сервера'
+                  ? 'Dropbox, S3 или SFTP · защита при потере сервера'
                   : 'Автоматическая отправка зашифрованных архивов',
             ),
             trailing: const Icon(Icons.chevron_right_rounded),
@@ -1186,7 +1173,7 @@ class _BackupsPageState extends ConsumerState<BackupsPage> {
                   initial: Map<String, dynamic>.from(data!['remote'] as Map),
                 ),
               ),
-            ),
+            ).then((_) => refresh()),
           ),
       ],
     );
@@ -1201,6 +1188,8 @@ class RemoteBackupsPage extends ConsumerStatefulWidget {
 }
 
 class _RemoteBackupsPageState extends ConsumerState<RemoteBackupsPage> {
+  final dropbox = DropboxAuthorization();
+  bool dropboxConnected = false;
   final fields = <String, TextEditingController>{};
   late String kind;
   bool busy = false;
@@ -1210,6 +1199,7 @@ class _RemoteBackupsPageState extends ConsumerState<RemoteBackupsPage> {
   void initState() {
     super.initState();
     kind = widget.initial['kind'] as String? ?? 'disabled';
+    dropboxConnected = kind == 'dropbox';
     for (final key in [
       'endpoint',
       'bucket',
@@ -1228,6 +1218,7 @@ class _RemoteBackupsPageState extends ConsumerState<RemoteBackupsPage> {
 
   @override
   void dispose() {
+    dropbox.cancel();
     for (final c in fields.values) {
       c.dispose();
     }
@@ -1251,6 +1242,41 @@ class _RemoteBackupsPageState extends ConsumerState<RemoteBackupsPage> {
     }
   }
 
+  Future<void> connectDropbox() async {
+    setState(() {
+      busy = true;
+      error = null;
+    });
+    try {
+      final connected = await dropbox.connect(ref.read(syncProvider));
+      if (mounted && connected) {
+        setState(() {
+          dropboxConnected = true;
+          kind = 'dropbox';
+          copies = [];
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Dropbox подключён. Новые серверные копии будут отправляться автоматически.',
+            ),
+          ),
+        );
+      }
+    } on StateError catch (e) {
+      if (mounted) setState(() => error = e.message);
+    } on Object {
+      if (mounted) {
+        setState(
+          () => error =
+              'Не удалось подключить Dropbox. Проверьте связь с VPS и разрешения, затем повторите вход.',
+        );
+      }
+    } finally {
+      if (mounted) setState(() => busy = false);
+    }
+  }
+
   Future<void> save() async {
     await ref
         .read(syncProvider)
@@ -1265,6 +1291,7 @@ class _RemoteBackupsPageState extends ConsumerState<RemoteBackupsPage> {
                   : field.value.text.trim(),
           },
         );
+    if (kind != 'dropbox') dropboxConnected = false;
     fields['secret']!.clear();
     fields['private_key']!.clear();
     if (mounted) {
@@ -1319,6 +1346,7 @@ class _RemoteBackupsPageState extends ConsumerState<RemoteBackupsPage> {
           decoration: const InputDecoration(labelText: 'Хранилище'),
           items: const [
             DropdownMenuItem(value: 'disabled', child: Text('Выключено')),
+            DropdownMenuItem(value: 'dropbox', child: Text('Dropbox')),
             DropdownMenuItem(value: 's3', child: Text('S3-совместимое')),
             DropdownMenuItem(value: 'sftp', child: Text('SFTP')),
           ],
@@ -1328,7 +1356,28 @@ class _RemoteBackupsPageState extends ConsumerState<RemoteBackupsPage> {
                   if (value != null) setState(() => kind = value);
                 },
         ),
-        if (kind != 'disabled') ...[
+        if (kind == 'dropbox') ...[
+          const SizedBox(height: 16),
+          Text(
+            dropboxConnected
+                ? 'Dropbox подключён. Архивы отправляются с VPS в папку приложения, даже когда Yggvion закрыт.'
+                : 'Войдите в браузере и разрешите доступ к папке приложения в Dropbox. Остальные файлы останутся недоступны Yggvion.',
+            style: TextStyle(color: context.palette.muted, height: 1.5),
+          ),
+          if (!dropbox.configured && !dropboxConnected)
+            const Padding(
+              padding: EdgeInsets.only(top: 12),
+              child: Text(
+                'Подключение Dropbox ещё не настроено в этой сборке.',
+              ),
+            ),
+          if (busy)
+            TextButton(
+              onPressed: dropbox.cancel,
+              child: const Text('Отменить вход'),
+            ),
+        ],
+        if (kind == 's3' || kind == 'sftp') ...[
           for (final field in <String, String>{
             'endpoint': kind == 's3'
                 ? 'HTTPS endpoint без пути'
@@ -1370,15 +1419,23 @@ class _RemoteBackupsPageState extends ConsumerState<RemoteBackupsPage> {
         ],
         const SizedBox(height: 16),
         FilledButton(
-          onPressed: busy ? null : () => action(save),
+          onPressed: busy
+              ? null
+              : kind == 'dropbox'
+              ? (dropbox.configured ? connectDropbox : null)
+              : () => action(save),
           child: Text(
-            kind == 'disabled'
+            kind == 'dropbox'
+                ? (dropboxConnected
+                      ? 'Сменить аккаунт Dropbox'
+                      : 'Подключить Dropbox')
+                : kind == 'disabled'
                 ? 'Выключить внешние копии'
                 : 'Проверить и подключить',
           ),
         ),
       ]),
-      if (kind != 'disabled')
+      if (kind != 'disabled' && (kind != 'dropbox' || dropboxConnected))
         settingsCard('Копии во внешнем хранилище', [
           Align(
             alignment: Alignment.centerLeft,

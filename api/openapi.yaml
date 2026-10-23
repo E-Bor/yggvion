@@ -426,7 +426,7 @@ paths:
         '409': {$ref: '#/components/responses/Error'}
   /backups/remote:
     get:
-      summary: List encrypted copies in the configured S3/SFTP destination
+      summary: List encrypted copies in the configured Dropbox/S3/SFTP destination
       responses:
         '200':
           description: External copies
@@ -439,7 +439,7 @@ paths:
         '502': {$ref: '#/components/responses/Error'}
     put:
       summary: Validate remote credentials and enable automatic encrypted replication
-      description: Empty secrets preserve existing credentials only for an unchanged destination/user. HTTPS is required for S3; SFTP requires the exact SHA256 SSH fingerprint.
+      description: Empty secrets preserve existing credentials only for an unchanged destination/user/app key. HTTPS is required for S3; SFTP requires the exact SHA256 SSH fingerprint. Dropbox uses the OAuth endpoint below. Disabling erases stored remote credentials but leaves external archives intact.
       requestBody:
         required: true
         content:
@@ -448,6 +448,37 @@ paths:
       responses:
         '200': {description: Destination checked and stored with mode 0600}
         '400': {$ref: '#/components/responses/Error'}
+  /backups/dropbox/connect:
+    post:
+      summary: Exchange a Dropbox OAuth code with PKCE and enable scheduled replication
+      description: >-
+        Authenticated owner only. The client validates its random OAuth state and
+        a five-minute transaction lifetime before submitting the one-use code.
+        Redirect must be yggvion://oauth/dropbox, or the Windows/Linux loopback
+        http://127.0.0.1:43827/dropbox (listener active only during authorization).
+        Requests use fixed Dropbox
+        HTTPS endpoints without redirects. Access to the App folder is granted
+        through files.metadata.read, files.content.read and files.content.write.
+        Offline refresh credentials are stored only on the VPS (0600), never in
+        responses. Existing destination remains intact on failure.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [app_key, code, code_verifier, redirect_uri]
+              properties:
+                app_key: {type: string, pattern: '^[a-zA-Z0-9_-]{5,128}$'}
+                code: {type: string, minLength: 1, maxLength: 4096}
+                code_verifier: {type: string, pattern: '^[a-zA-Z0-9._~-]{43,128}$'}
+                redirect_uri: {type: string, enum: ['yggvion://oauth/dropbox', 'http://127.0.0.1:43827/dropbox']}
+      responses:
+        '200': {description: Dropbox verified and enabled; no tokens returned}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '503': {$ref: '#/components/responses/Error'}
   /backups/remote/{id}/fetch:
     parameters:
       - {$ref: '#/components/parameters/BackupID'}
@@ -691,11 +722,12 @@ components:
       additionalProperties: false
       required: [kind]
       properties:
-        kind: {type: string, enum: [disabled, s3, sftp]}
+        kind: {type: string, enum: [disabled, s3, sftp, dropbox]}
+        dropbox_app_key: {type: string, description: Public Dropbox application key; returned only for Dropbox}
         endpoint: {type: string, description: 'HTTPS origin for S3 or host:port for SFTP'}
         bucket: {type: string}
         region: {type: string}
-        prefix: {type: string, description: S3 prefix or absolute SFTP directory without dot segments}
+        prefix: {type: string, description: S3 prefix or absolute SFTP directory without dot segments; fixed to / for Dropbox App folder}
         username: {type: string, description: S3 access key or SSH username}
         secret: {type: string, writeOnly: true}
         private_key: {type: string, writeOnly: true}
