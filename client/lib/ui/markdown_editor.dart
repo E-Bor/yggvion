@@ -9,6 +9,8 @@ import 'package:url_launcher/url_launcher.dart';
 import '../data/clipboard.dart';
 import '../domain/models.dart';
 import '../domain/markdown_blocks.dart';
+import '../domain/markdown_tasks.dart';
+import 'markdown_tasks.dart';
 import 'markdown_code_block.dart';
 import '../domain/note_links.dart';
 import 'providers.dart';
@@ -20,9 +22,11 @@ class MarkdownPreview extends ConsumerWidget {
     super.key,
     required this.text,
     this.selectable = true,
+    this.onChanged,
   });
   final String text;
   final bool selectable;
+  final ValueChanged<String>? onChanged;
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final legacy = RegExp(
@@ -94,14 +98,53 @@ class MarkdownPreview extends ConsumerWidget {
         ),
       );
     }
+    var checkboxIndex = 0;
+    final taskCount = text.contains(RegExp(r'\[[ xX]\]'))
+        ? markdownTaskCount(text)
+        : 0;
     return MarkdownBody(
+      key: ValueKey(onChanged != null),
       data: text,
       builders: {'pre': CodeBlockBuilder(selectable: selectable)},
+      paddingBuilders: {'li': MarkdownTaskListBuilder()},
+      checkboxBuilder: (checked) {
+        // MarkdownBody can parse again after dependency changes. Each full
+        // traversal must restart the same checkbox order.
+        final index = taskCount == 0 ? 0 : checkboxIndex++ % taskCount;
+        return SizedBox(
+          width: 32,
+          height: 32,
+          child: Checkbox(
+            value: checked,
+            activeColor: context.accentColor,
+            materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            visualDensity: VisualDensity.compact,
+            semanticLabel: 'Подзадача',
+            onChanged: onChanged == null
+                ? null
+                : (value) {
+                    if (!context.mounted) return;
+                    // MarkdownBody caches its buttons when only a callback
+                    // changes (e.g. editing a different live-preview block).
+                    final preview = context.widget as MarkdownPreview;
+                    final updated = setMarkdownTaskChecked(
+                      preview.text,
+                      index,
+                      value!,
+                    );
+                    if (updated != preview.text) {
+                      preview.onChanged?.call(updated);
+                    }
+                  },
+          ),
+        );
+      },
       fitContent: false,
       inlineSyntaxes: [_WikiLinkSyntax()],
       selectable: selectable,
       styleSheet: MarkdownStyleSheet.fromTheme(Theme.of(context)).copyWith(
         p: TextStyle(height: 1.65, color: context.palette.text),
+        listIndent: taskCount > 0 ? 36 : null,
         code: TextStyle(
           fontFamily: 'monospace',
           fontSize: 12,
@@ -317,7 +360,21 @@ class LiveMarkdownEditorState extends ConsumerState<LiveMarkdownEditor> {
       }
     }
     if (buffer.isNotEmpty) parts.add(buffer.join('\n'));
-    return parts.isEmpty ? [''] : parts;
+    // Blank lines may belong to a loose list. Rendering its indented children
+    // separately would turn nested checkboxes into code blocks.
+    final listStart = RegExp(r'^\n* {0,3}(?:[-+*]|[0-9]{1,9}[.)])[ \t]+');
+    final indented = RegExp(r'^\n*(?: {2,}|\t)');
+    final blocks = <String>[];
+    for (final part in parts) {
+      if (blocks.isNotEmpty &&
+          listStart.hasMatch(blocks.last) &&
+          (listStart.hasMatch(part) || indented.hasMatch(part))) {
+        blocks[blocks.length - 1] = '${blocks.last}\n\n$part';
+      } else {
+        blocks.add(part);
+      }
+    }
+    return blocks.isEmpty ? [''] : blocks;
   }
 
   @override
@@ -616,6 +673,7 @@ class LiveMarkdownEditorState extends ConsumerState<LiveMarkdownEditor> {
                     : null,
                 readOnly: _pasting,
                 contextMenuBuilder: _contextMenu,
+                inputFormatters: const [MarkdownTaskInputFormatter()],
                 maxLines: null,
                 minLines: 5,
                 style: const TextStyle(
@@ -647,6 +705,7 @@ class LiveMarkdownEditorState extends ConsumerState<LiveMarkdownEditor> {
                             : null,
                         readOnly: _pasting,
                         contextMenuBuilder: _contextMenu,
+                        inputFormatters: const [MarkdownTaskInputFormatter()],
                         maxLines: null,
                         minLines: 1,
                         style: const TextStyle(fontSize: 14, height: 1.65),
@@ -687,10 +746,7 @@ class LiveMarkdownEditorState extends ConsumerState<LiveMarkdownEditor> {
                                     height: 1.65,
                                   ),
                                 )
-                              : MarkdownPreview(
-                                  text: _blocks[index],
-                                  selectable: false,
-                                ),
+                              : _previewBlock(index),
                         ),
                       ),
                     ),
@@ -706,6 +762,35 @@ class LiveMarkdownEditorState extends ConsumerState<LiveMarkdownEditor> {
       ),
     ),
   );
+
+  Widget _previewBlock(int index) {
+    final block = _blocks[index], document = _last;
+    final start = _blocks
+        .take(index)
+        .fold<int>(0, (n, part) => n + part.length + 2);
+    return MarkdownPreview(
+      text: block,
+      selectable: false,
+      onChanged: _pasting
+          ? null
+          : (value) {
+              if (widget.readOnly || _last != document) return;
+              setState(() {
+                _last = document.replaceRange(
+                  start,
+                  start + block.length,
+                  value,
+                );
+                if (_active == null) {
+                  _load(_last);
+                } else {
+                  _blocks[index] = value;
+                }
+              });
+              widget.onChanged(_last);
+            },
+    );
+  }
 
   Widget _autocomplete(Widget child) => WikiAutocomplete(
     controller: _controller,
