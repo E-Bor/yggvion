@@ -12,6 +12,85 @@ class DailyStatistics {
   final Duration planned, actual, application;
 }
 
+class DailyActivity {
+  const DailyActivity(this.date, this.duration);
+  final DateTime date;
+  final Duration duration;
+
+  int get level {
+    if (duration <= Duration.zero) return 0;
+    if (duration < const Duration(minutes: 5)) return 1;
+    if (duration < const Duration(minutes: 20)) return 2;
+    if (duration < const Duration(hours: 1)) return 3;
+    return 4;
+  }
+}
+
+/// Recorded foreground usage on this device, independent of the chart period.
+class ActivityHistory {
+  const ActivityHistory(this.days);
+  final List<DailyActivity> days;
+
+  int get activeDays => days.where((d) => d.duration > Duration.zero).length;
+  Duration get total => sumDurations(days.map((d) => d.duration));
+
+  int get currentStreak {
+    var index = days.length - 1;
+    // Today can still become active; yesterday's streak remains current.
+    if (index >= 0 && days[index].level == 0) index--;
+    var count = 0;
+    while (index >= 0 && days[index--].level > 0) {
+      count++;
+    }
+    return count;
+  }
+
+  int get longestStreak {
+    var longest = 0, current = 0;
+    for (final day in days) {
+      current = day.level > 0 ? current + 1 : 0;
+      if (current > longest) longest = current;
+    }
+    return longest;
+  }
+
+  static tz.TZDateTime startFor(DateTime now, tz.Location location) {
+    final local = tz.TZDateTime.from(now, location);
+    return tz.TZDateTime(location, local.year, local.month, local.day - 364);
+  }
+
+  static ActivityHistory calculate(
+    List<TimeRange> usage,
+    DateTime now, {
+    required tz.Location location,
+  }) {
+    final start = startFor(now, location);
+    final ranges = unionRanges(
+      usage.map((range) => clipRange(range, start, now)).nonNulls,
+    );
+    final durations = <String, Duration>{};
+    // Split merged intervals once, instead of scanning the history 365 times.
+    for (final range in ranges) {
+      var day = tz.TZDateTime.from(range.start, location);
+      while (day.isBefore(range.end)) {
+        final next = tz.TZDateTime(location, day.year, day.month, day.day + 1);
+        final finish = range.end.isBefore(next) ? range.end : next;
+        final key = dayKey(day);
+        durations[key] =
+            (durations[key] ?? Duration.zero) + finish.difference(day);
+        day = next;
+      }
+    }
+    return ActivityHistory([
+      for (var i = 0; i < 365; i++)
+        for (final day in [
+          tz.TZDateTime(location, start.year, start.month, start.day + i),
+        ])
+          DailyActivity(day, durations[dayKey(day)] ?? Duration.zero),
+    ]);
+  }
+}
+
 class ProjectStatistics {
   const ProjectStatistics(this.title, this.color, this.planned, this.actual);
   final String title;

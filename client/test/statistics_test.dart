@@ -12,6 +12,128 @@ import 'package:yggvion/domain/statistics.dart';
 
 void main() {
   setUpAll(tzdata.initializeTimeZones);
+  test('activity intensity uses fixed foreground-time thresholds', () {
+    final date = DateTime.utc(2026, 10, 19);
+    for (final entry in <Duration, int>{
+      Duration.zero: 0,
+      const Duration(seconds: 1): 1,
+      const Duration(minutes: 4, seconds: 59): 1,
+      const Duration(minutes: 5): 2,
+      const Duration(minutes: 19, seconds: 59): 2,
+      const Duration(minutes: 20): 3,
+      const Duration(minutes: 59, seconds: 59): 3,
+      const Duration(hours: 1): 4,
+      const Duration(hours: 8): 4,
+    }.entries) {
+      expect(
+        DailyActivity(date, entry.key).level,
+        entry.value,
+        reason: '${entry.key}',
+      );
+    }
+  });
+
+  test(
+    'annual activity clips the window and future, merges overlaps and splits midnight',
+    () {
+      final now = DateTime.utc(2026, 10, 19, 12);
+      final history = ActivityHistory.calculate(
+        [
+          TimeRange(
+            DateTime.utc(2025, 10, 19, 23, 50),
+            DateTime.utc(2025, 10, 20, 0, 10),
+          ),
+          TimeRange(DateTime.utc(2025, 10, 1), DateTime.utc(2025, 10, 2)),
+          TimeRange(
+            DateTime.utc(2026, 10, 18, 23, 30),
+            DateTime.utc(2026, 10, 19, 0, 30),
+          ),
+          TimeRange(
+            DateTime.utc(2026, 10, 19, 10),
+            DateTime.utc(2026, 10, 19, 13),
+          ),
+          TimeRange(
+            DateTime.utc(2026, 10, 19, 10, 30),
+            DateTime.utc(2026, 10, 19, 11),
+          ),
+          TimeRange(DateTime.utc(2026, 10, 20), DateTime.utc(2026, 10, 21)),
+          TimeRange(now, now),
+        ],
+        now,
+        location: tz.UTC,
+      );
+      expect(history.days, hasLength(365));
+      expect(history.days.first.date, DateTime.utc(2025, 10, 20));
+      expect(history.days.last.date, DateTime.utc(2026, 10, 19));
+      expect(history.days.first.duration, const Duration(minutes: 10));
+      expect(history.days[363].duration, const Duration(minutes: 30));
+      expect(history.days.last.duration, const Duration(hours: 2, minutes: 30));
+      expect(history.activeDays, 3);
+      expect(history.total, const Duration(hours: 3, minutes: 10));
+      expect(history.currentStreak, 2);
+    },
+  );
+
+  test('annual activity follows local dates, leap days and DST', () {
+    final zone = tz.getLocation('Europe/Berlin');
+    final from = tz.TZDateTime(zone, 2026, 10, 25);
+    final until = tz.TZDateTime(zone, 2026, 10, 26);
+    final history = ActivityHistory.calculate(
+      [TimeRange(from, until)],
+      until,
+      location: zone,
+    );
+    expect(history.days[363].date, from);
+    expect(history.days[363].duration, const Duration(hours: 25));
+    expect(history.days.last.duration, Duration.zero);
+    expect(history.activeDays, 1);
+    expect(history.currentStreak, 1);
+    final leap = ActivityHistory.calculate(
+      [],
+      DateTime.utc(2024, 3, 1),
+      location: tz.UTC,
+    );
+    expect(leap.days, hasLength(365));
+    expect(
+      leap.days.where((day) => dayKey(day.date) == '2024-02-29'),
+      hasLength(1),
+    );
+    expect(leap.activeDays, 0);
+    expect(leap.currentStreak, 0);
+    expect(leap.longestStreak, 0);
+  });
+
+  test(
+    'usage streak allows today to be empty but never bridges a missed day',
+    () {
+      final now = DateTime.utc(2026, 10, 19, 12);
+      final usage = [
+        for (final day in [12, 13, 14, 17, 18])
+          TimeRange(
+            DateTime.utc(2026, 10, day, 10),
+            DateTime.utc(2026, 10, day, 10, 1),
+          ),
+      ];
+      final history = ActivityHistory.calculate(usage, now, location: tz.UTC);
+      expect(history.currentStreak, 2);
+      expect(history.longestStreak, 3);
+      expect(history.activeDays, 5);
+      usage.add(TimeRange(now.subtract(const Duration(minutes: 1)), now));
+      expect(
+        ActivityHistory.calculate(usage, now, location: tz.UTC).currentStreak,
+        3,
+      );
+      expect(
+        ActivityHistory.calculate(
+          usage,
+          now.add(const Duration(days: 2)),
+          location: tz.UTC,
+        ).currentStreak,
+        0,
+      );
+    },
+  );
+
   final start = DateTime.utc(2026, 10, 19);
   final end = DateTime.utc(2026, 10, 20);
   DateTime at(int hour, [int minute = 0]) =>

@@ -14,6 +14,19 @@ import 'interaction_test.dart'
 Future<void> statisticsFixture(Repository repo) async {
   await repo.saveProject('Разработка', 0xff9cb9ff);
   final project = repo.snapshot.projects.single;
+  for (var offset = 10; offset < 365; offset += 3) {
+    final start = DateTime.utc(
+      2026,
+      10,
+      19,
+      9,
+    ).subtract(Duration(days: offset));
+    final activity = await repo.db.beginActivity(start);
+    await repo.db.endActivity(
+      activity,
+      start.add(Duration(minutes: [2, 8, 25, 75][(offset ~/ 3) % 4])),
+    );
+  }
   for (var i = 0; i < 7; i++) {
     final start = DateTime.utc(2026, 10, 13 + i, 9);
     final task = await repo.createTask(
@@ -112,27 +125,70 @@ void main() {
               .join('\n'),
         );
         expect(find.text('План и факт'), findsOneWidget);
+        expect(find.byKey(const ValueKey('work-line-chart')), findsOneWidget);
+        expect(find.byKey(const ValueKey('usage-line-chart')), findsOneWidget);
         await expectLater(
           find.byType(StatisticsPage),
           matchesGoldenFile('goldens/statistics_${mobile ? 390 : 1440}.png'),
         );
-        await tester.ensureVisible(find.byKey(const ValueKey('work-bar-6')));
-        await tester.tap(find.byKey(const ValueKey('work-bar-6')));
+        await tester.ensureVisible(find.byKey(const ValueKey('work-point-6')));
+        await tester.tap(find.byKey(const ValueKey('work-point-6')));
         await settle(tester);
+        await tester.ensureVisible(find.byKey(const ValueKey('usage-point-6')));
+        await tester.tap(find.byKey(const ValueKey('usage-point-6')));
+        await settle(tester);
+        expect(find.text('Активно 34 мин'), findsOneWidget);
+        final calendar = find.byKey(const ValueKey('activity-calendar'));
+        await tester.ensureVisible(calendar);
+        await settle(tester);
+        expect(find.text('Календарь активности'), findsOneWidget);
+        expect(
+          find.byKey(const ValueKey('activity-day-2025-10-20')),
+          findsOneWidget,
+        );
+        expect(
+          find.byKey(const ValueKey('activity-day-2026-10-20')),
+          findsNothing,
+        );
+        await tester.tap(find.byKey(const ValueKey('activity-day-2026-10-13')));
+        await settle(tester);
+        final details = find.byKey(const ValueKey('activity-day-details'));
+        expect(
+          find.descendant(of: details, matching: find.text('10 мин')),
+          findsOneWidget,
+        );
+        await expectLater(
+          calendar,
+          matchesGoldenFile('goldens/activity_${mobile ? 390 : 1440}.png'),
+        );
+        await tester.tap(find.byKey(const ValueKey('activity-day-2026-10-12')));
+        await settle(tester);
+        expect(
+          find.descendant(of: details, matching: find.text('Нет активности')),
+          findsOneWidget,
+        );
         expect(tester.takeException(), isNull);
         await tester.ensureVisible(
           find.byKey(const ValueKey('statistics-period')),
         );
         await tester.tap(find.text('30 дней'));
         await settle(tester);
-        expect(find.byKey(const ValueKey('work-bar-29')), findsOneWidget);
+        expect(find.byKey(const ValueKey('work-point-29')), findsOneWidget);
         await tester.tap(find.text('90 дней'));
         await settle(tester);
-        expect(find.byKey(const ValueKey('work-bar-12')), findsOneWidget);
-        expect(find.byKey(const ValueKey('work-bar-13')), findsNothing);
+        expect(find.byKey(const ValueKey('work-point-12')), findsOneWidget);
+        expect(find.byKey(const ValueKey('work-point-13')), findsNothing);
         await tester.tap(find.byTooltip('Предыдущий период'));
         await settle(tester);
         expect(find.text('За этот период пока нет данных.'), findsWidgets);
+        expect(
+          find.byKey(const ValueKey('activity-day-2026-10-13')),
+          findsOneWidget,
+        );
+        expect(
+          find.text('Последние 365 дней · только это устройство'),
+          findsOneWidget,
+        );
         expect(tester.takeException(), isNull);
         await tester.tap(find.byType(BackButton));
         await settle(tester);
@@ -140,6 +196,40 @@ void main() {
       },
     );
   }
+
+  testInteraction('empty activity history stays usable on phone', (
+    tester,
+  ) async {
+    await workspace(tester, mobile: true);
+    await command(tester, LogicalKeyboardKey.digit5);
+    await tester.tap(find.byKey(const ValueKey('open-statistics')));
+    await tester.pump();
+    await settle(tester);
+    final calendar = find.byKey(const ValueKey('activity-calendar'));
+    await tester.ensureVisible(calendar);
+    await settle(tester);
+    await tester.tap(find.byKey(const ValueKey('activity-day-2026-10-19')));
+    await settle(tester);
+    expect(
+      find.descendant(of: calendar, matching: find.text('Пока нет данных')),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(of: calendar, matching: find.text('0')),
+      findsNWidgets(3),
+    );
+    final scroll = find.byKey(const ValueKey('activity-calendar-scroll'));
+    await tester.drag(scroll, const Offset(1200, 0));
+    await settle(tester);
+    await tester.tap(find.byKey(const ValueKey('activity-day-2025-10-20')));
+    await settle(tester);
+    expect(find.text('пн, 20 октября 2025'), findsOneWidget);
+    expect(
+      find.descendant(of: calendar, matching: find.text('Пока нет данных')),
+      findsOneWidget,
+    );
+    expect(tester.takeException(), isNull);
+  });
 
   testInteraction(
     'desktop note list is compact and keeps selection and deletion usable',
