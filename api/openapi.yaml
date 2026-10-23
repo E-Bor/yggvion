@@ -13,6 +13,13 @@ info:
     on sync, changes and attachment requests. Missing or stale generations return
     409 generation_changed. Clients quarantine local records/outbox/conflicts,
     reset the cursor and fetch the restored dataset before sending new writes.
+    Private requests are rate limited before database access: burst 120 and 30/s
+    per source IP (IPv6 /64), burst 480 and 120/s globally. Forwarded headers are
+    ignored. Thirty failed authentication attempts per minute throttle that source.
+    At most 8 authentication lookups, 24 regular handlers (4 per device), 4 file
+    transfers and 1 snapshot/password operation run concurrently. SSE has a separate
+    limit of 16 streams globally and 2 per device. Limits return 429 rate_limited
+    with Retry-After. Clients should retain their outbox and retry later.
 servers:
   - url: https://planner.example.com/api/v1
 security:
@@ -216,6 +223,8 @@ paths:
         the shared window and currently free. Minute precision, duration at most
         24 hours. Repeating a nonce with identical content is idempotent; changed
         content is rejected. Maximum JSON body 16 KiB, description 8000 UTF-8 bytes.
+        Guests cannot upload files or reference internal attachment URLs in either
+        title or description (case insensitive). Such proposals return 400.
         The plaintext suggestion is held in a separate inbox until an owner client
         validates it and uploads an encrypted task without a calendar block.
       security: [{calendarShare: []}]
@@ -415,15 +424,18 @@ paths:
   /backups/import:
     post:
       summary: Stream, validate and store a portable archive without an archive key
-      description: Maximum 100 GiB body. Validates snapshot and attachment SHA-256 checksums, E2EE envelopes, gzip completion, entry paths, sizes and duplicates. Imported copies do not replace current data until explicitly restored. The client uses the password from backup creation time to decrypt restored private data.
+      description: Maximum 100 GiB body. Reserves the exclusive backup job before reading the body, including the entire upload and validation. Disk writes keep a 512 MiB reserve; interrupted temporary files are removed on failure and startup. Validates snapshot and attachment SHA-256 checksums, E2EE envelopes, gzip completion, entry paths, sizes and duplicates. Imported copies do not replace current data until explicitly restored. The client uses the password from backup creation time to decrypt restored private data.
       requestBody:
         required: true
         content:
           application/octet-stream: {schema: {type: string, format: binary}}
       responses:
         '202': {description: Validation/import job accepted after upload}
+        '400': {$ref: '#/components/responses/Error'}
         '413': {$ref: '#/components/responses/Error'}
         '409': {$ref: '#/components/responses/Error'}
+        '429': {$ref: '#/components/responses/Error'}
+        '507': {description: Insufficient free disk space to preserve the reserve}
   /backups/remote:
     get:
       summary: List encrypted copies in the configured Dropbox/S3/SFTP destination
@@ -542,7 +554,7 @@ paths:
                       record: {$ref: '#/components/schemas/Record'}
       responses:
         '200':
-          description: Versioned results; retry an identical operation to get its original result
+          description: Versioned results. Exact operation receipts are retained for up to 7 days within a 4096-entry / 64 MiB budget. After eviction retries still use optimistic version checks, returning the current record or a conflict without overwriting newer data.
           content:
             application/json:
               schema:
@@ -566,7 +578,8 @@ paths:
     parameters:
       - {$ref: '#/components/parameters/Generation'}
     get:
-      summary: Read up to 500 ordered changes including tombstones
+      summary: Read the latest version of changed records including tombstones
+      description: Up to 500 records and approximately 8 MiB of record JSON per page. Intermediate versions are compacted; the latest version of every record and tombstone is retained. Sequence numbers remain monotonic, so old offline cursors and after=0 still work. Use has_more, not page length, to decide whether another page is needed.
       parameters:
         - in: query
           name: after
@@ -590,7 +603,7 @@ paths:
       summary: SSE sync hints; clients must retrieve durable changes using their cursor
       responses:
         '200':
-          description: An event named sync on changes and every 20 seconds
+          description: An event named sync on changes and every 20 seconds. At most two streams per device and sixteen globally; write deadline 10 seconds per flush, connection lifetime at most one hour. Reconnect and read durable changes after closing.
           content:
             text/event-stream: {schema: {type: string}}
         '401': {$ref: '#/components/responses/Error'}

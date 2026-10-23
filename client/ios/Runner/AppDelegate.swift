@@ -6,6 +6,7 @@ import UserNotifications
 @objc class AppDelegate: FlutterAppDelegate {
   private var iconChannel: FlutterMethodChannel?
   private var notificationSettingsChannel: FlutterMethodChannel?
+  private var storagePolicyChannel: FlutterMethodChannel?
 
   override func application(
     _ application: UIApplication,
@@ -15,6 +16,35 @@ import UserNotifications
     GeneratedPluginRegistrant.register(with: self)
     let launched = super.application(application, didFinishLaunchingWithOptions: launchOptions)
     if let controller = window?.rootViewController as? FlutterViewController {
+      let storage = FlutterMethodChannel(name: "dev.yggvion/storage_policy",
+                                         binaryMessenger: controller.binaryMessenger)
+      storage.setMethodCallHandler { call, result in
+        guard call.method == "excludePrivateDataFromBackup" else {
+          result(FlutterMethodNotImplemented)
+          return
+        }
+        do {
+          // Mark the stable parent so SQLite's WAL/SHM files and new attachments
+          // inherit the policy as well. Exported encrypted backups remain portable.
+          var directory = try FileManager.default.url(for: .applicationSupportDirectory,
+                                                      in: .userDomainMask,
+                                                      appropriateFor: nil, create: true)
+          var values = URLResourceValues()
+          values.isExcludedFromBackup = true
+          try directory.setResourceValues(values)
+          guard try directory.resourceValues(forKeys: [.isExcludedFromBackupKey])
+            .isExcludedFromBackup == true else {
+            result(FlutterError(code: "backup_exclusion_failed",
+                                message: "Не удалось защитить локальное хранилище от системного копирования.", details: nil))
+            return
+          }
+          result(nil)
+        } catch {
+          result(FlutterError(code: "backup_exclusion_failed",
+                              message: "Не удалось защитить локальное хранилище от системного копирования.", details: nil))
+        }
+      }
+      storagePolicyChannel = storage
       let settings = FlutterMethodChannel(name: "dev.yggvion/notification_settings",
                                           binaryMessenger: controller.binaryMessenger)
       settings.setMethodCallHandler { call, result in

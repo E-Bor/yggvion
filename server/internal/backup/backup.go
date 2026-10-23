@@ -50,20 +50,21 @@ type Status struct {
 	Finished  *time.Time `json:"finished,omitempty"`
 }
 type Manager struct {
-	Store      *store.Store
-	Dir, Files string
-	DataMu     *sync.RWMutex
-	mu         sync.Mutex
-	remoteMu   sync.Mutex
-	config     Config
-	status     Status
+	Store          *store.Store
+	Dir, Files     string
+	DataMu         *sync.RWMutex
+	mu             sync.Mutex
+	remoteMu       sync.Mutex
+	config         Config
+	status         Status
+	availableSpace func(string) (uint64, error)
 }
 
 func Open(s *store.Store, dir, files string, lock *sync.RWMutex) (*Manager, error) {
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		return nil, err
 	}
-	m := &Manager{Store: s, Dir: dir, Files: files, DataMu: lock, config: Config{24, 7, 4}}
+	m := &Manager{Store: s, Dir: dir, Files: files, DataMu: lock, config: Config{24, 7, 4}, availableSpace: availableDisk}
 	data, err := os.ReadFile(filepath.Join(dir, "schedule.json"))
 	if err == nil {
 		if err = json.Unmarshal(data, &m.config); err != nil {
@@ -74,6 +75,12 @@ func Open(s *store.Store, dir, files string, lock *sync.RWMutex) (*Manager, erro
 	}
 	if !validConfig(m.config) {
 		return nil, errors.New("invalid backup configuration")
+	}
+	if err := cleanIncomplete(dir, ".upload-", ".restore-", ".import-", ".remote-", ".backup-", ".write-"); err != nil {
+		return nil, err
+	}
+	if err := cleanIncomplete(files, "upload-"); err != nil {
+		return nil, err
 	}
 	return m, nil
 }
@@ -122,6 +129,13 @@ func (m *Manager) Status() Status { m.mu.Lock(); defer m.mu.Unlock(); return m.s
 // Start owns the operation until completion; request cancellation does not kill
 // an accepted job. Server shutdown does, through the supplied lifetime context.
 func (m *Manager) Start(ctx context.Context, operation string, work func(context.Context) error) error {
+	return m.StartPrepared(ctx, operation, nil, work)
+}
+
+// Reserves the same job slot for request-body upload and background validation.
+// Preparation runs before the HTTP handler returns; work keeps the slot until
+// completion, so neither another upload nor a scheduled job can race it.
+func (m *Manager) StartPrepared(ctx context.Context, operation string, prepare func() error, work func(context.Context) error) error {
 	m.mu.Lock()
 	if m.status.Running {
 		m.mu.Unlock()
@@ -129,10 +143,7 @@ func (m *Manager) Start(ctx context.Context, operation string, work func(context
 	}
 	m.status = Status{Running: true, Operation: operation}
 	m.mu.Unlock()
-	go func() {
-		job, cancel := context.WithTimeout(ctx, 2*time.Hour)
-		defer cancel()
-		err := work(job)
+	finish := func(err error) {
 		now := time.Now().UTC()
 		m.mu.Lock()
 		defer m.mu.Unlock()
@@ -142,6 +153,21 @@ func (m *Manager) Start(ctx context.Context, operation string, work func(context
 			slog.Error("backup job failed", "operation", operation, "error", err)
 			m.status.Error = "Операция не завершена. Проверьте свободное место, целостность архива и полноту вложений."
 		}
+	}
+	if prepare != nil {
+		if err := prepare(); err != nil {
+			finish(err)
+			return err
+		}
+	}
+	if err := ctx.Err(); err != nil {
+		finish(err)
+		return err
+	}
+	go func() {
+		job, cancel := context.WithTimeout(ctx, 2*time.Hour)
+		defer cancel()
+		finish(work(job))
 	}()
 	return nil
 }
@@ -250,7 +276,7 @@ func (m *Manager) Create(ctx context.Context, reason string) (Entry, error) {
 	}
 	defer os.Remove(f.Name())
 	defer f.Close()
-	gz := gzip.NewWriter(f)
+	gz := gzip.NewWriter(&reserveWriter{manager: m, target: f})
 	archive := tar.NewWriter(gz)
 	if err = add(ctx, archive, "snapshot.json", int64(len(b)), bytes.NewReader(b)); err != nil {
 		return entry, err
@@ -422,7 +448,7 @@ func (m *Manager) stage(ctx context.Context, path string) (store.Snapshot, strin
 			return snapshot, "", e
 		}
 		hash := sha256.New()
-		n, e := copyContext(ctx, io.MultiWriter(file, hash), archive)
+		n, e := m.CopyWithReserve(ctx, io.MultiWriter(file, hash), archive)
 		syncErr := file.Sync()
 		closeErr := file.Close()
 		if e != nil {
@@ -476,7 +502,7 @@ func (m *Manager) Restore(ctx context.Context, path string) error {
 		}
 	} else {
 		// Create's read-lock is already owned exclusively here; keep the shared lock.
-		safety := &Manager{Store: m.Store, Dir: m.Dir, Files: m.Files, DataMu: &sync.RWMutex{}}
+		safety := &Manager{Store: m.Store, Dir: m.Dir, Files: m.Files, DataMu: &sync.RWMutex{}, availableSpace: m.availableSpace}
 		if _, err = safety.Create(ctx, "before_restore"); err != nil {
 			return fmt.Errorf("safety backup: %w", err)
 		}
@@ -510,7 +536,7 @@ func (m *Manager) Import(ctx context.Context, path string) (Entry, error) {
 	}
 	defer os.Remove(target.Name())
 	defer target.Close()
-	if _, err = copyContext(ctx, target, source); err != nil {
+	if _, err = m.CopyWithReserve(ctx, target, source); err != nil {
 		return out, err
 	}
 	if err = target.Sync(); err != nil {
@@ -571,6 +597,16 @@ func (m *Manager) Prune() error {
 	}
 	return nil
 }
+
+func (m *Manager) createScheduled(ctx context.Context) error {
+	entry, err := m.Create(ctx, "scheduled")
+	if err != nil {
+		return err
+	}
+	// Retention must run even if remote storage fails or stalls.
+	pruneErr := m.Prune()
+	return errors.Join(pruneErr, m.Replicate(ctx, entry))
+}
 func (m *Manager) Run(ctx context.Context) {
 	ticker := time.NewTicker(time.Minute)
 	defer ticker.Stop()
@@ -590,16 +626,7 @@ func (m *Manager) Run(ctx context.Context) {
 			if len(entries) > 0 && time.Since(entries[0].Created) < time.Duration(c.EveryHours)*time.Hour {
 				continue
 			}
-			_ = m.Start(ctx, "scheduled", func(ctx context.Context) error {
-				entry, err := m.Create(ctx, "scheduled")
-				if err != nil {
-					return err
-				}
-				if err = m.Replicate(ctx, entry); err != nil {
-					return err
-				}
-				return m.Prune()
-			})
+			_ = m.Start(ctx, "scheduled", m.createScheduled)
 		}
 	}
 }

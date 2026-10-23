@@ -345,7 +345,7 @@ func (m *Manager) FetchRemote(ctx context.Context, id string) error {
 	}
 	defer os.Remove(tmp.Name())
 	defer tmp.Close()
-	n, err := copyContext(ctx, tmp, io.LimitReader(source, (100<<30)+1))
+	n, err := m.CopyWithReserve(ctx, tmp, io.LimitReader(source, MaxImportBytes+1))
 	if err != nil {
 		return err
 	}

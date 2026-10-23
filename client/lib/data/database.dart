@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:drift/drift.dart';
 import 'package:drift/native.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import '../domain/models.dart';
@@ -20,6 +21,11 @@ class LocalDatabase extends GeneratedDatabase {
     final dir = await getApplicationSupportDirectory();
     await dir.create(recursive: true);
     await StorageReset.finishPending(dir);
+    if (Platform.isIOS) {
+      await const MethodChannel(
+        'dev.yggvion/storage_policy',
+      ).invokeMethod<void>('excludePrivateDataFromBackup');
+    }
     try {
       await removeRetiredFiles(dir);
     } on FileSystemException catch (error) {

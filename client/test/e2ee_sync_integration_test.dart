@@ -174,6 +174,26 @@ void main() {
       await sa.sync();
       expect(a.syncError, isNull);
       expect(a.snapshot.note(note.id)!.content, 'OFFLINE_EDIT\n$link');
+      // B stays offline while the same note changes repeatedly on A. Only the
+      // latest version remains on the server; B must catch up from its old cursor.
+      final compactedNote = await a.createNote();
+      await a.saveNote(compactedNote.id, 'Compacted note', 'v1');
+      await sa.sync();
+      await sb.sync();
+      for (final text in ['v2', 'v3', 'v4']) {
+        await a.saveNoteContent(compactedNote.id, text);
+        await sa.sync();
+        expect(a.syncError, isNull);
+      }
+      await b.saveNoteContent(note.id, 'OFFLINE_EDIT\n$link');
+      await sb.sync();
+      expect(b.syncError, isNull);
+      expect(b.snapshot.note(compactedNote.id)!.content, 'v4');
+      await a.deleteEntity((await a.db.entity(compactedNote.id))!);
+      await sa.sync();
+      await sb.sync();
+      expect(b.snapshot.note(compactedNote.id), isNull);
+      expect(b.syncError, isNull);
       // A lost rotation response is recovered from remembered credentials.
       // Another device retains edits made offline and uses the new password.
       const nextPassword = 'Changed private password 43';

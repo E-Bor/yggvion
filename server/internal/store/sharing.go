@@ -149,6 +149,10 @@ func (s *Store) RevokeCalendarShare(ctx context.Context, id string) error {
 
 func (s *Store) ProposeEvent(ctx context.Context, token string, input GuestProposal, now time.Time) error {
 	input.Title = strings.TrimSpace(input.Title)
+	// Guest links cannot refer to private files, including inside titles or code.
+	if strings.Contains(strings.ToLower(input.Title+"\n"+input.Description), "attachment:") {
+		return ErrInvalid
+	}
 	if !domain.ValidID(input.Nonce) || input.Title == "" || utf8.RuneCountInString(input.Title) > 200 || len(input.Description) > 8000 || strings.ContainsAny(input.Title, "\r\n") || input.Start.Before(now) || !input.End.After(input.Start) || input.End.Sub(input.Start) > 24*time.Hour || input.Start.Second() != 0 || input.End.Second() != 0 || input.Start.Nanosecond() != 0 || input.End.Nanosecond() != 0 {
 		return ErrInvalid
 	}

@@ -339,6 +339,11 @@
       $("title").focus();
       return;
     }
+    if (/attachment:/i.test(title + "\n" + $("description").value)) {
+      $("form-error").textContent =
+        "В гостевом предложении нельзя прикреплять файлы. Уберите ссылку на вложение.";
+      return;
+    }
     sending = true;
     $("submit").disabled = true;
     $("form-error").textContent = "";

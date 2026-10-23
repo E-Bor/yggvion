@@ -111,6 +111,20 @@ void main() {
         'start': requested.toIso8601String(),
         'end': requested.add(const Duration(minutes: 45)).toIso8601String(),
       };
+      await expectLater(
+        guest.post<Object?>(
+          '$base/public/proposals',
+          options: auth,
+          data: {...payload, 'description': '[file](attachment:${'f' * 64})'},
+        ),
+        throwsA(
+          isA<DioException>().having(
+            (e) => e.response?.statusCode,
+            'status',
+            400,
+          ),
+        ),
+      );
       await guest.post<Object?>(
         '$base/public/proposals',
         options: auth,
@@ -170,6 +184,44 @@ void main() {
       );
       expect(a.syncError, isNull);
       expect(b.syncError, isNull);
+      // Simulate a pending proposal accepted by an older server. It must be
+      // imported as harmless text and must not poison either client's outbox.
+      var injected = false;
+      final legacyId = 'guest_${'d' * 64}';
+      sa.client.interceptors.add(
+        InterceptorsWrapper(
+          onResponse: (response, handler) {
+            if (!injected &&
+                response.requestOptions.path.endsWith('/guest-proposals')) {
+              injected = true;
+              (response.data['records'] as List).add({
+                'id': legacyId,
+                'kind': 'task',
+                'version': 0,
+                'deleted': false,
+                'data': {
+                  'title': 'Legacy proposal',
+                  'description': '[file](attachment:${'f' * 64})',
+                  'proposal': {
+                    'start': another.toIso8601String(),
+                    'end': another
+                        .add(const Duration(hours: 1))
+                        .toIso8601String(),
+                    'timezone': 'UTC',
+                  },
+                },
+              });
+            }
+            handler.next(response);
+          },
+        ),
+      );
+      await sa.sync();
+      await sb.sync();
+      expect(a.syncError, isNull);
+      expect(b.syncError, isNull);
+      expect(b.snapshot.task(legacyId)!.description, contains('attachment∶'));
+      expect(await a.db.customSelect('SELECT * FROM outbox').get(), isEmpty);
       await sa.request('DELETE', '/api/v1/calendar-shares/${share['id']}');
       await expectLater(
         guest.get<Object?>('$base/public/calendar', options: auth),

@@ -3,7 +3,6 @@ package httpapi
 import (
 	"context"
 	"errors"
-	"io"
 	"net/http"
 	"os"
 	"time"
@@ -206,44 +205,51 @@ func (a *API) backupRoutes(mux *http.ServeMux) {
 		a.acceptJob(w, err)
 	})
 	register("POST /api/v1/backups/import", func(w http.ResponseWriter, r *http.Request) {
-		if a.Backups.Status().Running {
-			fail(w, 409, "backup_busy")
-			return
-		}
-		// Body is an archive of E2EE records, never multipart paths or executable SQL.
-		if err := http.NewResponseController(w).SetReadDeadline(time.Now().Add(2 * time.Hour)); err != nil && !errors.Is(err, http.ErrNotSupported) {
-			fail(w, 500, "backup_error")
-			return
-		}
-		r.Body = http.MaxBytesReader(w, r.Body, 100<<30)
-		file, err := os.CreateTemp(a.Backups.Dir, ".upload-*")
-		if err != nil {
-			fail(w, 500, "backup_error")
-			return
-		}
-		name := file.Name()
+		var name string
 		keep := false
 		defer func() {
-			file.Close()
-			if !keep {
+			if name != "" && !keep {
 				os.Remove(name)
 			}
 		}()
-		if _, err = io.Copy(file, r.Body); err != nil {
-			fail(w, 413, "backup_upload_failed")
-			return
-		}
-		if err = file.Close(); err != nil {
-			fail(w, 500, "backup_error")
-			return
-		}
-		err = a.Backups.Start(a.Lifetime, "import", func(ctx context.Context) error {
+		err := a.Backups.StartPrepared(a.Lifetime, "import", func() error {
+			if r.ContentLength > backup.MaxImportBytes {
+				return &http.MaxBytesError{Limit: backup.MaxImportBytes}
+			}
+			if err := a.Backups.CheckSpace(r.ContentLength); err != nil {
+				return err
+			}
+			if err := http.NewResponseController(w).SetReadDeadline(time.Now().Add(2 * time.Hour)); err != nil && !errors.Is(err, http.ErrNotSupported) {
+				return err
+			}
+			r.Body = http.MaxBytesReader(w, r.Body, backup.MaxImportBytes)
+			file, err := os.CreateTemp(a.Backups.Dir, ".upload-*")
+			if err != nil {
+				return err
+			}
+			name = file.Name()
+			defer file.Close()
+			if _, err = a.Backups.CopyWithReserve(r.Context(), file, r.Body); err != nil {
+				return err
+			}
+			return file.Close()
+		}, func(ctx context.Context) error {
 			defer os.Remove(name)
 			_, err := a.Backups.Import(ctx, name)
 			return err
 		})
 		keep = err == nil
-		a.acceptJob(w, err)
+		var tooLarge *http.MaxBytesError
+		switch {
+		case errors.As(err, &tooLarge):
+			fail(w, 413, "backup_too_large")
+		case errors.Is(err, backup.ErrNoSpace):
+			fail(w, 507, "insufficient_storage")
+		case err != nil && !errors.Is(err, backup.ErrBusy):
+			fail(w, 400, "backup_upload_failed")
+		default:
+			a.acceptJob(w, err)
+		}
 	})
 }
 func (a *API) acceptJob(w http.ResponseWriter, err error) {

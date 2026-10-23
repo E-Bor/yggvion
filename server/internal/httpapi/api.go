@@ -30,6 +30,7 @@ type API struct {
 	EnsurePublic func(context.Context) (string, error)
 	ShareClock   func() time.Time
 	shareLimit   shareLimiter
+	limits       apiLimits
 	Store        *store.Store
 	PairingKey   string
 	Files        string
@@ -75,7 +76,7 @@ func (a *API) Handler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("Cache-Control", "no-store")
-		mux.ServeHTTP(w, r)
+		a.guard(mux).ServeHTTP(w, r)
 	})
 }
 func write(w http.ResponseWriter, status int, v any) {
@@ -102,16 +103,32 @@ func decode(w http.ResponseWriter, r *http.Request, v any) error {
 }
 func (a *API) auth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		source := requestSource(r)
+		if !a.limits.beginAuth(source, time.Now()) {
+			limited(w)
+			return
+		}
 		header := r.Header.Get("Authorization")
-		if !strings.HasPrefix(header, "Bearer ") {
+		token := strings.TrimPrefix(header, "Bearer ")
+		if !strings.HasPrefix(header, "Bearer ") || !domain.ValidHash(token) {
+			a.limits.endAuth(source, true)
 			fail(w, 401, "unauthorized")
 			return
 		}
-		id, e := a.Store.Authorize(r.Context(), strings.TrimPrefix(header, "Bearer "))
-		if e != nil {
+		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+		id, err := a.Store.Authorize(ctx, token)
+		cancel()
+		a.limits.endAuth(source, err != nil)
+		if err != nil {
 			fail(w, 401, "unauthorized")
 			return
 		}
+		release, ok := a.limits.beginDevice(id, r.URL.Path)
+		if !ok {
+			limited(w)
+			return
+		}
+		defer release()
 		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), deviceKey{}, id)))
 	})
 }
@@ -188,12 +205,12 @@ func (a *API) changes(w http.ResponseWriter, r *http.Request) {
 		}
 		after = v
 	}
-	rows, cursor, e := a.Store.Changes(r.Context(), after, 500)
+	rows, cursor, more, e := a.Store.Changes(r.Context(), after, 500)
 	if e != nil {
 		fail(w, 500, "storage_error")
 		return
 	}
-	write(w, 200, map[string]any{"records": rows, "cursor": cursor, "has_more": len(rows) == 500})
+	write(w, 200, map[string]any{"records": rows, "cursor": cursor, "has_more": more})
 }
 func (a *API) devices(w http.ResponseWriter, r *http.Request) {
 	devices, e := a.Store.Devices(r.Context())
@@ -240,6 +257,7 @@ func (a *API) events(w http.ResponseWriter, r *http.Request) {
 	ticker := time.NewTicker(20 * time.Second)
 	defer ticker.Stop()
 	for {
+		_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(10 * time.Second))
 		if _, e := io.WriteString(w, "event: sync\ndata: {}\n\n"); e != nil {
 			return
 		}
@@ -248,7 +266,10 @@ func (a *API) events(w http.ResponseWriter, r *http.Request) {
 		case <-r.Context().Done():
 			return
 		case <-ticker.C:
-			if _, err := a.Store.Authorize(r.Context(), strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")); err != nil {
+			ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+			_, err := a.Store.Authorize(ctx, strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "))
+			cancel()
+			if err != nil {
 				return
 			}
 		case <-c:

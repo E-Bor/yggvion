@@ -15,6 +15,7 @@ import (
 	"reflect"
 	"strings"
 	"sync"
+	"time"
 
 	_ "modernc.org/sqlite"
 	"yggvion/server/internal/domain"
@@ -43,7 +44,7 @@ func Open(path string) (*Store, error) {
 	}
 	db.SetMaxOpenConns(1)
 	var schemaVersion int
-	if err = db.QueryRow("PRAGMA user_version").Scan(&schemaVersion); err != nil || (schemaVersion != 0 && schemaVersion != SchemaVersion) {
+	if err = db.QueryRow("PRAGMA user_version").Scan(&schemaVersion); err != nil || (schemaVersion != 0 && schemaVersion != 7 && schemaVersion != SchemaVersion) {
 		db.Close()
 		if err != nil {
 			return nil, err
@@ -110,6 +111,11 @@ func save(ctx context.Context, tx *sql.Tx, r domain.Record) (domain.Record, erro
 	r.Seq = 0
 	encoded, err := json.Marshal(r)
 	if err != nil {
+		return r, err
+	}
+	// Keep the latest change of every record, including tombstones. Sequence
+	// numbers never go backwards, so any offline cursor can still catch up.
+	if _, err = tx.ExecContext(ctx, "DELETE FROM changes WHERE seq=(SELECT seq FROM records WHERE id=?)", r.ID); err != nil {
 		return r, err
 	}
 	result, err := tx.ExecContext(ctx, "INSERT INTO changes(record) VALUES (?)", string(encoded))
@@ -202,7 +208,7 @@ func (s *Store) Apply(ctx context.Context, deviceID string, mutations []domain.M
 		if err != nil {
 			return nil, err
 		}
-		if _, err = tx.ExecContext(ctx, "INSERT INTO operations(id,device_id,request_hash,result) VALUES (?,?,?,?)", m.OperationID, deviceID, fingerprint, string(payload)); err != nil {
+		if _, err = tx.ExecContext(ctx, "INSERT INTO operations(id,device_id,request_hash,result,created,payload_bytes) VALUES (?,?,?,?,?,?)", m.OperationID, deviceID, fingerprint, string(payload), time.Now().Unix(), len(payload)); err != nil {
 			return nil, err
 		}
 		if result.Status == "applied" {
@@ -211,6 +217,9 @@ func (s *Store) Apply(ctx context.Context, deviceID string, mutations []domain.M
 			}
 		}
 		results = append(results, result)
+	}
+	if err = compactOperations(ctx, tx, time.Now()); err != nil {
+		return nil, err
 	}
 	if err = tx.Commit(); err != nil {
 		return nil, err
@@ -223,28 +232,34 @@ func equalJSON(left, right json.RawMessage) bool {
 	return json.Unmarshal(left, &a) == nil && json.Unmarshal(right, &b) == nil && reflect.DeepEqual(a, b)
 }
 
-func (s *Store) Changes(ctx context.Context, after int64, limit int) ([]domain.Record, int64, error) {
-	rows, err := s.DB.QueryContext(ctx, "SELECT record,seq FROM changes WHERE seq>? ORDER BY seq LIMIT ?", after, limit)
+func (s *Store) Changes(ctx context.Context, after int64, limit int) ([]domain.Record, int64, bool, error) {
+	rows, err := s.DB.QueryContext(ctx, "SELECT record,seq FROM changes WHERE seq>? ORDER BY seq LIMIT ?", after, limit+1)
 	if err != nil {
-		return nil, after, err
+		return nil, after, false, err
 	}
 	defer rows.Close()
 	records := []domain.Record{}
-	cursor := after
+	cursor, bytes := after, 0
+	more := false
 	for rows.Next() {
 		var data string
 		var seq int64
 		if err = rows.Scan(&data, &seq); err != nil {
-			return nil, after, err
+			return nil, after, false, err
+		}
+		if len(records) >= limit || (len(records) > 0 && bytes+len(data) > maxChangePageBytes) {
+			more = true
+			break
 		}
 		var r domain.Record
 		if err = json.Unmarshal([]byte(data), &r); err != nil {
-			return nil, after, err
+			return nil, after, false, err
 		}
 		records = append(records, r)
 		cursor = seq
+		bytes += len(data)
 	}
-	return records, cursor, rows.Err()
+	return records, cursor, more, rows.Err()
 }
 func (s *Store) Devices(ctx context.Context) ([]map[string]string, error) {
 	rows, e := s.DB.QueryContext(ctx, "SELECT id,name FROM devices WHERE revoked=0 ORDER BY name")

@@ -13,6 +13,7 @@ import '../domain/server_metrics.dart';
 import '../domain/sync_rules.dart';
 import 'repository.dart';
 import 'encryption.dart';
+import 'file_download.dart';
 import 'package:collection/collection.dart';
 import 'package:timezone/timezone.dart' as tz;
 

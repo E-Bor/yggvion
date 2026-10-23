@@ -407,9 +407,11 @@ extension EncryptedSync on SyncService {
       final encrypted = File('${target.path}.cipher.part');
       final plain = File('${target.path}.part');
       try {
-        await client.download(
+        await downloadLimitedFile(
+          client,
           '$_url/api/v1/attachments/$cipherId',
-          encrypted.path,
+          encrypted,
+          maximumBytes: maxEncryptedAttachmentBytes,
           options: _auth,
         );
         if ((await sha256.bind(encrypted.openRead()).first).toString() !=
@@ -513,8 +515,16 @@ extension EncryptedSync on SyncService {
         proposals.add(
           Task.create(
             candidate.id,
-            title.trim(),
-            description: description,
+            title.trim().replaceAll(
+              RegExp('attachment:', caseSensitive: false),
+              'attachment∶',
+            ),
+            // Older servers may still return guest-supplied internal URLs.
+            // Keep the text readable, but never import guest file references.
+            description: description.replaceAll(
+              RegExp('attachment:', caseSensitive: false),
+              'attachment∶',
+            ),
           ).change({
             'proposal': {
               'pending': true,

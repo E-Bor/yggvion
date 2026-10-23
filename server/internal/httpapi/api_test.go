@@ -175,7 +175,7 @@ func TestAtomicInvalidBatch(t *testing.T) {
 	if w.Code != 400 {
 		t.Fatal(w.Body.String())
 	}
-	records, _, e := s.Changes(context.Background(), 0, 100)
+	records, _, _, e := s.Changes(context.Background(), 0, 100)
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -208,7 +208,7 @@ func TestEncryptedKindsRoundTripWithoutServerSideRewrites(t *testing.T) {
 		mutations = append(mutations, domain.Mutation{OperationID: kind, Record: encryptedRecord(kind, kind, "opaque "+kind)})
 	}
 	results := decodeResults(t, push(t, h, token, mutations...))
-	records, _, err := s.Changes(context.Background(), 0, 100)
+	records, _, _, err := s.Changes(context.Background(), 0, 100)
 	if err != nil || len(records) != len(mutations) {
 		t.Fatal(records, err)
 	}
@@ -259,8 +259,8 @@ func TestConcurrentDevices(t *testing.T) {
 	if counts["applied"] != 1 || counts["conflict"] != 1 {
 		t.Fatal(counts)
 	}
-	records, _, e := s.Changes(context.Background(), 0, 10)
-	if e != nil || len(records) != 2 {
+	records, _, _, e := s.Changes(context.Background(), 0, 10)
+	if e != nil || len(records) != 1 || records[0].Version != 2 {
 		t.Fatal(records, e)
 	}
 }
