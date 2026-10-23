@@ -116,7 +116,7 @@ paths:
           application/json:
             schema: {$ref: '#/components/schemas/Availability'}
       responses:
-        '200': {description: Replaced within the original share window; expiry is unchanged}
+        '200': {description: 'Returns updated=true after atomic replacement. With cursor supplied, a stale snapshot returns updated=false without changes. Expiry is unchanged.'}
         '400': {$ref: '#/components/responses/Error'}
         '401': {$ref: '#/components/responses/Error'}
         '404': {$ref: '#/components/responses/Error'}
@@ -125,7 +125,7 @@ paths:
       summary: List active share windows without secrets, for snapshot refresh
       parameters: [{$ref: '#/components/parameters/Generation'}]
       responses:
-        '200': {description: 'shares array with id, expires, start, end, timezone'}
+        '200': {description: 'shares array with id, expires, start, end, timezone and optional proposal_ids (private owner-only guest task identifiers). Top-level proposal_statuses=true advertises support for cursor and proposal status updates.'}
         '401': {$ref: '#/components/responses/Error'}
     post:
       summary: Share anonymous availability for exactly one hour
@@ -183,7 +183,11 @@ paths:
       summary: Anonymous busy intervals with overlaps and adjacent intervals merged
       description: >-
         Send the share secret from the URL fragment as a Bearer token. No titles,
-        descriptions, IDs, projects, birthdays or pending suggestions are disclosed.
+        descriptions, private IDs, projects or birthdays are disclosed. The busy
+        intervals include pending and accepted reservations from all live links.
+        Only proposals submitted through this link have separate receipts with
+        nonce, original start/end and status. Other links reveal only anonymous busy
+        time. An owner's replacement interval is never associated with a receipt.
         Responses are not cached. Revoking the issuing device or restoring server
         data also invalidates invitations.
       security: [{calendarShare: []}]
@@ -195,13 +199,25 @@ paths:
               schema:
                 type: object
                 additionalProperties: false
-                required: [expires, start, end, timezone, busy, now]
+                required: [expires, start, end, timezone, busy, proposals, now]
                 properties:
                   expires: {type: string, format: date-time}
                   start: {type: string, format: date-time}
                   end: {type: string, format: date-time}
                   now: {type: string, format: date-time}
                   timezone: {type: string}
+                  proposals:
+                    type: array
+                    maxItems: 10
+                    items:
+                      type: object
+                      additionalProperties: false
+                      required: [nonce, start, end, status]
+                      properties:
+                        nonce: {type: string}
+                        start: {type: string, format: date-time}
+                        end: {type: string, format: date-time}
+                        status: {type: string, enum: [pending, accepted, declined, rescheduled]}
                   busy:
                     type: array
                     items:
@@ -217,7 +233,7 @@ paths:
   /public/proposals:
     servers: [{url: 'https://planner.example.com'}]
     post:
-      summary: Suggest a one-time event without reserving its time
+      summary: Suggest a one-time event and reserve the interval for the link lifetime
       description: >-
         At most 10 proposals per invitation. Start must be in the future, within
         the shared window and currently free. Minute precision, duration at most
@@ -227,6 +243,11 @@ paths:
         title or description (case insensitive). Such proposals return 400.
         The plaintext suggestion is held in a separate inbox until an owner client
         validates it and uploads an encrypted task without a calendar block.
+        Conflict checks and insertion are atomic across all live links. Overlapping
+        pending or accepted reservations return 409; adjacent intervals remain valid.
+        Importing into the owner's planner does not release the reservation. Decline,
+        rescheduling, revocation or expiry releases it; accepted events remain in the
+        owner's anonymous availability. Original proposal text is not returned publicly.
       security: [{calendarShare: []}]
       requestBody:
         required: true
@@ -787,6 +808,21 @@ components:
       required: [timezone, busy]
       properties:
         timezone: {type: string, description: Owner IANA timezone}
+        cursor: {type: integer, minimum: 0, description: Latest fully received changes cursor. Required when proposals are supplied; compared with the current server cursor before any write.}
+        proposals:
+          type: array
+          maxItems: 10
+          description: Owner-only dispositions for proposal_ids of this specific share. Client skips publication while local writes or conflicts remain. Original dates are immutable, except backfilling pre-schema-9 proposals.
+          items:
+            type: object
+            additionalProperties: false
+            required: [task_id, version, start, end, status]
+            properties:
+              task_id: {type: string, pattern: '^guest_[a-f0-9]{64}$'}
+              version: {type: integer, minimum: 1}
+              start: {type: string, format: date-time}
+              end: {type: string, format: date-time}
+              status: {type: string, enum: [pending, accepted, declined, rescheduled]}
         busy:
           type: array
           maxItems: 10000

@@ -8,6 +8,15 @@
     nonce,
     sending = false,
     expired = false;
+  let refreshing = false,
+    dragging = false,
+    revision = 0;
+  const statuses = {
+    pending: "Предложено",
+    accepted: "Подтверждено",
+    declined: "Отклонено",
+    rescheduled: "Перенесено владельцем",
+  };
   let columns = matchMedia("(max-width:760px)").matches ? 1 : 7;
   const minuteHeight = 56 / 60;
   const dayStart = (value) => {
@@ -51,6 +60,7 @@
     $("notice").textContent = message;
     $("workspace").hidden = true;
     $("timeline").replaceChildren();
+    $("proposal-list").replaceChildren();
     $("expiry").textContent = "Приглашение недоступно";
   }
   async function request(path, body) {
@@ -93,6 +103,7 @@
     );
   }
   function select(start, end) {
+    if (sending || expired) return;
     selection = { start, end };
     nonce = crypto.randomUUID();
     $("selection-title").textContent = "Предложить встречу";
@@ -119,6 +130,7 @@
     const from = a.getHours() * 60 + a.getMinutes(),
       to = +b === +limit ? 1440 : b.getHours() * 60 + b.getMinutes();
     const block = node("div", cls, text);
+    block.title = text;
     block.style.top = `${from * minuteHeight}px`;
     block.style.height = `${Math.max(7, (to - from) * minuteHeight)}px`;
     column.append(block);
@@ -185,6 +197,17 @@
           "busy-block",
           "Занято",
         );
+      for (const proposal of data.proposals || []) {
+        if (proposal.status !== "pending" && proposal.status !== "accepted")
+          continue;
+        paintBlock(
+          column,
+          new Date(proposal.start),
+          new Date(proposal.end),
+          `proposal-block ${proposal.status}`,
+          `${statuses[proposal.status]} · ${time(proposal.start)}–${time(proposal.end)}`,
+        );
+      }
       let anchor,
         active = false,
         wait,
@@ -204,10 +227,11 @@
         );
       column.addEventListener("pointerdown", (event) => {
         if (sending || expired || event.button !== 0) return;
+        dragging = true;
         originY = event.clientY;
         anchor = slot(event);
         const begin = () => {
-          active = true;
+          active = dragging = true;
           column.setPointerCapture(event.pointerId);
           select(atMinute(day, anchor), atMinute(day, anchor + 30));
           if (
@@ -252,11 +276,11 @@
             behavior: "smooth",
             block: "start",
           });
-        active = false;
+        active = dragging = false;
       });
       column.addEventListener("pointercancel", () => {
         clearTimeout(wait);
-        active = false;
+        active = dragging = false;
       });
       column.addEventListener("keydown", (event) => {
         if (event.key === "ArrowDown" || event.key === "ArrowUp") {
@@ -284,19 +308,46 @@
       timeline.append(column);
     }
     drawSelection();
+    const receipts = $("proposal-list");
+    receipts.replaceChildren();
+    const proposals = data.proposals || [];
+    $("proposals").hidden = proposals.length === 0;
+    for (const p of proposals) {
+      if (!Object.hasOwn(statuses, p.status)) continue;
+      const row = node("div", "proposal-receipt");
+      row.append(
+        node("div", "receipt-time", `${dateLabel(p.start)} · ${time(p.start)}–${time(p.end)}`),
+      );
+      row.append(node("span", `receipt-status ${p.status}`, statuses[p.status]));
+      receipts.append(row);
+    }
   }
   async function load(initial = false) {
-    const snapshot = await request("/public/calendar");
-    data = { ...snapshot, clockOffset: +new Date(snapshot.now) - Date.now() };
-    if (initial) {
-      first = dayStart(data.start);
-      $("zone").textContent =
-        `Ваш часовой пояс · ${Intl.DateTimeFormat().resolvedOptions().timeZone}`;
-      $("workspace").hidden = false;
+    if (refreshing || dragging || expired) return;
+    refreshing = true;
+    const requestedRevision = revision;
+    try {
+      const snapshot = await request("/public/calendar");
+      if (expired || dragging || requestedRevision !== revision) return;
+      data = { ...snapshot, clockOffset: +new Date(snapshot.now) - Date.now() };
+      if (initial) {
+        first = dayStart(data.start);
+        $("zone").textContent =
+          `Ваш часовой пояс · ${Intl.DateTimeFormat().resolvedOptions().timeZone}`;
+        $("workspace").hidden = false;
+        $("notice").textContent = "";
+      }
+      render();
       $("notice").textContent = "";
+      if (selection) {
+        $("submit").disabled = sending || !valid(selection);
+        if (!valid(selection))
+          $("form-error").textContent = "Это время уже занято. Выберите другой интервал.";
+      }
+      if (initial) $("viewport").scrollTop = 8 * 56;
+    } finally {
+      refreshing = false;
     }
-    render();
-    if (initial) $("viewport").scrollTop = 8 * 56;
   }
   $("prev").onclick = () => {
     first = addDays(first, -columns);
@@ -347,23 +398,48 @@
     sending = true;
     $("submit").disabled = true;
     $("form-error").textContent = "";
+    const proposal = {
+      nonce,
+      start: selection.start.toISOString(),
+      end: selection.end.toISOString(),
+      status: "pending",
+    };
     try {
       await request("/public/proposals", {
-        nonce,
+        nonce: proposal.nonce,
         title,
         description: $("description").value,
-        start: selection.start.toISOString(),
-        end: selection.end.toISOString(),
+        start: proposal.start,
+        end: proposal.end,
       });
+      // The server has reserved this interval. Paint it immediately, even if
+      // the following refresh cannot reach the network.
+      revision++;
+      data.proposals = [
+        ...(data.proposals || []).filter((p) => p.nonce !== proposal.nonce),
+        proposal,
+      ];
+      data.busy.push({ start: proposal.start, end: proposal.end });
       $("form").hidden = true;
       $("success").hidden = false;
       $("selection-title").textContent = "Готово";
       selection = null;
-      drawSelection();
+      render();
+      await load().catch((error) => {
+        if (!expired) $("notice").textContent = error.message;
+      });
     } catch (error) {
       $("form-error").textContent = error.message;
       try {
         await load();
+        if (data?.proposals?.some((p) => p.nonce === proposal.nonce)) {
+          $("form").hidden = true;
+          $("success").hidden = false;
+          $("selection-title").textContent = "Готово";
+          $("form-error").textContent = "";
+          selection = null;
+          drawSelection();
+        }
       } catch (refreshError) {
         $("notice").textContent = refreshError.message;
       }
@@ -396,11 +472,17 @@
       `Доступ ещё ${Math.floor(remaining / 60)}:${String(remaining % 60).padStart(2, "0")}`;
   }, 1000);
   setInterval(() => {
-    if (data && !expired && !document.hidden)
+    if (data && !expired && !document.hidden && !sending && !dragging)
       load().catch((error) => {
         $("notice").textContent = error.message;
       });
-  }, 60000);
+  }, 15000);
+  document.addEventListener("visibilitychange", () => {
+    if (data && !expired && !document.hidden && !sending)
+      load().catch((error) => {
+        if (!expired) $("notice").textContent = error.message;
+      });
+  });
   if (!/^[a-f0-9]{64}$/.test(token))
     unavailable("Откройте полную ссылку, которую прислал владелец календаря.");
   else

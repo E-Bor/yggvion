@@ -182,9 +182,7 @@ void main() {
       if (size.width > 1000) {
         await tester.tap(find.text('Задача').first);
       } else {
-        await tester.tap(find.byTooltip('Создать'));
-        await tester.pumpAndSettle();
-        await tester.tap(find.text('Незапланированная задача'));
+        await tester.tap(find.byKey(const ValueKey('create-event')));
       }
       await tester.pumpAndSettle();
       expect(find.text('Введите название'), findsOneWidget);

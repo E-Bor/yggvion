@@ -199,7 +199,7 @@ func TestSchemaSevenCompactsWithoutResettingIdentityOrCursor(t *testing.T) {
 	if _, err = s.DB.Exec("INSERT INTO changes(seq,record) VALUES(?,?)", first[0].Record.Seq, string(encoded)); err != nil {
 		t.Fatal(err)
 	}
-	for _, q := range []string{"DROP INDEX operations_created", "DROP INDEX records_seq", "ALTER TABLE operations DROP COLUMN created", "ALTER TABLE operations DROP COLUMN payload_bytes", "PRAGMA user_version=7"} {
+	for _, q := range []string{"DROP INDEX operations_created", "DROP INDEX records_seq", "ALTER TABLE operations DROP COLUMN created", "ALTER TABLE operations DROP COLUMN payload_bytes", "ALTER TABLE calendar_proposals DROP COLUMN start", "ALTER TABLE calendar_proposals DROP COLUMN end", "ALTER TABLE calendar_proposals DROP COLUMN status", "PRAGMA user_version=7"} {
 		if _, err = s.DB.Exec(q); err != nil {
 			t.Fatal(err)
 		}

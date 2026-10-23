@@ -89,7 +89,7 @@ func TestEncryptedCalendarUsesOnlyPublishedAvailability(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, busy, err := s.PublicCalendar(ctx, token, now)
+	_, busy, _, err := s.PublicCalendar(ctx, token, now)
 	if err != nil || len(busy) != 1 {
 		t.Fatal(busy, err)
 	}
@@ -113,7 +113,7 @@ func TestEncryptedCalendarUsesOnlyPublishedAvailability(t *testing.T) {
 	if len(inbox) != 0 {
 		t.Fatal("guest plaintext not removed after receipt")
 	}
-	if _, _, err = s.PublicCalendar(ctx, token, now.Add(time.Hour)); err != ErrShareUnavailable {
+	if _, _, _, err = s.PublicCalendar(ctx, token, now.Add(time.Hour)); err != ErrShareUnavailable {
 		t.Fatal("expired link", err)
 	}
 }

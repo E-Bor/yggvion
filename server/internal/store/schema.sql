@@ -31,6 +31,7 @@ CREATE INDEX calendar_shares_expires ON calendar_shares(expires);
 CREATE TABLE calendar_proposals (
  share_id TEXT NOT NULL REFERENCES calendar_shares(id) ON DELETE CASCADE,
  nonce TEXT NOT NULL, fingerprint TEXT NOT NULL, task_id TEXT NOT NULL,
+ start TEXT NOT NULL DEFAULT '', end TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'pending',
  PRIMARY KEY(share_id,nonce)
 );
 CREATE TABLE encrypted_uploads (id TEXT PRIMARY KEY, key_id TEXT NOT NULL);
@@ -38,4 +39,4 @@ CREATE TABLE guest_inbox (id TEXT PRIMARY KEY, data TEXT NOT NULL, created INTEG
 CREATE TABLE calendar_availability (
  share_id TEXT PRIMARY KEY REFERENCES calendar_shares(id) ON DELETE CASCADE, busy TEXT NOT NULL
 );
-PRAGMA user_version = 8;
+PRAGMA user_version = 9;

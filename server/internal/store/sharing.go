@@ -17,11 +17,12 @@ var ErrShareLimit = errors.New("share limit reached")
 var ErrTimeBusy = errors.New("time is busy")
 
 type CalendarShare struct {
-	ID       string    `json:"id"`
-	Expires  time.Time `json:"expires"`
-	Start    time.Time `json:"start"`
-	End      time.Time `json:"end"`
-	Timezone string    `json:"timezone"`
+	ID          string    `json:"id"`
+	Expires     time.Time `json:"expires"`
+	Start       time.Time `json:"start"`
+	End         time.Time `json:"end"`
+	Timezone    string    `json:"timezone"`
+	ProposalIDs []string  `json:"proposal_ids,omitempty"`
 }
 
 type BusyInterval struct {
@@ -126,18 +127,22 @@ func calendarBusy(ctx context.Context, tx *sql.Tx, share CalendarShare) ([]BusyI
 	return busy, nil
 }
 
-func (s *Store) PublicCalendar(ctx context.Context, token string, now time.Time) (CalendarShare, []BusyInterval, error) {
+func (s *Store) PublicCalendar(ctx context.Context, token string, now time.Time) (CalendarShare, []BusyInterval, []PublicProposal, error) {
 	tx, err := s.DB.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
 	if err != nil {
-		return CalendarShare{}, nil, err
+		return CalendarShare{}, nil, nil, err
 	}
 	defer tx.Rollback()
 	share, err := readCalendarShare(ctx, tx, token, now)
 	if err != nil {
-		return share, nil, err
+		return share, nil, nil, err
 	}
 	busy, err := calendarBusy(ctx, tx, share)
-	return share, busy, err
+	if err != nil {
+		return share, nil, nil, err
+	}
+	proposals, held, err := proposalSlots(ctx, tx, share, now)
+	return share, mergeBusy(append(busy, held...)), proposals, err
 }
 
 func (s *Store) RevokeCalendarShare(ctx context.Context, id string) error {
@@ -197,7 +202,11 @@ func (s *Store) ProposeEvent(ctx context.Context, token string, input GuestPropo
 	if err != nil {
 		return err
 	}
-	for _, interval := range busy {
+	_, held, err := proposalSlots(ctx, tx, share, now)
+	if err != nil {
+		return err
+	}
+	for _, interval := range append(busy, held...) {
 		if input.Start.Before(interval.End) && input.End.After(interval.Start) {
 			return ErrTimeBusy
 		}
@@ -211,7 +220,7 @@ func (s *Store) ProposeEvent(ctx context.Context, token string, input GuestPropo
 	if _, err = tx.ExecContext(ctx, "INSERT INTO guest_inbox VALUES(?,?,?)", id, string(data), now.Unix()); err != nil {
 		return err
 	}
-	if _, err = tx.ExecContext(ctx, "INSERT INTO calendar_proposals VALUES(?,?,?,?)", share.ID, input.Nonce, fingerprint, id); err != nil {
+	if _, err = tx.ExecContext(ctx, "INSERT INTO calendar_proposals(share_id,nonce,fingerprint,task_id,start,end,status) VALUES(?,?,?,?,?,?,?)", share.ID, input.Nonce, fingerprint, id, input.Start.UTC().Format(time.RFC3339), input.End.UTC().Format(time.RFC3339), "pending"); err != nil {
 		return err
 	}
 	return tx.Commit()

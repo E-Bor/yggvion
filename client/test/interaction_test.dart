@@ -380,9 +380,7 @@ void main() {
         final repo = await workspace(tester, mobile: mobile);
         Future<void> create() async {
           if (mobile) {
-            await tester.tap(find.byTooltip('Создать'));
-            await tester.pumpAndSettle();
-            await tester.tap(find.text('Заметка').last);
+            await tester.tap(find.byKey(const ValueKey('create-note')));
           } else {
             await tester.tap(find.text('Заметка').first);
           }

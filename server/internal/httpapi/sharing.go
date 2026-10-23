@@ -197,13 +197,13 @@ func (a *API) publicCalendar(w http.ResponseWriter, r *http.Request) {
 	}
 	a.DataMu.RLock()
 	defer a.DataMu.RUnlock()
-	share, busy, err := a.Store.PublicCalendar(r.Context(), token, a.shareNow())
+	share, busy, proposals, err := a.Store.PublicCalendar(r.Context(), token, a.shareNow())
 	if err != nil {
 		shareError(w, err)
 		return
 	}
 	// Do not serialize CalendarShare: its identifier is for the owner only.
-	write(w, 200, map[string]any{"expires": share.Expires, "start": share.Start, "end": share.End, "timezone": share.Timezone, "busy": busy, "now": a.shareNow()})
+	write(w, 200, map[string]any{"expires": share.Expires, "start": share.Start, "end": share.End, "timezone": share.Timezone, "busy": busy, "proposals": proposals, "now": a.shareNow()})
 }
 
 func (a *API) publicProposal(w http.ResponseWriter, r *http.Request) {

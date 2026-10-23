@@ -107,7 +107,7 @@ func TestPublicCalendarPrivacyAndProposalLifecycle(t *testing.T) {
 	}
 	var response map[string]json.RawMessage
 	json.Unmarshal(w.Body.Bytes(), &response)
-	if len(response) != 6 {
+	if len(response) != 7 {
 		t.Fatal("unexpected public fields", response)
 	}
 	var busy []map[string]time.Time
@@ -152,8 +152,8 @@ func TestPublicCalendarPrivacyAndProposalLifecycle(t *testing.T) {
 	w = f.call("GET", "/public/calendar", token, nil)
 	json.Unmarshal(w.Body.Bytes(), &response)
 	json.Unmarshal(response["busy"], &busy)
-	if len(busy) != 1 {
-		t.Fatal("pending proposal occupies the calendar")
+	if len(busy) != 2 {
+		t.Fatal("pending proposal did not reserve its interval")
 	}
 	proposal.Title = "Changed after a retry"
 	if w = f.call("POST", "/public/proposals", token, proposal); w.Code != 400 {
@@ -240,7 +240,10 @@ func TestPublicProposalValidationAndQuota(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			codes <- f.call("POST", "/public/proposals", token, f.propose(fmt.Sprintf("proposal-%d", i))).Code
+			p := f.propose(fmt.Sprintf("proposal-%d", i))
+			p.Start = p.Start.Add(time.Duration(i) * 2 * time.Hour)
+			p.End = p.Start.Add(time.Hour)
+			codes <- f.call("POST", "/public/proposals", token, p).Code
 		}()
 	}
 	wg.Wait()

@@ -27,6 +27,7 @@ class Repository extends ChangeNotifier {
   bool sidebarCollapsed = false;
   bool lightTheme = false;
   double calendarFraction = .64, scratchpadFraction = .62;
+  double plannerFraction = .30;
   String? lastCalendarTaskId;
   int conflictCount = 0;
   Future<void> _tail = Future.value();
@@ -69,6 +70,12 @@ class Repository extends ChangeNotifier {
         double.tryParse(await db.meta('home_calendar_fraction') ?? '') ?? .64;
     scratchpadFraction =
         double.tryParse(await db.meta('home_scratchpad_fraction') ?? '') ?? .62;
+    final plannerWidth = double.tryParse(
+      await db.meta('planner_fraction') ?? '',
+    );
+    plannerFraction = plannerWidth != null && plannerWidth.isFinite
+        ? plannerWidth.clamp(.2, .6)
+        : .30;
     lastCalendarTaskId = await db.meta('last_calendar_task');
     await reload();
     final initial = <Entity>[];
@@ -183,6 +190,12 @@ class Repository extends ChangeNotifier {
       await db.setMeta('home_calendar_fraction', '$calendarFraction');
       await db.setMeta('home_scratchpad_fraction', '$scratchpadFraction');
     });
+    publish();
+  }
+
+  Future<void> savePlannerLayout(double fraction) async {
+    plannerFraction = fraction.clamp(.2, .6);
+    await serial(() => db.setMeta('planner_fraction', '$plannerFraction'));
     publish();
   }
 

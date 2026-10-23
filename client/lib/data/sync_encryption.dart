@@ -466,13 +466,62 @@ extension EncryptedSync on SyncService {
 
   Future<void> _refreshAvailability() async {
     final result = await request('GET', '/api/v1/calendar-shares');
+    final supportsStatuses = result['proposal_statuses'] == true;
     for (final raw in result['shares'] as List) {
       final share = raw as Map<String, dynamic>;
-      final snapshot = _availability(
-        DateTime.parse(share['start'] as String),
-        DateTime.parse(share['end'] as String),
-        share['timezone'] as String,
-      );
+      final snapshot = await repo.serial(() async {
+        // Do not publish speculative local decisions or unresolved conflicts.
+        final dirty = await repo.db
+            .customSelect(
+              'SELECT id FROM outbox UNION ALL SELECT id FROM conflicts LIMIT 1',
+            )
+            .get();
+        if (dirty.isNotEmpty) return null;
+        final value = _availability(
+          DateTime.parse(share['start'] as String),
+          DateTime.parse(share['end'] as String),
+          share['timezone'] as String,
+        );
+        if (!supportsStatuses) return value;
+        value['cursor'] = int.parse(await repo.db.meta('sync_cursor') ?? '0');
+        final updates = <Map<String, dynamic>>[];
+        for (final id in (share['proposal_ids'] as List? ?? const [])) {
+          if (id is! String || !RegExp(r'^guest_[a-f0-9]{64}$').hasMatch(id)) {
+            throw const FormatException('Неверный идентификатор предложения');
+          }
+          final entity = await repo.db.entity(id);
+          if (entity == null || entity.version < 1 || entity.kind != 'task') {
+            continue;
+          }
+          final task = Task(entity);
+          if (task.proposedStart == null || task.proposedEnd == null) continue;
+          final blocks = repo.snapshot.blocks.where(
+            (b) => b.taskId == id && !b.historical,
+          );
+          final status = entity.deleted
+              ? 'declined'
+              : task.isProposed
+              ? 'pending'
+              : blocks.any(
+                  (b) =>
+                      b.start.isAtSameMomentAs(task.proposedStart!) &&
+                      b.end.isAtSameMomentAs(task.proposedEnd!),
+                )
+              ? 'accepted'
+              : blocks.isNotEmpty
+              ? 'rescheduled'
+              : 'declined';
+          updates.add({
+            'task_id': id, 'version': entity.version, 'status': status,
+            // Publish only the interval originally supplied by this guest.
+            'start': wireTime(task.proposedStart!),
+            'end': wireTime(task.proposedEnd!),
+          });
+        }
+        value['proposals'] = updates;
+        return value;
+      });
+      if (snapshot == null) return;
       await request(
         'PUT',
         '/api/v1/calendar-shares/${share['id']}/availability',

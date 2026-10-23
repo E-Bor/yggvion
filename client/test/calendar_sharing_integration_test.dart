@@ -135,6 +135,26 @@ void main() {
         options: auth,
         data: payload,
       );
+      final pending = (await guest.get<Map<String, dynamic>>(
+        '$base/public/calendar',
+        options: auth,
+      )).data!;
+      expect(pending['proposals'], [containsPair('status', 'pending')]);
+      expect(pending['busy'], hasLength(2));
+      await expectLater(
+        guest.post<Object?>(
+          '$base/public/proposals',
+          options: auth,
+          data: {...payload, 'nonce': 'overlap'},
+        ),
+        throwsA(
+          isA<DioException>().having(
+            (e) => e.response?.statusCode,
+            'status',
+            409,
+          ),
+        ),
+      );
       await sa.sync();
       await sb.sync();
       final proposal = b.snapshot.tasks.singleWhere((t) => t.isProposed);
@@ -156,6 +176,7 @@ void main() {
         options: auth,
       )).data!;
       expect(accepted['busy'], hasLength(2));
+      expect(accepted['proposals'], [containsPair('status', 'accepted')]);
 
       final another = start.add(const Duration(days: 1));
       await guest.post<Object?>(
@@ -184,6 +205,33 @@ void main() {
       );
       expect(a.syncError, isNull);
       expect(b.syncError, isNull);
+      final rescheduled = (await guest.get<Map<String, dynamic>>(
+        '$base/public/calendar',
+        options: auth,
+      )).data!;
+      final receipt = (rescheduled['proposals'] as List)
+          .cast<Map>()
+          .singleWhere((p) => p['nonce'] == 'guest-submission-two');
+      expect(receipt['status'], 'rescheduled');
+      expect(DateTime.parse(receipt['start'] as String), another);
+      expect(
+        receipt.keys,
+        unorderedEquals(['nonce', 'start', 'end', 'status']),
+      );
+      // Deletion publishes a disposition without exposing private task fields.
+      await b.deleteEntity(b.snapshot.task(toMove.id)!.entity);
+      await sb.sync();
+      final declined = (await guest.get<Map<String, dynamic>>(
+        '$base/public/calendar',
+        options: auth,
+      )).data!;
+      expect(
+        (declined['proposals'] as List).cast<Map>().singleWhere(
+          (p) => p['nonce'] == 'guest-submission-two',
+        )['status'],
+        'declined',
+      );
+      await sa.sync();
       // Simulate a pending proposal accepted by an older server. It must be
       // imported as harmless text and must not poison either client's outbox.
       var injected = false;

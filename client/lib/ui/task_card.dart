@@ -68,6 +68,8 @@ class TaskCard extends ConsumerWidget {
     final repo = ref.read(appProvider);
     guard(context, () async {
       switch (value) {
+        case 'edit':
+          await openTask(context, task: task);
         case 'review':
           await repo.completeForReview(task);
         case 'time':
@@ -83,6 +85,8 @@ class TaskCard extends ConsumerWidget {
   }
 
   List<PopupMenuEntry<String>> menu() => [
+    const PopupMenuItem(value: 'edit', child: Text('Редактировать')),
+    const PopupMenuDivider(),
     if (!task.done)
       const PopupMenuItem(
         value: 'review',
@@ -258,6 +262,8 @@ class TaskCard extends ConsumerWidget {
                     width: 25,
                     height: 32,
                     child: PopupMenuButton<String>(
+                      key: ValueKey('task-menu-${task.id}'),
+                      tooltip: 'Действия с задачей',
                       padding: EdgeInsets.zero,
                       iconSize: 17,
                       onSelected: (v) => action(context, ref, v),

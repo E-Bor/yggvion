@@ -34,7 +34,7 @@ func (a *API) encryptionRoutes(mux *http.ServeMux) {
 			fail(w, 500, "storage_error")
 			return
 		}
-		write(w, 200, map[string]any{"shares": shares})
+		write(w, 200, map[string]any{"shares": shares, "proposal_statuses": true})
 	}))))
 	mux.Handle("PUT /api/v1/calendar-shares/{id}/availability", a.auth(a.current(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var input store.Availability
@@ -45,11 +45,12 @@ func (a *API) encryptionRoutes(mux *http.ServeMux) {
 			fail(w, 400, "invalid_snapshot")
 			return
 		}
-		if err := a.Store.UpdateAvailability(r.Context(), r.PathValue("id"), input, a.shareNow()); err != nil {
+		updated, err := a.Store.UpdateAvailability(r.Context(), r.PathValue("id"), input, a.shareNow())
+		if err != nil {
 			shareError(w, err)
 			return
 		}
-		write(w, 200, map[string]bool{"updated": true})
+		write(w, 200, map[string]bool{"updated": updated})
 	}))))
 }
 

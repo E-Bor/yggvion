@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="robots" content="noindex,nofollow,noarchive" />
-    <title>Найдём время · Yggvion</title>
+    <title>Согласуем время · Yggvion</title>
     <link rel="icon" type="image/svg+xml" href="/share/logo.svg" />
     <link rel="stylesheet" href="/share/calendar.css" />
     <script src="/share/calendar.js" defer></script>
@@ -24,12 +24,8 @@
         ><span class="expiry" id="expiry">Приватное приглашение</span>
       </header>
       <section class="intro">
-        <div class="eyebrow">ВРЕМЯ ДЛЯ ВАЖНОГО</div>
-        <h1>Найдём время<span>.</span></h1>
-        <p>
-          Выберите свободный интервал и предложите встречу.<br />Детали чужих
-          событий остаются личными.
-        </p>
+        <h1>Согласуем время<span>.</span></h1>
+        <p>Выберите свободный интервал и предложите встречу.</p>
       </section>
       <div id="notice" role="status" aria-live="polite">
         Открываем календарь…
@@ -51,8 +47,9 @@
             </div>
           </div>
           <div class="legend">
-            <span class="dot busy-dot"></span> Занято
-            <span class="dot free-dot"></span> Можно предложить встречу
+            <span><i class="dot busy-dot"></i> Занято</span>
+            <span><i class="dot pending-dot"></i> Предложено</span>
+            <span><i class="dot accepted-dot"></i> Подтверждено</span>
           </div>
           <div id="viewport">
             <div id="grid">
@@ -115,16 +112,18 @@
             <div class="success-icon">✓</div>
             <h3>Предложение отправлено</h3>
             <p class="muted">
-              Владелец увидит его в планировщике и сможет подтвердить время.
-              Окончательное время согласуйте с ним.
+              Время отмечено в календаре. Статус обновится после ответа владельца.
             </p>
             <button id="another" type="button">Предложить ещё</button>
           </div>
+          <section id="proposals" hidden aria-label="Ваши предложения">
+            <h3>Ваши предложения</h3>
+            <div id="proposal-list" aria-live="polite"></div>
+          </section>
         </aside>
       </main>
       <footer>
-        <span>Только занятость. Ничего личного.</span
-        ><span>Ссылка действует один час</span>
+        <span>Ссылка действует один час</span>
       </footer>
     </div>
   </body>

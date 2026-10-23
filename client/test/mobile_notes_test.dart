@@ -47,9 +47,7 @@ void main() {
       } else if (name == 'planner') {
         expect(find.text('Без расписания'), findsOneWidget);
         expect(find.text('Новая задача'), findsNothing);
-        await tester.tap(find.byTooltip('Создать'));
-        await tester.pumpAndSettle();
-        await tester.tap(find.text('Незапланированная задача'));
+        await tester.tap(find.byKey(const ValueKey('create-event')));
         await settle(tester);
         expect(find.byType(TaskEditor), findsOneWidget);
         await tester.tap(find.byTooltip('Закрыть'));
@@ -80,9 +78,7 @@ void main() {
           List.generate(40, (i) => 'Строка черновика $i').join('\n\n'),
         ),
       );
-      await tester.tap(find.byTooltip('Создать'));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('Заметка').last);
+      await tester.tap(find.byKey(const ValueKey('create-note')));
       await settle(tester);
       final id = repo.snapshot.notes
           .singleWhere((note) => note.pinned.isEmpty)

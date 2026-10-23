@@ -44,7 +44,7 @@ func Open(path string) (*Store, error) {
 	}
 	db.SetMaxOpenConns(1)
 	var schemaVersion int
-	if err = db.QueryRow("PRAGMA user_version").Scan(&schemaVersion); err != nil || (schemaVersion != 0 && schemaVersion != 7 && schemaVersion != SchemaVersion) {
+	if err = db.QueryRow("PRAGMA user_version").Scan(&schemaVersion); err != nil || (schemaVersion != 0 && schemaVersion != 7 && schemaVersion != 8 && schemaVersion != SchemaVersion) {
 		db.Close()
 		if err != nil {
 			return nil, err

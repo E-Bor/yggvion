@@ -86,6 +86,7 @@ class _WorkspaceState extends ConsumerState<Workspace>
   Timer? ticker;
   StreamSubscription<Uri>? invitationLinks;
   bool mobileTasks = true;
+  late double plannerFraction;
   bool birthdaysOpen = false;
   double? sidebarWidth, sidebarDragOrigin, sidebarDragWidth;
   bool sidebarEdgeHovered = false;
@@ -114,6 +115,7 @@ class _WorkspaceState extends ConsumerState<Workspace>
   void initState() {
     super.initState();
     final repo = ref.read(appProvider);
+    plannerFraction = repo.plannerFraction;
     homeDate = tz.TZDateTime.from(
       repo.now(),
       tz.getLocation(repo.snapshot.settings.timezone),
@@ -460,52 +462,19 @@ class _WorkspaceState extends ConsumerState<Workspace>
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
-                    PopupMenuButton<String>(
-                      key: const ValueKey('create-menu'),
-                      tooltip: 'Создать',
-                      onSelected: (v) => guard(context, () async {
-                        if (v == 'task') {
-                          await openTask(context);
-                        } else {
-                          await createNote();
-                        }
-                      }),
-                      itemBuilder: (_) => [
-                        const PopupMenuItem(
-                          value: 'note',
-                          child: ListTile(
-                            leading: Icon(Icons.note_add_outlined),
-                            title: Text('Заметка'),
-                          ),
-                        ),
-                        const PopupMenuItem(
-                          value: 'task',
-                          child: ListTile(
-                            leading: Icon(Icons.add_task_rounded),
-                            title: Text('Незапланированная задача'),
-                          ),
-                        ),
-                      ],
-                      child: Container(
-                        width: 64,
-                        height: 64,
-                        decoration: BoxDecoration(
-                          color: context.accentColor,
-                          borderRadius: BorderRadius.circular(20),
-                          boxShadow: [
-                            BoxShadow(
-                              color: Colors.black.withValues(alpha: .25),
-                              blurRadius: 20,
-                              offset: const Offset(0, 6),
-                            ),
-                          ],
-                        ),
-                        child: Icon(
-                          Icons.add_rounded,
-                          size: 28,
-                          color: context.palette.background,
-                        ),
-                      ),
+                    _MobileCreateButton(
+                      key: const ValueKey('create-event'),
+                      label: 'Событие',
+                      icon: Icons.event_outlined,
+                      primary: true,
+                      onPressed: () => guard(context, () => openTask(context)),
+                    ),
+                    const SizedBox(height: 12),
+                    _MobileCreateButton(
+                      key: const ValueKey('create-note'),
+                      label: 'Заметка',
+                      icon: Icons.note_add_outlined,
+                      onPressed: () => guard(context, createNote),
                     ),
                   ],
                 ),
@@ -1103,6 +1072,9 @@ class _WorkspaceState extends ConsumerState<Workspace>
 
   Widget _planner(bool desktop) {
     final repo = ref.watch(appProvider);
+    final currentSelection = selected == null
+        ? null
+        : repo.snapshot.task(selected!.id);
     final matching = repo.snapshot.tasks
         .where(
           (t) =>
@@ -1220,7 +1192,7 @@ class _WorkspaceState extends ConsumerState<Workspace>
     );
     final calendar = Column(
       children: [
-        if (selected != null)
+        if (currentSelection != null)
           Container(
             width: double.infinity,
             padding: const EdgeInsets.all(12),
@@ -1239,7 +1211,7 @@ class _WorkspaceState extends ConsumerState<Workspace>
                 const SizedBox(width: 9),
                 Expanded(
                   child: Text(
-                    'Выберите время: ${selected!.title}',
+                    'Выберите время: ${currentSelection.title}',
                     style: TextStyle(fontSize: 12, color: context.accentColor),
                   ),
                 ),
@@ -1256,7 +1228,7 @@ class _WorkspaceState extends ConsumerState<Workspace>
             projectId: projectId,
             initialDate: calendarDate,
             onDateChanged: (value) => setState(() => calendarDate = value),
-            selectedTask: selected,
+            selectedTask: currentSelection,
             planner: true,
             onPlaced: () => setState(() => selected = null),
           ),
@@ -1266,12 +1238,42 @@ class _WorkspaceState extends ConsumerState<Workspace>
     return Padding(
       padding: EdgeInsets.fromLTRB(desktop ? 28 : 12, 0, desktop ? 28 : 12, 16),
       child: desktop
-          ? Row(
-              children: [
-                SizedBox(width: 290, child: Card(child: list)),
-                const SizedBox(width: 20),
-                Expanded(child: calendar),
-              ],
+          ? LayoutBuilder(
+              builder: (context, constraints) {
+                final width = constraints.maxWidth - 16;
+                final minimum = (240 / width).clamp(.2, .6);
+                final maximum = (1 - 380 / width).clamp(minimum, .6);
+                final fraction = plannerFraction.clamp(minimum, maximum);
+                void save() => guard(
+                  context,
+                  () => repo.savePlannerLayout(plannerFraction),
+                );
+                return Row(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    SizedBox(
+                      key: const ValueKey('planner-task-panel'),
+                      width: width * fraction,
+                      child: Card(child: list),
+                    ),
+                    PanelDivider(
+                      key: const ValueKey('planner-calendar-divider'),
+                      axis: Axis.vertical,
+                      label: 'Размер списка задач и календаря',
+                      onDelta: (delta) => setState(
+                        () => plannerFraction = (fraction + delta / width)
+                            .clamp(minimum, maximum),
+                      ),
+                      onEnd: save,
+                      onReset: () {
+                        setState(() => plannerFraction = .30);
+                        save();
+                      },
+                    ),
+                    Expanded(child: calendar),
+                  ],
+                );
+              },
             )
           : Column(
               children: [
@@ -1405,6 +1407,51 @@ class _WorkspaceState extends ConsumerState<Workspace>
       ),
     );
   }
+}
+
+class _MobileCreateButton extends StatelessWidget {
+  const _MobileCreateButton({
+    super.key,
+    required this.label,
+    required this.icon,
+    required this.onPressed,
+    this.primary = false,
+  });
+  final String label;
+  final IconData icon;
+  final VoidCallback onPressed;
+  final bool primary;
+
+  @override
+  Widget build(BuildContext context) => SizedBox(
+    width: 64,
+    height: 64,
+    child: FloatingActionButton(
+      heroTag: 'create-$label',
+      tooltip: 'Создать: $label',
+      onPressed: onPressed,
+      elevation: 0,
+      focusElevation: 0,
+      hoverElevation: 0,
+      highlightElevation: 1,
+      backgroundColor: primary
+          ? context.accentColor
+          : Color.alphaBlend(
+              context.accentColor.withValues(alpha: .14),
+              context.palette.surface,
+            ),
+      foregroundColor: primary
+          ? Theme.of(context).colorScheme.onPrimary
+          : context.accentColor,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(20),
+        side: primary
+            ? BorderSide.none
+            : BorderSide(color: context.accentColor.withValues(alpha: .3)),
+      ),
+      child: Icon(icon, size: 28),
+    ),
+  );
 }
 
 class SearchDialog extends ConsumerStatefulWidget {
