@@ -150,6 +150,53 @@ void main() {
           isEmpty,
         );
       }
+
+      // The phone starts a new timer and then stops receiving updates, as when
+      // iOS suspends it. Switching tasks on the desktop must close the same
+      // session; the old lock-screen clock must never become extra time.
+      final nextTask = await a.createTask('Next task');
+      await sa.sync();
+      await sb.sync();
+      await b.toggleCalendarTimer(b.snapshot.task(task.id)!);
+      final phoneSession = b.snapshot.sessions.singleWhere((s) => s.running);
+      await sb.sync();
+      await sa.sync();
+      now = now.add(const Duration(minutes: 12));
+      final switchedAt = now;
+      await a.toggleCalendarTimer(nextTask);
+      await sa.sync();
+      now = now.add(const Duration(minutes: 35));
+      expect(b.activeTimerTask?.id, task.id); // Still the stale local snapshot.
+      expect(
+        b.snapshot.sessions.singleWhere((s) => s.running).id,
+        phoneSession.id,
+      );
+
+      await sb.sync(); // The phone wakes and receives the desktop's closure.
+      await sa.sync();
+      await sb.sync();
+      for (final repo in [a, b]) {
+        expect(repo.syncError, isNull);
+        expect(repo.conflictCount, 0);
+        expect(repo.activeTimerTask?.id, nextTask.id);
+        expect(repo.snapshot.sessions, hasLength(4));
+        expect(repo.snapshot.sessions.where((s) => s.running), hasLength(1));
+        expect(
+          repo.snapshot.sessions
+              .singleWhere((s) => s.id == phoneSession.id)
+              .end,
+          switchedAt,
+        );
+        expect(repo.snapshot.spent(task.id, now), const Duration(minutes: 52));
+        expect(
+          repo.snapshot.spent(nextTask.id, now),
+          const Duration(minutes: 35),
+        );
+        expect(
+          await repo.db.customSelect('SELECT * FROM outbox').get(),
+          isEmpty,
+        );
+      }
     },
     skip: binary == null
         ? 'Set YGGVION_TEST_SERVER to run against the real Go server'

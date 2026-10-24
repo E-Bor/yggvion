@@ -116,6 +116,72 @@ void main() {
     ),
   );
 
+  TextSpan renderedText(WidgetTester tester, String fragment) {
+    Iterable<TextSpan> runs(InlineSpan span) sync* {
+      if (span is! TextSpan) return;
+      if (span.text?.contains(fragment) ?? false) yield span;
+      for (final child in span.children ?? const <InlineSpan>[]) {
+        yield* runs(child);
+      }
+    }
+
+    final roots = [
+      for (final widget in tester.widgetList<SelectableText>(
+        find.byType(SelectableText),
+      ))
+        widget.textSpan ?? TextSpan(text: widget.data, style: widget.style),
+      for (final widget in tester.widgetList<Text>(find.byType(Text)))
+        widget.textSpan ?? TextSpan(text: widget.data, style: widget.style),
+    ];
+    return roots.expand(runs).single;
+  }
+
+  bool struck(WidgetTester tester, String fragment) =>
+      renderedText(
+        tester,
+        fragment,
+      ).style?.decoration?.contains(TextDecoration.lineThrough) ??
+      false;
+
+  for (final selectable in [true, false]) {
+    testInteraction(
+      'completed tasks strike their own text and preserve formatting ($selectable)',
+      (tester) async {
+        const source =
+            '- [X] **Готово** и `код` и [ссылка](https://example.com)\n'
+            '  - [ ] Невыполненная\n\n'
+            '  Продолжение\n\n'
+            '  ```text\n  - [x] Пример\n  ```\n\n'
+            '- [ ] Открытая\n'
+            '  - [x] Сделанная';
+        await preview(
+          tester,
+          MarkdownPreview(text: source, selectable: selectable),
+        );
+        for (final text in [
+          'Готово',
+          'код',
+          'ссылка',
+          'Продолжение',
+          'Сделанная',
+        ]) {
+          expect(struck(tester, text), isTrue, reason: text);
+        }
+        for (final text in ['Невыполненная', 'Открытая', 'Пример']) {
+          expect(struck(tester, text), isFalse, reason: text);
+        }
+        expect(
+          renderedText(tester, 'Готово').style?.fontWeight,
+          FontWeight.bold,
+        );
+        expect(renderedText(tester, 'код').style?.fontFamily, 'monospace');
+        expect(renderedText(tester, 'ссылка').recognizer, isNotNull);
+        expect(find.byType(Checkbox), findsNWidgets(4));
+        expect(tester.takeException(), isNull);
+      },
+    );
+  }
+
   testInteraction('nested and loose preview checkboxes toggle the right item', (
     tester,
   ) async {
@@ -140,10 +206,17 @@ void main() {
     await tester.tap(find.byType(Checkbox).at(1));
     await tester.pumpAndSettle();
     expect(text, '- [x] Родитель\n  - [ ] Ребёнок\n\n- [ ] **Другой**');
+    expect(struck(tester, 'Родитель'), isTrue);
+    expect(struck(tester, 'Ребёнок'), isFalse);
     await tester.tap(find.byType(Checkbox).at(2));
     await tester.pumpAndSettle();
     expect(text, '- [x] Родитель\n  - [ ] Ребёнок\n\n- [x] **Другой**');
     expect(find.text('Другой', findRichText: true), findsOneWidget);
+    expect(struck(tester, 'Другой'), isTrue);
+    await tester.tap(find.byType(Checkbox).at(0));
+    await tester.pumpAndSettle();
+    expect(struck(tester, 'Родитель'), isFalse);
+    expect(struck(tester, 'Другой'), isTrue);
     expect(tester.takeException(), isNull);
   });
 

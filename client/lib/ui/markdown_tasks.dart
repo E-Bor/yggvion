@@ -9,9 +9,28 @@ class MarkdownTaskListBuilder extends MarkdownPaddingBuilder {
   @override
   void visitElementBefore(md.Element element) {
     final input = markdownTaskInput(element);
-    if (input != null && element.children!.first != input) {
+    if (input == null) return;
+    if (element.children!.first != input) {
       (element.children!.first as md.Element).children!.remove(input);
       element.children!.insert(0, input);
+    }
+    if (input.attributes.containsKey('checked')) {
+      _strikeText(element.children!);
+    }
+  }
+
+  void _strikeText(List<md.Node> children) {
+    for (var i = 0; i < children.length; i++) {
+      final child = children[i];
+      if (child is md.Text) {
+        children[i] = md.Element('del', [child]);
+      } else if (child is md.Element &&
+          child.children != null &&
+          !const {'input', 'ul', 'ol', 'pre', 'del'}.contains(child.tag)) {
+        // Keep inline formatting and links; nested tasks have their own state.
+        // Only the render tree changes, never the stored Markdown.
+        _strikeText(child.children!);
+      }
     }
   }
 }
