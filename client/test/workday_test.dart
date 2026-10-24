@@ -11,14 +11,242 @@ import 'package:yggvion/domain/workday.dart';
 void main() {
   setUpAll(data.initializeTimeZones);
   final monday = DateTime.utc(2026, 10, 19);
-  final now = DateTime.utc(2026, 10, 20, 12);
+  late DateTime now;
   late Repository repo;
   setUp(() async {
+    now = DateTime.utc(2026, 10, 20, 12);
     repo = Repository(LocalDatabase(NativeDatabase.memory()), clock: () => now);
     await repo.initialize();
     await repo.updateSettings(30, [0], 'UTC');
   });
   tearDown(() => repo.close());
+
+  test(
+    'first regime change preserves existing defaults before yesterday',
+    () async {
+      await repo.commit([
+        repo.snapshot.settings.entity.change({
+          'workday_start': 420,
+          'workday_end': 960,
+          'workdays': [1, 2, 5],
+        }),
+      ]);
+      await repo.updateWorkdaySettings(600, 1140, [1, 2, 3, 4, 5]);
+      await repo.reload();
+      final schedule = WorkdaySchedule(repo.snapshot);
+      final earlier = schedule.forDate(DateTime.utc(2026, 10, 16))!;
+      expect(earlier.start.hour, 7);
+      expect(earlier.end.hour, 16);
+      expect(schedule.forDate(DateTime.utc(2026, 10, 14)), isNull);
+      for (final date in [
+        DateTime.utc(2026, 10, 19),
+        DateTime.utc(2026, 10, 20),
+        DateTime.utc(2026, 10, 28),
+      ]) {
+        final day = schedule.forDate(date)!;
+        expect(day.start.hour, 10);
+        expect(day.end.hour, 19);
+      }
+      expect(schedule.history.previous.single.until, '2026-10-19');
+      expect(schedule.records, isEmpty);
+    },
+  );
+
+  test(
+    'same-day changes replace one regime and later edits append history',
+    () async {
+      final original = repo.snapshot.settings.entity.encoded;
+      await repo.updateWorkdaySettings(540, 1080, [5, 4, 3, 2, 1, 1]);
+      expect(repo.snapshot.settings.entity.encoded, original);
+      await repo.updateWorkdaySettings(480, 1020, [1, 2, 3, 4, 5]);
+      await repo.updateWorkdaySettings(600, 1140, [1, 2, 3, 4, 5]);
+      var history = WorkdayHistory(repo.snapshot.settings);
+      expect(history.previous, hasLength(1));
+      expect(history.forDate('2026-10-18').start, 540);
+      expect(history.forDate('2026-10-19').start, 600);
+      now = DateTime.utc(2026, 10, 22, 12);
+      await repo.updateWorkdaySettings(660, 1500, [1, 2, 3, 4, 5]);
+      await repo.updateSettings(45, [5], 'UTC', searchTypos: 2);
+      await repo.reload();
+      history = WorkdayHistory(repo.snapshot.settings);
+      expect(history.previous.map((p) => p.until), [
+        '2026-10-19',
+        '2026-10-21',
+      ]);
+      expect(history.forDate('2026-10-16').start, 540);
+      expect(history.forDate('2026-10-19').start, 600);
+      expect(history.forDate('2026-10-20').end, 1140);
+      expect(history.forDate('2026-10-21').start, 660);
+      expect(history.forDate('2026-10-30').end, 1500);
+    },
+  );
+
+  test(
+    'earlier statistics stay intact while yesterday uses the new regime',
+    () async {
+      final friday = DateTime.utc(2026, 10, 16);
+      final task = await repo.createTask('Work');
+      await repo.saveSession(
+        task.id,
+        friday.add(const Duration(hours: 8)),
+        friday.add(const Duration(hours: 10)),
+      );
+      final before = StatisticsReport.calculate(
+        repo.snapshot,
+        [],
+        friday,
+        monday,
+        now,
+      );
+      await repo.updateWorkdaySettings(480, 1500, [1, 2, 3, 4, 5, 6, 7]);
+      final after = StatisticsReport.calculate(
+        repo.snapshot,
+        [],
+        friday,
+        monday,
+        now,
+      );
+      expect(after.workdayAvailable, before.workdayAvailable);
+      expect(after.workdayActual, before.workdayActual);
+      expect(after.outsideWorkday, before.outsideWorkday);
+      expect(after.meanWorkdayStart, before.meanWorkdayStart);
+      expect(after.meanWorkdayEnd, before.meanWorkdayEnd);
+      final schedule = WorkdaySchedule(repo.snapshot);
+      expect(schedule.forDate(DateTime.utc(2026, 10, 17)), isNull);
+      expect(schedule.forDate(DateTime.utc(2026, 10, 18)), isNull);
+      expect(
+        schedule.forDate(monday)!.end.toUtc(),
+        DateTime.utc(2026, 10, 20, 1),
+      );
+      expect(schedule.forDate(DateTime.utc(2026, 10, 24)), isNotNull);
+      await repo.setWorkdayBoundary(
+        friday,
+        start: true,
+        value: friday.add(const Duration(hours: 8)),
+      );
+      expect(WorkdaySchedule(repo.snapshot).forDate(friday)!.end.hour, 18);
+      final corrected = StatisticsReport.calculate(
+        repo.snapshot,
+        [],
+        friday,
+        monday,
+        now,
+      );
+      expect(corrected.workdayActual, const Duration(hours: 2));
+    },
+  );
+
+  test(
+    'weekday changes affect yesterday onward including disabling the workweek',
+    () async {
+      await repo.updateWorkdaySettings(540, 1080, []);
+      final schedule = WorkdaySchedule(repo.snapshot);
+      expect(schedule.forDate(DateTime.utc(2026, 10, 16)), isNotNull);
+      expect(schedule.forDate(monday), isNull);
+      expect(schedule.forDate(DateTime.utc(2026, 10, 21)), isNull);
+      final report = StatisticsReport.calculate(
+        repo.snapshot,
+        [],
+        DateTime.utc(2026, 10, 16),
+        DateTime.utc(2026, 10, 22),
+        now,
+      );
+      expect(report.workdays.map((d) => d.startMinutes), [
+        540,
+        null,
+        null,
+        null,
+        null,
+        null,
+      ]);
+      expect(report.meanWorkdayStart, 540);
+    },
+  );
+
+  test(
+    'effective date uses workspace civil yesterday through midnight and DST',
+    () async {
+      final cases = [
+        (
+          'Pacific/Kiritimati',
+          DateTime.utc(2026, 10, 19, 10, 15),
+          '2026-10-19',
+        ),
+        (
+          'America/Los_Angeles',
+          DateTime.utc(2026, 10, 20, 6, 30),
+          '2026-10-18',
+        ),
+        ('America/New_York', DateTime.utc(2026, 3, 9, 4, 30), '2026-03-08'),
+        ('America/New_York', DateTime.utc(2026, 11, 2, 5, 30), '2026-11-01'),
+      ];
+      for (var i = 0; i < cases.length; i++) {
+        final (zone, instant, expected) = cases[i];
+        now = instant;
+        await repo.updateSettings(30, [0], zone);
+        await repo.updateWorkdaySettings(480 + i * 5, 1020, [1, 2, 3, 4, 5]);
+        expect(
+          WorkdayHistory(repo.snapshot.settings).previous.last.until,
+          expected,
+        );
+      }
+    },
+  );
+
+  test(
+    'moving the effective date backwards preserves the earlier regimes',
+    () async {
+      await repo.updateWorkdaySettings(480, 1020, [1, 2, 3, 4, 5]);
+      now = DateTime.utc(2026, 10, 24, 12);
+      await repo.updateWorkdaySettings(600, 1140, [1, 2, 3, 4, 5]);
+      now = DateTime.utc(2026, 10, 22, 12);
+      await repo.updateWorkdaySettings(660, 1200, [1, 2, 3, 4, 5]);
+      final history = WorkdayHistory(repo.snapshot.settings);
+      expect(history.previous.map((p) => p.until), [
+        '2026-10-19',
+        '2026-10-21',
+      ]);
+      expect(history.forDate('2026-10-16').start, 540);
+      expect(history.forDate('2026-10-20').start, 480);
+      expect(history.forDate('2026-10-21').start, 660);
+      expect(history.forDate('2026-10-24').start, 660);
+    },
+  );
+
+  test('invalid history dates ranges and ordering are rejected', () {
+    Map<String, dynamic> entry(String until) => {
+      'until': until,
+      'start': 540,
+      'end': 1080,
+      'days': [1, 2, 3, 4, 5],
+    };
+    for (final history in [
+      [entry('2026-02-30')],
+      [entry('2026-10-19'), entry('2026-10-19')],
+      [entry('2026-10-21'), entry('2026-10-19')],
+      [
+        {...entry('2026-10-19'), 'until': null},
+      ],
+      [
+        {...entry('2026-10-19'), 'end': 539},
+      ],
+      [
+        {
+          ...entry('2026-10-19'),
+          'days': [8],
+        },
+      ],
+    ]) {
+      expect(
+        () => WorkdayHistory(
+          AppSettings(
+            repo.snapshot.settings.entity.change({'workday_history': history}),
+          ),
+        ),
+        throwsFormatException,
+      );
+    }
+  });
 
   test(
     'defaults are weekdays, settings autosave and invalid ranges leave them intact',
@@ -319,6 +547,7 @@ void main() {
   test(
     'full workday respects DST and weekend work remains outside its bounds',
     () async {
+      now = DateTime.utc(2026, 3, 1);
       await repo.updateSettings(30, [0], 'America/New_York');
       await repo.updateWorkdaySettings(0, 1440, [1, 2, 3, 4, 5, 6, 7]);
       final zone = tz.getLocation('America/New_York');
@@ -336,6 +565,7 @@ void main() {
         );
         expect(report.workdayAvailable.inHours, date.month == 3 ? 23 : 25);
       }
+      now = DateTime.utc(2026, 10, 18, 12);
       await repo.updateSettings(30, [0], 'UTC');
       await repo.updateWorkdaySettings(540, 1080, [1, 2, 3, 4, 5]);
       final saturday = DateTime.utc(2026, 10, 17);
@@ -516,6 +746,7 @@ void main() {
   });
 
   test('overnight work on a weekend and DST use elapsed time', () async {
+    now = DateTime.utc(2026, 3, 1);
     await repo.updateSettings(30, [0], 'America/New_York');
     await repo.updateWorkdaySettings(1320, 1680, [6]);
     final zone = tz.getLocation('America/New_York');

@@ -944,11 +944,10 @@ class Repository extends ChangeNotifier {
   }
 
   Future<void> updateWorkdaySettings(int start, int end, List<int> days) async {
-    if (start < 0 ||
-        start >= 1440 ||
-        end > start + 1440 ||
-        end - start < 5 ||
-        days.any((day) => day < 1 || day > 7)) {
+    final pattern = WorkdayPattern(start, end, days.toSet().toList()..sort());
+    try {
+      pattern.validate();
+    } on FormatException {
       throw ArgumentError('Рабочий день должен длиться от 5 минут до 24 часов');
     }
     await commitComputed(() async {
@@ -956,13 +955,18 @@ class Repository extends ChangeNotifier {
       if (settings == null || settings.deleted) {
         throw StateError('Настройки недоступны');
       }
-      return [
-        settings.change({
-          'workday_start': start,
-          'workday_end': end,
-          'workdays': days.toSet().toList()..sort(),
-        }),
-      ];
+      final current = AppSettings(settings);
+      final history = WorkdayHistory(current);
+      if (history.current.sameAs(pattern)) return [];
+      final zone = tz.getLocation(current.timezone);
+      final today = tz.TZDateTime.from(now(), zone);
+      final yesterday = tz.TZDateTime(
+        zone,
+        today.year,
+        today.month,
+        today.day - 1,
+      );
+      return [settings.change(history.changedFrom(dayKey(yesterday), pattern))];
     });
   }
 

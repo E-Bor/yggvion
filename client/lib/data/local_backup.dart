@@ -782,13 +782,7 @@ void _validateEntity(Entity e) {
         tz.getLocation(v.timezone);
         v.accentColor;
         v.searchTypos;
-        check(
-          v.workdayStart >= 0 &&
-              v.workdayStart < 1440 &&
-              v.workdayEnd <= v.workdayStart + 1440 &&
-              v.workdayEnd - v.workdayStart >= 5,
-        );
-        check(v.workdays.every((day) => day >= 1 && day <= 7));
+        WorkdayHistory(v);
       case 'series':
         e.data['title'] as String;
         e.data['description'] as String?;

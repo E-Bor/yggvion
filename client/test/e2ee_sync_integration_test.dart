@@ -9,6 +9,7 @@ import 'package:timezone/data/latest.dart' as tz;
 import 'package:yggvion/data/database.dart';
 import 'package:yggvion/data/repository.dart';
 import 'package:yggvion/data/sync.dart';
+import 'package:yggvion/domain/models.dart';
 import 'package:yggvion/domain/workday.dart';
 
 void main() {
@@ -39,8 +40,15 @@ void main() {
       process.stdout.drain<void>();
       process.stderr.drain<void>();
       final base = 'http://127.0.0.1:$port', probe = Dio();
-      final a = Repository(LocalDatabase(NativeDatabase.memory())),
-          b = Repository(LocalDatabase(NativeDatabase.memory()));
+      final startedAt = DateTime.now();
+      final a = Repository(
+            LocalDatabase(NativeDatabase.memory()),
+            clock: () => startedAt,
+          ),
+          b = Repository(
+            LocalDatabase(NativeDatabase.memory()),
+            clock: () => startedAt,
+          );
 
       final sa = SyncService(a, realtime: false),
           sb = SyncService(b, realtime: false);
@@ -92,6 +100,13 @@ void main() {
         start: true,
         value: workday.add(const Duration(hours: 10)),
       );
+      await a.updateWorkdaySettings(480, 1020, [1, 2, 3, 4, 5]);
+      final regimeDate = WorkdayHistory(
+        a.snapshot.settings,
+      ).previous.single.until!;
+      final beforeRegime = DateTime.parse(
+        regimeDate,
+      ).subtract(const Duration(days: 1));
       final note = await a.createNote();
       final file = File('${dir.path}/private-file.txt');
       await file.writeAsString('PRIVATE_FILE_CONTENT');
@@ -144,6 +159,14 @@ void main() {
       await sb.unlockWithPassword(password);
       expect(b.syncError, isNull);
       expect(b.snapshot.note(note.id)!.title, 'PRIVATE_NOTE_TITLE');
+      // Both devices started offline. Accept the server's settings using
+      // the existing conflict flow before editing its history on this device.
+      await b.resolveRecordConflict('settings', keepLocal: false);
+      var regime = WorkdayHistory(b.snapshot.settings);
+      expect(regime.forDate(dayKey(beforeRegime)).start, 540);
+      expect(regime.forDate(regimeDate).start, 480);
+      expect(regime.previous.single.until, regimeDate);
+      expect(jsonEncode(wire), isNot(contains('workday_history')));
       expect(
         WorkdaySchedule(
           b.snapshot,
@@ -155,9 +178,15 @@ void main() {
         start: false,
         value: workday.add(const Duration(hours: 25)),
       );
+      await b.updateWorkdaySettings(600, 1140, [1, 2, 3, 4, 5]);
       await sb.sync();
       await sa.sync();
       expect(a.syncError, isNull);
+      regime = WorkdayHistory(a.snapshot.settings);
+      expect(regime.forDate(dayKey(beforeRegime)).start, 540);
+      expect(regime.current.start, 600);
+      expect(regime.forDate(regimeDate).start, 600);
+      expect(regime.previous, hasLength(1));
       expect(
         WorkdaySchedule(a.snapshot).forDate(workday)!.record!.end!.toUtc(),
         DateTime.utc(2026, 10, 20, 1),

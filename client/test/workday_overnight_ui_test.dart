@@ -157,52 +157,54 @@ void main() {
       expect(repo.snapshot.blocks, isEmpty);
       expect(tester.takeException(), isNull);
     });
-    testInteraction(
-      'overnight averages show the next-day label mobile=$mobile',
-      (tester) async {
-        await workspace(
-          tester,
-          mobile: mobile,
-          prepare: (repo) async {
-            await repo.updateSettings(30, [0], 'UTC');
-            await repo.updateWorkdaySettings(540, 1440, [1, 2, 3, 4, 5]);
-            for (final day in [15, 16]) {
-              final date = DateTime.utc(2026, 10, day);
-              await repo.setWorkdayBoundary(
-                date,
-                start: true,
-                value: DateTime.utc(2026, 10, day, 9),
-              );
-              await repo.setWorkdayBoundary(
-                date,
-                start: false,
-                value: day == 15
-                    ? DateTime.utc(2026, 10, day, 23)
-                    : DateTime.utc(2026, 10, day + 1, 1),
-              );
-            }
-          },
-        );
-        await command(tester, LogicalKeyboardKey.digit5);
-        await tester.tap(find.byKey(const ValueKey('open-statistics')));
-        await tester.pump();
-        await settle(tester);
-        await tester.ensureVisible(find.text('Начало и конец дня'));
-        await settle(tester);
-        expect(find.text('00:00 +1'), findsWidgets);
-        expect(
-          find.byKey(const ValueKey('statistics-info-boundaries')),
-          findsOneWidget,
-        );
-        await expectLater(
-          find.byType(StatisticsPage),
-          matchesGoldenFile(
-            'goldens/workday_overnight_chart_${mobile ? 390 : 1440}.png',
-          ),
-        );
-        expect(tester.takeException(), isNull);
-      },
-    );
+    testInteraction('overnight averages show the next-day label mobile=$mobile', (
+      tester,
+    ) async {
+      await workspace(
+        tester,
+        mobile: mobile,
+        prepare: (repo) async {
+          await repo.updateSettings(30, [0], 'UTC');
+          // Seed the historical regime; editing settings today starts yesterday.
+          await repo.commit([
+            repo.snapshot.settings.entity.change({'workday_end': 1440}),
+          ]);
+          for (final day in [15, 16]) {
+            final date = DateTime.utc(2026, 10, day);
+            await repo.setWorkdayBoundary(
+              date,
+              start: true,
+              value: DateTime.utc(2026, 10, day, 9),
+            );
+            await repo.setWorkdayBoundary(
+              date,
+              start: false,
+              value: day == 15
+                  ? DateTime.utc(2026, 10, day, 23)
+                  : DateTime.utc(2026, 10, day + 1, 1),
+            );
+          }
+        },
+      );
+      await command(tester, LogicalKeyboardKey.digit5);
+      await tester.tap(find.byKey(const ValueKey('open-statistics')));
+      await tester.pump();
+      await settle(tester);
+      await tester.ensureVisible(find.text('Начало и конец дня'));
+      await settle(tester);
+      expect(find.text('00:00 +1'), findsWidgets);
+      expect(
+        find.byKey(const ValueKey('statistics-info-boundaries')),
+        findsOneWidget,
+      );
+      await expectLater(
+        find.byType(StatisticsPage),
+        matchesGoldenFile(
+          'goldens/workday_overnight_chart_${mobile ? 390 : 1440}.png',
+        ),
+      );
+      expect(tester.takeException(), isNull);
+    });
   }
 
   testInteraction('default overnight time saves from settings', (tester) async {

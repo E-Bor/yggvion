@@ -97,7 +97,7 @@ class WorkdaySettings extends ConsumerWidget {
         ),
         const SizedBox(height: 10),
         Text(
-          'Часовой пояс: ${settings.timezone}. Настройки сохраняются сразу. Дни с ручными изменениями сохраняют свои границы.',
+          'Часовой пояс: ${settings.timezone}. Изменения сохраняются сразу и действуют со вчерашнего дня. Более ранние дни и ручные корректировки сохраняются.',
           style: TextStyle(
             color: context.palette.muted,
             fontSize: 11,

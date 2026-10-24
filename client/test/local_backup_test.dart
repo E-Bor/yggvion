@@ -301,8 +301,9 @@ void main() {
   );
 
   test(
-    'local backup restores workday defaults and individual boundaries',
+    'local backup restores workday history and individual boundaries',
     () async {
+      now = DateTime.utc(2026, 10, 20, 12);
       await repo.updateSettings(30, [0], 'UTC');
       await repo.updateWorkdaySettings(480, 1500, [1, 2, 3, 4, 5]);
       final date = DateTime.utc(2026, 10, 19);
@@ -313,6 +314,7 @@ void main() {
       );
       final saved = await backups.create();
       await repo.setWorkdayBoundary(date, start: true, value: null);
+      now = DateTime.utc(2026, 10, 23, 12);
       await repo.updateWorkdaySettings(540, 1080, [1]);
       await backups.restore(saved.path);
       expect(repo.snapshot.settings.workdayStart, 480);
@@ -322,6 +324,11 @@ void main() {
       expect(day.end.toUtc(), DateTime.utc(2026, 10, 20, 1));
       expect(day.record!.start, isNotNull);
       expect(day.record!.end, isNull);
+      final history = WorkdayHistory(repo.snapshot.settings);
+      expect(history.previous.single.until, '2026-10-19');
+      expect(history.forDate('2026-10-16').start, 540);
+      expect(history.forDate('2026-10-20').start, 480);
+      expect(history.forDate('2026-10-23').end, 1500);
     },
   );
 
@@ -340,6 +347,7 @@ void main() {
         'duplicate',
         'truncated',
         'invalid-fields',
+        'invalid-workday-history',
       ]) {
         final input = InputFileStream(await decryptedArchive(saved.path));
         final original = ZipDecoder().decodeStream(input);
@@ -347,7 +355,8 @@ void main() {
         final plainPath = '$path.zip';
         final encoder = ZipFileEncoder()..create(plainPath, level: 0);
         List<int>? alteredSnapshot;
-        if (corruption == 'invalid-fields') {
+        if (corruption == 'invalid-fields' ||
+            corruption == 'invalid-workday-history') {
           final data =
               jsonDecode(
                     utf8.decode(
@@ -358,7 +367,18 @@ void main() {
           final settings = (data['records'] as List).cast<Map>().singleWhere(
             (r) => r['kind'] == 'settings',
           );
-          (settings['data'] as Map)['timezone'] = 'Invalid/Unknown';
+          if (corruption == 'invalid-fields') {
+            (settings['data'] as Map)['timezone'] = 'Invalid/Unknown';
+          } else {
+            (settings['data'] as Map)['workday_history'] = [
+              {
+                'until': '2026-02-30',
+                'start': 540,
+                'end': 1080,
+                'days': [1],
+              },
+            ];
+          }
           alteredSnapshot = utf8.encode(jsonEncode(data));
         }
         for (final entry in original) {

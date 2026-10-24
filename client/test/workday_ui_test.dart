@@ -173,6 +173,13 @@ void main() {
         await tester.tap(saturday);
         await settle(tester);
         expect(repo.snapshot.settings.workdays, contains(6));
+        final schedule = WorkdaySchedule(repo.snapshot);
+        expect(schedule.forDate(DateTime.utc(2026, 10, 17)), isNull);
+        expect(schedule.forDate(DateTime.utc(2026, 10, 24)), isNotNull);
+        expect(
+          find.textContaining('действуют со вчерашнего дня'),
+          findsOneWidget,
+        );
         final setting = find.byKey(const ValueKey('workday-start-setting'));
         await tester.ensureVisible(setting);
         await settle(tester);
