@@ -327,8 +327,9 @@ class Repository extends ChangeNotifier {
 
   Future<void> completeForReview(Task task) async {
     if (task.done) return;
+    final time = now();
     final changes = [
-      task.entity.change({'status': 'done'}),
+      task.entity.change({'status': 'done', 'completed_at': wireTime(time)}),
       Task.create(
         newId(),
         'Проверить: ${task.title}',
@@ -340,7 +341,7 @@ class Repository extends ChangeNotifier {
     for (final s in snapshot.sessions.where(
       (s) => s.taskId == task.id && s.running,
     )) {
-      changes.add(s.entity.change({'end': wireTime(_safeEnd(s, now()))}));
+      changes.add(s.entity.change({'end': wireTime(_safeEnd(s, time))}));
     }
     await commit(changes);
   }

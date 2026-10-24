@@ -113,6 +113,9 @@ void main() {
       expect(repo.snapshot.taskBlocks(copy.id), isEmpty);
       expect(repo.snapshot.spent(copy.id, now), Duration.zero);
       expect(repo.snapshot.task(t.id)!.done, isTrue);
+      expect(repo.snapshot.task(t.id)!.completedAt, now);
+      expect(copy.completedAt, isNull);
+      expect(repo.snapshot.boardTasks(TaskStatus.done, now).single.id, t.id);
       expect(repo.snapshot.taskBlocks(t.id), hasLength(1));
       expect(repo.snapshot.sessions.where((s) => s.running), isEmpty);
     },

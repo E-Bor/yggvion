@@ -86,6 +86,7 @@ class _WorkspaceState extends ConsumerState<Workspace>
   Timer? ticker;
   StreamSubscription<Uri>? invitationLinks;
   bool mobileTasks = true;
+  int boardDoneDays = 7, boardDoneLimit = 50;
   late double plannerFraction;
   bool birthdaysOpen = false;
   double? sidebarWidth, sidebarDragOrigin, sidebarDragWidth;
@@ -220,6 +221,10 @@ class _WorkspaceState extends ConsumerState<Workspace>
       }
     }
     setState(() {
+      if (next == PageKind.board && page != next) {
+        boardDoneDays = 7;
+        boardDoneLimit = 50;
+      }
       page = next;
       selected = null;
       newNoteId = null;
@@ -1325,15 +1330,16 @@ class _WorkspaceState extends ConsumerState<Workspace>
                       if (task != null) await repo.status(task, status);
                     }),
                     builder: (context, candidates, rejected) {
-                      final tasks = repo.snapshot.tasks
-                          .where(
-                            (t) =>
-                                t.seriesId.isEmpty &&
-                                !t.isProposed &&
-                                t.status == status &&
-                                (projectId.isEmpty || t.projectId == projectId),
-                          )
-                          .toList();
+                      final tasks = repo.snapshot.boardTasks(
+                        status,
+                        repo.now(),
+                        projectId: projectId,
+                        doneDays: boardDoneDays == 0 ? null : boardDoneDays,
+                      );
+                      final visibleCount = status == TaskStatus.done
+                          ? math.min(boardDoneLimit, tasks.length)
+                          : tasks.length;
+                      final more = tasks.length - visibleCount;
                       return Container(
                         decoration: BoxDecoration(
                           color: candidates.isNotEmpty
@@ -1350,51 +1356,167 @@ class _WorkspaceState extends ConsumerState<Workspace>
                         child: Column(
                           children: [
                             Padding(
-                              padding: const EdgeInsets.all(17),
-                              child: Row(
-                                children: [
-                                  Container(
-                                    width: 7,
-                                    height: 7,
-                                    decoration: BoxDecoration(
-                                      shape: BoxShape.circle,
-                                      color: status == TaskStatus.done
-                                          ? context.palette.green
-                                          : status == TaskStatus.inProgress
-                                          ? context.palette.pink
-                                          : status == TaskStatus.waiting
-                                          ? Palette.projects[2]
-                                          : context.accentColor,
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 17,
+                                vertical: 9,
+                              ),
+                              child: SizedBox(
+                                height: 40,
+                                child: Row(
+                                  children: [
+                                    Container(
+                                      width: 7,
+                                      height: 7,
+                                      decoration: BoxDecoration(
+                                        shape: BoxShape.circle,
+                                        color: status == TaskStatus.done
+                                            ? context.palette.green
+                                            : status == TaskStatus.inProgress
+                                            ? context.palette.pink
+                                            : status == TaskStatus.waiting
+                                            ? Palette.projects[2]
+                                            : context.accentColor,
+                                      ),
                                     ),
-                                  ),
-                                  const SizedBox(width: 9),
-                                  Text(
-                                    status.label,
-                                    style: const TextStyle(
-                                      fontSize: 13,
-                                      fontWeight: FontWeight.w600,
+                                    const SizedBox(width: 9),
+                                    Expanded(
+                                      child: Text(
+                                        status.label,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: const TextStyle(
+                                          fontSize: 13,
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      ),
                                     ),
-                                  ),
-                                  const Spacer(),
-                                  Text(
-                                    '${tasks.length}',
-                                    style: TextStyle(
-                                      color: context.palette.muted,
-                                      fontSize: 12,
+                                    if (status == TaskStatus.done) ...[
+                                      const SizedBox(width: 8),
+                                      PopupMenuButton<int>(
+                                        key: const ValueKey(
+                                          'board-done-period',
+                                        ),
+                                        tooltip: 'Период завершённых задач',
+                                        initialValue: boardDoneDays,
+                                        onSelected: (days) => setState(() {
+                                          boardDoneDays = days;
+                                          boardDoneLimit = 50;
+                                        }),
+                                        itemBuilder: (_) => [
+                                          for (final days in [7, 30, 0])
+                                            CheckedPopupMenuItem(
+                                              value: days,
+                                              checked: boardDoneDays == days,
+                                              child: Text(
+                                                days == 0
+                                                    ? 'Вся история'
+                                                    : 'Последние $days дней',
+                                              ),
+                                            ),
+                                        ],
+                                        child: Padding(
+                                          padding: const EdgeInsets.symmetric(
+                                            vertical: 8,
+                                            horizontal: 4,
+                                          ),
+                                          child: Row(
+                                            mainAxisSize: MainAxisSize.min,
+                                            children: [
+                                              Text(
+                                                boardDoneDays == 0
+                                                    ? 'Всё время'
+                                                    : '$boardDoneDays дней',
+                                                style: TextStyle(
+                                                  fontSize: 11,
+                                                  color: context.palette.muted,
+                                                ),
+                                              ),
+                                              const SizedBox(width: 3),
+                                              Icon(
+                                                Icons.expand_more_rounded,
+                                                size: 16,
+                                                color: context.palette.muted,
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                    const SizedBox(width: 8),
+                                    Text(
+                                      '${tasks.length}',
+                                      key: ValueKey(
+                                        'board-count-${status.wire}',
+                                      ),
+                                      style: TextStyle(
+                                        color: context.palette.muted,
+                                        fontSize: 12,
+                                      ),
                                     ),
-                                  ),
-                                ],
+                                  ],
+                                ),
                               ),
                             ),
                             Expanded(
-                              child: ListView.builder(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 10,
-                                ),
-                                itemCount: tasks.length,
-                                itemBuilder: (context, i) =>
-                                    BoardTask(task: tasks[i]),
-                              ),
+                              child: status == TaskStatus.done && tasks.isEmpty
+                                  ? Padding(
+                                      padding: const EdgeInsets.all(20),
+                                      child: Text(
+                                        boardDoneDays == 0
+                                            ? 'Здесь появятся завершённые задачи.'
+                                            : 'За последние $boardDoneDays дней нет завершённых задач. Более ранние доступны в истории.',
+                                        textAlign: TextAlign.center,
+                                        style: TextStyle(
+                                          fontSize: 12,
+                                          height: 1.5,
+                                          color: context.palette.muted,
+                                        ),
+                                      ),
+                                    )
+                                  : ListView.builder(
+                                      key: ValueKey(
+                                        'board-list-${status.wire}-$projectId-${status == TaskStatus.done ? boardDoneDays : 0}',
+                                      ),
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 10,
+                                      ),
+                                      itemCount:
+                                          visibleCount + (more > 0 ? 1 : 0),
+                                      itemBuilder: (context, i) {
+                                        if (i < visibleCount) {
+                                          return BoardTask(task: tasks[i]);
+                                        }
+                                        return Padding(
+                                          padding: const EdgeInsets.only(
+                                            top: 8,
+                                            bottom: 16,
+                                          ),
+                                          child: Column(
+                                            children: [
+                                              Text(
+                                                'Показано $visibleCount из ${tasks.length}',
+                                                style: TextStyle(
+                                                  fontSize: 11,
+                                                  color: context.palette.muted,
+                                                ),
+                                              ),
+                                              const SizedBox(height: 4),
+                                              TextButton(
+                                                key: const ValueKey(
+                                                  'board-done-more',
+                                                ),
+                                                onPressed: () => setState(
+                                                  () => boardDoneLimit += 50,
+                                                ),
+                                                child: Text(
+                                                  'Показать ещё ${math.min(50, more)}',
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        );
+                                      },
+                                    ),
                             ),
                           ],
                         ),

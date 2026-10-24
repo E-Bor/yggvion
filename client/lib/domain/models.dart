@@ -145,6 +145,8 @@ class Task {
   String get parentId => entity.data['parent_id'] as String? ?? '';
   TaskStatus get status => TaskStatus.parse(entity.data['status'] as String);
   bool get done => status == TaskStatus.done;
+  DateTime? get completedAt =>
+      DateTime.tryParse(entity.data['completed_at'] as String? ?? '');
   bool get isBirthday =>
       (entity.data['birthday_date'] as String? ?? '').isNotEmpty;
   static Entity create(
@@ -487,6 +489,50 @@ class Snapshot {
     final result = <String, List<WorkSession>>{};
     for (final s in sessions) {
       (result[s.taskId] ??= []).add(s);
+    }
+    return result;
+  }
+
+  List<Task> boardTasks(
+    TaskStatus status,
+    DateTime now, {
+    String projectId = '',
+    int? doneDays = 7,
+  }) {
+    DateTime? cutoff;
+    if (status == TaskStatus.done && doneDays != null) {
+      if (doneDays < 1) throw RangeError.value(doneDays, 'doneDays');
+      final zone = tz.getLocation(settings.timezone);
+      final local = tz.TZDateTime.from(now, zone);
+      cutoff = tz.TZDateTime(
+        zone,
+        local.year,
+        local.month,
+        local.day - doneDays + 1,
+      );
+    }
+    final result = tasks.where((task) {
+      if (task.entity.deleted ||
+          task.isBirthday ||
+          task.seriesId.isNotEmpty ||
+          task.isProposed ||
+          task.status != status ||
+          (projectId.isNotEmpty && task.projectId != projectId)) {
+        return false;
+      }
+      // Tasks without a known completion date remain accessible in all history.
+      final completed = task.completedAt;
+      return cutoff == null ||
+          (completed != null && !completed.isBefore(cutoff));
+    }).toList();
+    if (status == TaskStatus.done) {
+      result.sort((a, b) {
+        final aDate = a.completedAt, bDate = b.completedAt;
+        if (aDate == null && bDate != null) return 1;
+        if (bDate == null && aDate != null) return -1;
+        final order = aDate == null ? 0 : bDate!.compareTo(aDate);
+        return order != 0 ? order : a.id.compareTo(b.id);
+      });
     }
     return result;
   }
