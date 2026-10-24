@@ -7,7 +7,9 @@ import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:uuid/uuid.dart';
+import 'package:timezone/timezone.dart' as tz;
 import '../domain/models.dart';
+import '../domain/workday.dart';
 import '../domain/tracking_action.dart';
 import '../domain/note_links.dart';
 import 'database.dart';
@@ -940,6 +942,70 @@ class Repository extends ChangeNotifier {
     changes.add(entity.tombstone());
     await commit(changes);
   }
+
+  Future<void> updateWorkdaySettings(int start, int end, List<int> days) async {
+    if (start < 0 ||
+        start >= 1440 ||
+        end > start + 1440 ||
+        end - start < 5 ||
+        days.any((day) => day < 1 || day > 7)) {
+      throw ArgumentError('Рабочий день должен длиться от 5 минут до 24 часов');
+    }
+    await commitComputed(() async {
+      final settings = await db.entity('settings');
+      if (settings == null || settings.deleted) {
+        throw StateError('Настройки недоступны');
+      }
+      return [
+        settings.change({
+          'workday_start': start,
+          'workday_end': end,
+          'workdays': days.toSet().toList()..sort(),
+        }),
+      ];
+    });
+  }
+
+  Future<void> setWorkdayBoundary(
+    DateTime date, {
+    required bool start,
+    required DateTime? value,
+  }) => commitComputed(() async {
+    final window = WorkdaySchedule(snapshot).forDate(date);
+    if (window == null) throw StateError('Этот день не отмечен как рабочий');
+    final day = window.date;
+    final zone = tz.getLocation(snapshot.settings.timezone);
+    final next = tz.TZDateTime(zone, day.year, day.month, day.day + 1);
+    final lastEnd = tz.TZDateTime(zone, day.year, day.month, day.day + 2);
+    if (value != null &&
+        (value.isBefore(day) ||
+            (start ? !value.isBefore(next) : value.isAfter(lastEnd)))) {
+      throw ArgumentError(
+        start
+            ? 'Начало должно быть в выбранном дне'
+            : 'Конец может быть в выбранном или следующем дне',
+      );
+    }
+    final record =
+        window.record?.entity ??
+        Entity(
+          id: 'workday-${dayKey(day)}',
+          kind: 'workday',
+          data: {
+            'day': dayKey(day),
+            'planned_start': wireTime(window.plannedStart),
+            'planned_end': wireTime(window.plannedEnd),
+          },
+        );
+    final updated = record.change({
+      start ? 'start' : 'end': value == null ? null : wireTime(value),
+    });
+    WorkdayRecord(updated).validate();
+    if (updated.data['start'] == null && updated.data['end'] == null) {
+      return window.record == null ? [] : [updated.tombstone()];
+    }
+    return [updated];
+  });
 
   Future<void> updateSettings(
     int minutes,

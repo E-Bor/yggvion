@@ -10,6 +10,7 @@ import 'package:rrule/rrule.dart';
 import 'package:timezone/data/latest.dart' as tzdata;
 import 'package:timezone/timezone.dart' as tz;
 import '../domain/models.dart';
+import '../domain/workday.dart';
 import 'repository.dart';
 import 'encryption.dart';
 import 'local_credentials.dart';
@@ -636,6 +637,7 @@ void _validateSnapshot(Map<String, dynamic> data) {
     'settings',
     'series',
     'snooze',
+    'workday',
   };
   for (final raw in data['records'] as List) {
     final e = Entity.fromJson(Map<String, dynamic>.from(raw as Map));
@@ -780,6 +782,13 @@ void _validateEntity(Entity e) {
         tz.getLocation(v.timezone);
         v.accentColor;
         v.searchTypos;
+        check(
+          v.workdayStart >= 0 &&
+              v.workdayStart < 1440 &&
+              v.workdayEnd <= v.workdayStart + 1440 &&
+              v.workdayEnd - v.workdayStart >= 5,
+        );
+        check(v.workdays.every((day) => day >= 1 && day <= 7));
       case 'series':
         e.data['title'] as String;
         e.data['description'] as String?;
@@ -804,6 +813,8 @@ void _validateEntity(Entity e) {
         }
         final birthday = e.data['birthday_date'] as String?;
         if (birthday != null && birthday.isNotEmpty) DateTime.parse(birthday);
+      case 'workday':
+        WorkdayRecord(e).validate();
       case 'snooze':
         e.data['task_id'] as String;
         parseTime(e.data['at']);

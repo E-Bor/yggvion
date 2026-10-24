@@ -8,6 +8,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import 'package:timezone/timezone.dart' as tz;
 import '../domain/models.dart';
+import '../domain/workday.dart';
 import '../data/repository.dart';
 import '../domain/recurrence.dart';
 import 'providers.dart';
@@ -235,6 +236,17 @@ class _CalendarDrag {
   DateTime start, end;
 }
 
+class _WorkdayDrag {
+  _WorkdayDrag(this.window, this.start, this.origin)
+    : original = start ? window.start : window.end,
+      value = start ? window.start : window.end;
+  final WorkdayWindow window;
+  final bool start;
+  final Offset origin;
+  final DateTime original;
+  DateTime value;
+}
+
 class _CalendarPaneState extends ConsumerState<CalendarPane>
     with SingleTickerProviderStateMixin {
   late DateTime date;
@@ -245,6 +257,7 @@ class _CalendarPaneState extends ConsumerState<CalendarPane>
   Duration? lastScrollTick;
   Offset? pointer;
   _CalendarDrag? drag;
+  _WorkdayDrag? workdayDrag;
   late DateTime interactionFirst;
   double interactionWidth = 0;
   int interactionCount = 0;
@@ -355,7 +368,7 @@ class _CalendarPaneState extends ConsumerState<CalendarPane>
 
   void swipePage(CalendarView view, double distance, [double velocity = 0]) {
     if (widget.planningPreview) return;
-    if (drag != null || selectionAnchor != null) return;
+    if (drag != null || workdayDrag != null || selectionAnchor != null) return;
     if (distance.abs() < 60 && !(distance.abs() > 20 && velocity.abs() > 500)) {
       return;
     }
@@ -444,7 +457,7 @@ class _CalendarPaneState extends ConsumerState<CalendarPane>
   }
 
   void updateInteraction(Offset global) {
-    if (drag == null && selectionAnchor == null) return;
+    if (drag == null && workdayDrag == null && selectionAnchor == null) return;
     pointer = global;
     updatePreview();
     updateEdgeScroll();
@@ -452,6 +465,47 @@ class _CalendarPaneState extends ConsumerState<CalendarPane>
 
   void updatePreview() {
     final point = contentPosition(pointer!);
+    final boundary = workdayDrag;
+    if (boundary != null) {
+      final minutes =
+          ((point.dy - boundary.origin.dy) / hourHeight * 60 / 5).round() * 5;
+      final day = boundary.window.date;
+      int column(double x) => ((x - gutter) / interactionWidth).floor().clamp(
+        0,
+        interactionCount - 1,
+      );
+      final days = boundary.start
+          ? 0
+          : column(point.dx) - column(boundary.origin.dx);
+      var minimum = boundary.start
+          ? day
+          : boundary.window.start.add(const Duration(minutes: 5));
+      if (!boundary.start && minimum.isBefore(interactionFirst)) {
+        minimum = interactionFirst;
+      }
+      var maximum = boundary.start
+          ? boundary.window.end.subtract(const Duration(minutes: 5))
+          : boundary.window.start.add(const Duration(hours: 25));
+      final dateLimit = boundary.start
+          ? _date(
+              day.year,
+              day.month,
+              day.day + 1,
+            ).subtract(const Duration(minutes: 5))
+          : _date(day.year, day.month, day.day + 2);
+      if (maximum.isAfter(dateLimit)) maximum = dateLimit;
+      final visibleEnd = _date(
+        interactionFirst.year,
+        interactionFirst.month,
+        interactionFirst.day + interactionCount,
+      );
+      if (maximum.isAfter(visibleEnd)) maximum = visibleEnd;
+      var value = shift(boundary.original, days, minutes);
+      if (value.isBefore(minimum)) value = minimum;
+      if (value.isAfter(maximum)) value = maximum;
+      if (value != boundary.value) setState(() => boundary.value = value);
+      return;
+    }
     final active = drag;
     if (active != null) {
       int column(double x) => ((x - gutter) / interactionWidth).floor().clamp(
@@ -583,6 +637,7 @@ class _CalendarPaneState extends ConsumerState<CalendarPane>
     setState(() {
       pointer = null;
       drag = null;
+      workdayDrag = null;
       selectionStart = null;
       selectionEnd = null;
       selectionAnchor = null;
@@ -713,6 +768,7 @@ class _CalendarPaneState extends ConsumerState<CalendarPane>
           if (!mobile ||
               notification.metrics.axis != Axis.horizontal ||
               drag != null ||
+              workdayDrag != null ||
               selectionAnchor != null) {
             return false;
           }
@@ -921,7 +977,8 @@ class _CalendarPaneState extends ConsumerState<CalendarPane>
                                                 },
                                                 onUpdate: updateInteraction,
                                                 onCancel: () {
-                                                  if (drag == null) {
+                                                  if (drag == null &&
+                                                      workdayDrag == null) {
                                                     cancelInteraction();
                                                   }
                                                 },
@@ -1073,7 +1130,16 @@ class _CalendarPaneState extends ConsumerState<CalendarPane>
                                                         width,
                                                         count,
                                                       ),
+                                                    if (!editingDrafts)
+                                                      ...workdayLines(
+                                                        repo,
+                                                        blocks,
+                                                        first,
+                                                        width,
+                                                        count,
+                                                      ),
                                                     if (drag != null ||
+                                                        workdayDrag != null ||
                                                         selectionStart != null)
                                                       ...timeGuide(),
                                                   ],
@@ -1099,21 +1165,180 @@ class _CalendarPaneState extends ConsumerState<CalendarPane>
     );
   }
 
+  void finishWorkdayDrag() {
+    final active = workdayDrag;
+    cancelInteraction();
+    if (active == null || active.value == active.original) return;
+    guard(
+      context,
+      () => ref
+          .read(appProvider)
+          .setWorkdayBoundary(
+            active.window.date,
+            start: active.start,
+            value: active.value,
+          ),
+    );
+  }
+
+  Iterable<Widget> workdayLines(
+    Repository repo,
+    List<TimeBlock> blocks,
+    DateTime first,
+    double width,
+    int count,
+  ) sync* {
+    final schedule = WorkdaySchedule(repo.snapshot);
+    for (var ownerIndex = -1; ownerIndex < count; ownerIndex++) {
+      final day = _date(first.year, first.month, first.day + ownerIndex);
+      final window = schedule.forDate(day);
+      if (window == null) continue;
+      for (final start in [true, false]) {
+        final moving =
+            workdayDrag?.window.date == day && workdayDrag?.start == start;
+        final value = _display(
+          moving
+              ? workdayDrag!.value
+              : start
+              ? window.start
+              : window.end,
+        );
+        final nextDay = dayKey(value) != dayKey(day);
+        var index = _dayIndex(_midnight(value), first);
+        final atMidnight =
+            !start && value.hour == 0 && value.minute == 0 && index > 0;
+        if (atMidnight) index--;
+        if (index < 0 || index >= count) continue;
+        final displayDay = _date(first.year, first.month, first.day + index);
+        final y = atMidnight
+            ? 24 * hourHeight
+            : (value.hour + value.minute / 60) * hourHeight;
+        final color = moving ? context.accentColor : context.palette.muted;
+        final title = start
+            ? 'Начало дня'
+            : nextDay
+            ? 'Конец ${DateFormat('d MMM', 'ru').format(day)}'
+            : 'Конец дня';
+        final markerTop = (start ? y + 3 : y - 27).clamp(
+          0.0,
+          24 * hourHeight - 24,
+        );
+        // Keep event completion/timer buttons clickable even when several
+        // short events begin on this boundary.
+        final nearHeaders = blocks.where((block) {
+          if (repo.snapshot.task(block.taskId)?.isBirthday == true) {
+            return false;
+          }
+          final begin = _display(block.start);
+          if (dayKey(begin) != dayKey(displayDay)) return false;
+          final top = (begin.hour + begin.minute / 60) * hourHeight;
+          return top < markerTop + 24 && top + 32 > markerTop;
+        }).length;
+        final time = atMidnight
+            ? '24:00'
+            : '${DateFormat('HH:mm').format(value)}${nextDay ? ' +1' : ''}';
+        yield Positioned(
+          left: gutter + index * width + 3,
+          top: y,
+          width: width - 6,
+          height: 1,
+          child: IgnorePointer(
+            child: CustomPaint(
+              painter: _WorkdayLinePainter(
+                color.withValues(alpha: moving ? .8 : .5),
+              ),
+            ),
+          ),
+        );
+        yield Positioned(
+          key: ValueKey('workday-marker-${dayKey(day)}-$start'),
+          left: gutter + index * width + 4,
+          top: markerTop,
+          width: width - 8,
+          child: Align(
+            alignment: Alignment.centerLeft,
+            child: Tooltip(
+              message: '$title · $time\nПотяните метку, чтобы изменить время.',
+              triggerMode: TooltipTriggerMode.manual,
+              waitDuration: const Duration(milliseconds: 350),
+              child: MouseRegion(
+                cursor: SystemMouseCursors.grab,
+                child: CalendarGestureSurface(
+                  key: ValueKey(
+                    'workday-${start ? 'start' : 'end'}-${dayKey(day)}',
+                  ),
+                  // Consume taps so they cannot create an event underneath.
+                  allowTouchTap: true,
+                  onTap: (_) {},
+                  onStart: (global) {
+                    beginInteraction(global, width, count, first);
+                    setState(
+                      () => workdayDrag = _WorkdayDrag(
+                        window,
+                        start,
+                        contentPosition(global),
+                      ),
+                    );
+                    updateEdgeScroll();
+                  },
+                  onUpdate: updateInteraction,
+                  onEnd: finishWorkdayDrag,
+                  onCancel: () {
+                    if (workdayDrag != null) cancelInteraction();
+                  },
+                  child: Semantics(
+                    label: '$title, $time',
+                    hint: 'Перетащите, чтобы изменить время',
+                    child: Container(
+                      width: nearHeaders > 1 ? 18 : 24,
+                      height: 24,
+                      decoration: BoxDecoration(
+                        color: context.palette.surface,
+                        border: Border.all(color: color.withValues(alpha: .55)),
+                        borderRadius: BorderRadius.circular(7),
+                      ),
+                      child: Icon(
+                        start
+                            ? Icons.wb_sunny_outlined
+                            : Icons.bedtime_outlined,
+                        size: 12,
+                        color: color,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+      }
+    }
+  }
+
   List<Widget> timeGuide() {
     final active = drag;
     final value = _display(
-      active == null
-          ? at(
-              contentPosition(pointer!),
-              interactionWidth,
-              interactionCount,
-              interactionFirst,
-            )
-          : active.kind == CalendarDragKind.end
-          ? active.end
-          : active.start,
+      workdayDrag?.value ??
+          (active == null
+              ? at(
+                  contentPosition(pointer!),
+                  interactionWidth,
+                  interactionCount,
+                  interactionFirst,
+                )
+              : active.kind == CalendarDragKind.end
+              ? active.end
+              : active.start),
     );
-    final y = (value.hour + value.minute / 60) * hourHeight;
+    final endOfWorkday =
+        workdayDrag != null &&
+        !workdayDrag!.start &&
+        value.hour == 0 &&
+        value.minute == 0 &&
+        _dayIndex(_midnight(value), interactionFirst) > 0;
+    final y = endOfWorkday
+        ? 24 * hourHeight
+        : (value.hour + value.minute / 60) * hourHeight;
     final left = horizontal.hasClients ? horizontal.offset : 0.0;
     return [
       Positioned(
@@ -1140,7 +1365,7 @@ class _CalendarPaneState extends ConsumerState<CalendarPane>
               borderRadius: BorderRadius.circular(5),
             ),
             child: Text(
-              DateFormat('HH:mm').format(value),
+              endOfWorkday ? '24:00' : DateFormat('HH:mm').format(value),
               key: const ValueKey('calendar-time-label'),
               textAlign: TextAlign.center,
               style: TextStyle(
@@ -2247,6 +2472,28 @@ class _CalendarBlockState extends ConsumerState<CalendarBlock> {
       ),
     );
   }
+}
+
+class _WorkdayLinePainter extends CustomPainter {
+  const _WorkdayLinePainter(this.color);
+  final Color color;
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = color
+      ..strokeWidth = 1
+      ..strokeCap = StrokeCap.round;
+    for (var x = 0.0; x < size.width; x += 8) {
+      canvas.drawLine(
+        Offset(x, 0),
+        Offset(math.min(x + 4, size.width), 0),
+        paint,
+      );
+    }
+  }
+
+  @override
+  bool shouldRepaint(_WorkdayLinePainter old) => old.color != color;
 }
 
 class _GridPainter extends CustomPainter {

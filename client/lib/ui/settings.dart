@@ -13,6 +13,7 @@ import 'birthdays.dart';
 import 'server_settings.dart';
 import 'encryption_settings.dart';
 import 'statistics.dart';
+import 'workday_settings.dart';
 
 class SettingsPage extends ConsumerStatefulWidget {
   const SettingsPage({super.key, required this.onOpenBirthdays});
@@ -503,6 +504,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                     ),
                   ),
                 ),
+                section('Рабочий день', const WorkdaySettings()),
                 section(
                   'Проекты',
                   Column(

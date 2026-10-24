@@ -78,18 +78,16 @@ class _StatisticsPageState extends ConsumerState<StatisticsPage> {
         now,
         tz.getLocation(snapshot.settings.timezone),
       );
+      final first = await repo.db.activityStarted;
       final end = tz.TZDateTime(
         local.location,
         local.year,
         local.month,
         local.day + 1 - offset * days,
       );
-      final start = tz.TZDateTime(
-        local.location,
-        end.year,
-        end.month,
-        end.day - days,
-      );
+      final start = days == 0
+          ? StatisticsReport.historyStart(snapshot, now, first)
+          : tz.TZDateTime(local.location, end.year, end.month, end.day - days);
       await ref.read(activityProvider)?.flush();
       final historyStart = ActivityHistory.startFor(now, local.location);
       final historyEnd = tz.TZDateTime(
@@ -102,7 +100,6 @@ class _StatisticsPageState extends ConsumerState<StatisticsPage> {
       final activity = start.isBefore(historyStart)
           ? await repo.db.activity(start, end)
           : historyActivity;
-      final first = await repo.db.activityStarted;
       final next = await compute(_calculate, (
         snapshot: snapshot,
         activity: activity,
@@ -189,44 +186,55 @@ class _StatisticsPageState extends ConsumerState<StatisticsPage> {
                         spacing: 20,
                         runSpacing: 12,
                         children: [
-                          SegmentedButton<int>(
+                          Wrap(
                             key: const ValueKey('statistics-period'),
-                            showSelectedIcon: false,
-                            segments: const [
-                              ButtonSegment(value: 7, label: Text('7 дней')),
-                              ButtonSegment(value: 30, label: Text('30 дней')),
-                              ButtonSegment(value: 90, label: Text('90 дней')),
+                            spacing: 8,
+                            runSpacing: 8,
+                            children: [
+                              for (final period in [7, 30, 90, 0])
+                                ChoiceChip(
+                                  showCheckmark: false,
+                                  label: Text(
+                                    period == 0
+                                        ? 'За всё время'
+                                        : '$period дней',
+                                  ),
+                                  selected: days == period,
+                                  onSelected: (_) {
+                                    days = period;
+                                    offset = 0;
+                                    load(reset: true);
+                                  },
+                                ),
                             ],
-                            selected: {days},
-                            onSelectionChanged: (value) {
-                              days = value.single;
-                              offset = 0;
-                              load(reset: true);
-                            },
                           ),
                           Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
                               IconButton(
                                 tooltip: 'Предыдущий период',
-                                onPressed: () {
-                                  offset++;
-                                  load(reset: true);
-                                },
+                                onPressed: days == 0
+                                    ? null
+                                    : () {
+                                        offset++;
+                                        load(reset: true);
+                                      },
                                 icon: const Icon(Icons.chevron_left_rounded),
                               ),
-                              Text(
-                                data == null
-                                    ? 'Загрузка…'
-                                    : '${DateFormat('d MMM', 'ru').format(data.days.first.date)} — ${DateFormat('d MMM y', 'ru').format(data.days.last.date)}',
-                                style: const TextStyle(
-                                  fontSize: 13,
-                                  fontWeight: FontWeight.w500,
+                              Flexible(
+                                child: Text(
+                                  data == null
+                                      ? 'Загрузка…'
+                                      : '${DateFormat('d MMM', 'ru').format(data.days.first.date)} — ${DateFormat('d MMM y', 'ru').format(data.days.last.date)}',
+                                  style: const TextStyle(
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w500,
+                                  ),
                                 ),
                               ),
                               IconButton(
                                 tooltip: 'Следующий период',
-                                onPressed: offset == 0
+                                onPressed: offset == 0 || days == 0
                                     ? null
                                     : () {
                                         offset--;
@@ -262,9 +270,11 @@ class _StatisticsPageState extends ConsumerState<StatisticsPage> {
                         const SizedBox(height: 18),
                         _StatCard(
                           title: 'План и факт',
-                          subtitle: days == 90
-                              ? 'По неделям · выберите точку для деталей'
-                              : 'По дням · выберите точку для деталей',
+                          infoId: 'plan-fact',
+                          info:
+                              'План — сумма длительностей календарных блоков в выбранном периоде, включая невыполненный план. Факт — таймер и ручной учёт до текущего момента; пересечения считаются один раз. Пунктир показывает план, акцентная линия — факт. Здесь интервалы делятся по календарным датам в часовом поясе приложения. Дни рождения и удалённые задачи исключены. На длинных периодах точка объединяет несколько дней.',
+                          subtitle:
+                              '${_chartStep(data.days.length) == 1 ? 'По дням' : 'По ${_chartStep(data.days.length)} дней'} · выберите точку для деталей',
                           child: _TimeChart(
                             key: ValueKey('work-$days-$offset'),
                             days: data.days,
@@ -283,38 +293,45 @@ class _StatisticsPageState extends ConsumerState<StatisticsPage> {
                             ),
                           ),
                         const SizedBox(height: 18),
-                        LayoutBuilder(
-                          builder: (context, constraints) {
-                            final projects = _ProjectCard(
-                              projects: data.projects,
-                            );
-                            final estimates = _EstimateCard(
-                              estimates: data.estimates,
-                              statistics: data.estimateStatistics,
-                            );
-                            if (constraints.maxWidth < 850) {
-                              return Column(
-                                crossAxisAlignment: CrossAxisAlignment.stretch,
-                                children: [
-                                  projects,
-                                  const SizedBox(height: 18),
-                                  estimates,
-                                ],
-                              );
-                            }
-                            return Row(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Expanded(child: projects),
-                                const SizedBox(width: 18),
-                                Expanded(child: estimates),
-                              ],
-                            );
-                          },
+                        _EstimateCard(
+                          estimates: data.estimates,
+                          statistics: data.estimateStatistics,
+                        ),
+                        const SizedBox(height: 18),
+                        _ProjectCard(projects: data.projects),
+                        const SizedBox(height: 18),
+                        _StatCard(
+                          title: 'Работа в течение дня',
+                          infoId: 'workday',
+                          info:
+                              'Часы — объединённое время таймера и ручного учёта внутри границ рабочего дня. Доля = эти часы / длительность рабочего дня × 100%; за период делятся суммы. Ночь после полуночи относится к дате начала рабочего дня, даже на границе выбранного периода. Будущее время не учитывается. Границы берутся из настроек автоматически; перемещение метки в календаре корректирует выбранный день. При пересечении соседних рабочих дней общий интервал относится к более раннему дню. Вне рабочего дня — учёт за календарные даты периода, не попавший ни в один рабочий интервал. Поэтому итог может отличаться от календарного графика плана и факта.',
+                          subtitle:
+                              'Таймтрек внутри рабочего дня · часы и доля времени',
+                          child: _WorkdayChart(
+                            key: ValueKey('workday-utilization-$days-$offset'),
+                            data: data,
+                          ),
+                        ),
+                        const SizedBox(height: 18),
+                        _StatCard(
+                          title: 'Начало и конец дня',
+                          infoId: 'boundaries',
+                          info:
+                              'Точки показывают начало и конец каждого рабочего дня из настроек или их ручные корректировки в календаре. Подтверждение не требуется. Средние считаются отдельно по каждой границе, когда её время наступило. Будущие моменты и нерабочие дни без заданных границ исключены. Ночная граница относится к дате начала рабочего дня: +1 означает следующие сутки. Для среднего 01:00 +1 учитывается как 25:00, поэтому среднее между 23:00 и 01:00 +1 — 00:00 +1. На длинных периодах точки показывают среднее по рабочим дням группы. Пропуски не заменяются нулями.',
+                          subtitle:
+                              'Все рабочие дни · среднее за выбранный период',
+                          child: _WorkdayChart(
+                            key: ValueKey('workday-boundaries-$days-$offset'),
+                            data: data,
+                            boundaries: true,
+                          ),
                         ),
                         const SizedBox(height: 18),
                         _StatCard(
                           title: 'Использование приложения',
+                          infoId: 'usage',
+                          info:
+                              'Активное время считается только в открытом активном окне на этом устройстве. После двух минут без действий учёт приостанавливается. Фоновый таймер задач в эту метрику не входит. Линия показывает активное время по календарным датам; на длинных периодах дни объединяются. Сеансы — интервалы активности, начавшиеся в выбранном периоде. Эти данные хранятся локально и не суммируются между устройствами.',
                           subtitle:
                               'Только это устройство${firstActivity == null ? '' : ' · с ${DateFormat('d MMM y', 'ru').format(tz.TZDateTime.from(firstActivity!, tz.getLocation(ref.read(appProvider).snapshot.settings.timezone)))}'}',
                           child: Column(
@@ -368,6 +385,9 @@ class _StatisticsPageState extends ConsumerState<StatisticsPage> {
                             key: const ValueKey('activity-calendar'),
                             child: _StatCard(
                               title: 'Календарь активности',
+                              infoId: 'activity',
+                              info:
+                                  'Показаны последние 365 дней независимо от периода остальных графиков. Яркость акцента отражает активное использование приложения на этом устройстве: нет активности; меньше 5 минут; от 5 до 20; от 20 до 60; от часа. Дни до начала учёта не считаются пропусками. Серия — последовательные дни с активностью; сегодняшняя серия сохраняется от вчерашнего дня до конца сегодня. Фоновый таймер задач не влияет на яркость.',
                               subtitle:
                                   'Последние 365 дней · только это устройство',
                               child: _ActivityCalendar(
@@ -386,8 +406,6 @@ class _StatisticsPageState extends ConsumerState<StatisticsPage> {
                             fontSize: 12,
                           ),
                         ),
-                        const SizedBox(height: 16),
-                        const _StatisticsExplanation(),
                       ] else if (busy)
                         const SizedBox(
                           height: 260,
@@ -500,9 +518,11 @@ class _StatCard extends StatelessWidget {
   const _StatCard({
     required this.title,
     required this.subtitle,
+    required this.infoId,
+    required this.info,
     required this.child,
   });
-  final String title, subtitle;
+  final String title, subtitle, infoId, info;
   final Widget child;
   @override
   Widget build(BuildContext context) => Card(
@@ -511,9 +531,24 @@ class _StatCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Text(
-            title,
-            style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w600),
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  title,
+                  style: const TextStyle(
+                    fontSize: 17,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              _StatisticsExplanation(
+                id: infoId,
+                title: title,
+                description: info,
+              ),
+            ],
           ),
           const SizedBox(height: 6),
           Text(
@@ -549,6 +584,12 @@ class _SmallTotal extends StatelessWidget {
   );
 }
 
+int _chartStep(int days) => days <= 31
+    ? 1
+    : days <= 365
+    ? 7
+    : (days / 52).ceil();
+
 class _TimeChart extends StatefulWidget {
   const _TimeChart({super.key, required this.days, this.application = false});
   final List<DailyStatistics> days;
@@ -563,7 +604,7 @@ class _TimeChartState extends State<_TimeChart> {
   Widget build(BuildContext context) {
     final groups =
         <({DateTime start, DateTime end, Duration plan, Duration fact})>[];
-    final step = widget.days.length > 31 ? 7 : 1;
+    final step = _chartStep(widget.days.length);
     for (var i = 0; i < widget.days.length; i += step) {
       final slice = widget.days.skip(i).take(step).toList();
       groups.add((
@@ -788,15 +829,19 @@ class _LineChartPainter extends CustomPainter {
     required this.muted,
     required this.border,
     required this.surface,
+    this.minimum = 0,
+    this.fill = true,
+    this.dashPlan = true,
   });
-  final List<double> plan, fact;
-  final double maximum;
+  final List<double?> plan, fact;
+  final double maximum, minimum;
   final int selected;
   final Color accent, muted, border, surface;
+  final bool fill, dashPlan;
 
   @override
   void paint(Canvas canvas, Size size) {
-    if (fact.isEmpty || size.isEmpty) return;
+    if (fact.isEmpty || size.isEmpty || maximum <= minimum) return;
     final grid = Paint()
       ..color = border.withValues(alpha: .6)
       ..strokeWidth = .7;
@@ -806,57 +851,75 @@ class _LineChartPainter extends CustomPainter {
     }
     Offset point(int index, double value) => Offset(
       (index + .5) * size.width / fact.length,
-      4 + (size.height - 8) * (1 - (value / maximum).clamp(0, 1)),
+      4 +
+          (size.height - 8) *
+              (1 - ((value - minimum) / (maximum - minimum)).clamp(0, 1)),
     );
-    Path line(List<double> values) {
+    Path line(List<double?> values) {
       final path = Path();
+      Offset? previous;
       for (var i = 0; i < values.length; i++) {
-        final p = point(i, values[i]);
-        if (i == 0) {
+        final value = values[i];
+        if (value == null) {
+          previous = null;
+          continue;
+        }
+        final p = point(i, value);
+        if (previous == null) {
           path.moveTo(p.dx, p.dy);
         } else {
-          path.lineTo(p.dx, p.dy);
+          // Horizontal tangents round the corners without inventing peaks or
+          // negative time between samples. Missing days remain gaps.
+          final middle = (previous.dx + p.dx) / 2;
+          path.cubicTo(middle, previous.dy, middle, p.dy, p.dx, p.dy);
         }
+        previous = p;
       }
       return path;
     }
 
     final actual = line(fact);
-    final fill = Path.from(actual)
-      ..lineTo(point(fact.length - 1, 0).dx, size.height - 4)
-      ..lineTo(point(0, 0).dx, size.height - 4)
-      ..close();
-    canvas.drawPath(
-      fill,
-      Paint()
-        ..shader = LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          colors: [
-            accent.withValues(alpha: .18),
-            accent.withValues(alpha: .015),
-          ],
-        ).createShader(Offset.zero & size),
-    );
+    if (fill && fact.every((v) => v != null)) {
+      final area = Path.from(actual)
+        ..lineTo(point(fact.length - 1, minimum).dx, size.height - 4)
+        ..lineTo(point(0, minimum).dx, size.height - 4)
+        ..close();
+      canvas.drawPath(
+        area,
+        Paint()
+          ..shader = LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [
+              accent.withValues(alpha: .18),
+              accent.withValues(alpha: .015),
+            ],
+          ).createShader(Offset.zero & size),
+      );
+    }
     if (plan.isNotEmpty) {
-      final plannedPaint = Paint()
+      final paint = Paint()
         ..color = muted
         ..strokeWidth = 1.8
         ..style = PaintingStyle.stroke
         ..strokeCap = StrokeCap.round;
-      for (final metric in line(plan).computeMetrics()) {
-        for (var offset = 0.0; offset < metric.length; offset += 9) {
-          canvas.drawPath(
-            metric.extractPath(offset, math.min(offset + 4.5, metric.length)),
-            plannedPaint,
-          );
+      if (dashPlan) {
+        for (final metric in line(plan).computeMetrics()) {
+          for (var offset = 0.0; offset < metric.length; offset += 9) {
+            canvas.drawPath(
+              metric.extractPath(offset, math.min(offset + 4.5, metric.length)),
+              paint,
+            );
+          }
         }
+      } else {
+        canvas.drawPath(line(plan), paint);
       }
     }
-    final guide = point(selected, fact[selected]);
+    final guideX = point(selected, minimum).dx;
     canvas.drawLine(
-      Offset(guide.dx, 4),
-      Offset(guide.dx, size.height - 4),
+      Offset(guideX, 4),
+      Offset(guideX, size.height - 4),
       Paint()
         ..color = accent.withValues(alpha: .2)
         ..strokeWidth = 1,
@@ -870,25 +933,20 @@ class _LineChartPainter extends CustomPainter {
         ..strokeJoin = StrokeJoin.round
         ..style = PaintingStyle.stroke,
     );
-    if (fact.length <= 7) {
-      for (var i = 0; i < fact.length; i++) {
-        canvas.drawCircle(point(i, fact[i]), 2.5, Paint()..color = accent);
+    for (final series in [(fact, accent), (plan, muted)]) {
+      if (series.$1.isEmpty) continue;
+      for (var i = 0; i < series.$1.length; i++) {
+        final value = series.$1[i];
+        if (value == null) continue;
+        if (i == selected) {
+          final p = point(i, value);
+          canvas.drawCircle(p, 6, Paint()..color = surface);
+          canvas.drawCircle(p, 4, Paint()..color = series.$2);
+        } else if (fact.length <= 7 || !fill) {
+          canvas.drawCircle(point(i, value), 2.5, Paint()..color = series.$2);
+        }
       }
     }
-    if (plan.isNotEmpty) {
-      final p = point(selected, plan[selected]);
-      canvas.drawCircle(p, 4, Paint()..color = surface);
-      canvas.drawCircle(
-        p,
-        3,
-        Paint()
-          ..color = muted
-          ..style = PaintingStyle.stroke
-          ..strokeWidth = 1.5,
-      );
-    }
-    canvas.drawCircle(guide, 6, Paint()..color = surface);
-    canvas.drawCircle(guide, 4, Paint()..color = accent);
   }
 
   @override
@@ -896,11 +954,325 @@ class _LineChartPainter extends CustomPainter {
       !listEquals(old.plan, plan) ||
       !listEquals(old.fact, fact) ||
       old.maximum != maximum ||
+      old.minimum != minimum ||
+      old.fill != fill ||
+      old.dashPlan != dashPlan ||
       old.selected != selected ||
       old.accent != accent ||
       old.muted != muted ||
       old.border != border ||
       old.surface != surface;
+}
+
+class _WorkdayChart extends StatefulWidget {
+  const _WorkdayChart({super.key, required this.data, this.boundaries = false});
+  final StatisticsReport data;
+  final bool boundaries;
+  @override
+  State<_WorkdayChart> createState() => _WorkdayChartState();
+}
+
+class _WorkdayChartState extends State<_WorkdayChart> {
+  int? selected;
+  bool percentages = true;
+
+  String time(double? minutes) {
+    if (minutes == null) return '—';
+    final value = minutes.round();
+    final clock = value % 1440;
+    final days = value ~/ 1440;
+    return '${(clock ~/ 60).toString().padLeft(2, '0')}:${(clock % 60).toString().padLeft(2, '0')}${days > 0 ? ' +$days' : ''}';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final data = widget.data;
+    final groups =
+        <
+          ({
+            DateTime start,
+            DateTime end,
+            Duration worked,
+            Duration available,
+            Duration outside,
+            double? begin,
+            double? finish,
+          })
+        >[];
+    final step = _chartStep(data.workdays.length);
+    double? mean(Iterable<double> values) {
+      final list = values.toList();
+      return list.isEmpty ? null : list.reduce((a, b) => a + b) / list.length;
+    }
+
+    for (var i = 0; i < data.workdays.length; i += step) {
+      final slice = data.workdays.skip(i).take(step).toList();
+      groups.add((
+        start: slice.first.date,
+        end: slice.last.date,
+        worked: sumDurations(slice.map((d) => d.worked)),
+        available: sumDurations(slice.map((d) => d.available)),
+        outside: sumDurations(slice.map((d) => d.outside)),
+        begin: mean(slice.map((d) => d.startMinutes).nonNulls),
+        finish: mean(slice.map((d) => d.endMinutes).nonNulls),
+      ));
+    }
+    if (groups.isEmpty) return const Text('Пока нет данных.');
+    final plan = widget.boundaries
+        ? [for (final g in groups) g.begin == null ? null : g.begin! / 60]
+        : <double?>[];
+    final fact = [
+      for (final g in groups)
+        widget.boundaries
+            ? (g.finish == null ? null : g.finish! / 60)
+            : g.available == Duration.zero
+            ? null
+            : percentages
+            ? g.worked.inMicroseconds / g.available.inMicroseconds * 100
+            : g.worked.inSeconds / 3600,
+    ];
+    final measured = [...plan, ...fact].nonNulls.toList();
+    final minimum = widget.boundaries && measured.isNotEmpty
+        ? math.max(0.0, measured.reduce(math.min).floorToDouble() - 1)
+        : 0.0;
+    final maximum = widget.boundaries
+        ? (measured.isEmpty
+              ? 24.0
+              : math.max(
+                  minimum + 1,
+                  measured.reduce(math.max).ceilToDouble() + 1,
+                ))
+        : percentages
+        ? 100.0
+        : math.max(
+            1.0,
+            measured.isEmpty ? 1.0 : measured.reduce(math.max).ceilToDouble(),
+          );
+    final index = (selected ?? groups.length - 1).clamp(0, groups.length - 1);
+    final picked = groups[index];
+    final number = NumberFormat('0.#', 'ru');
+    String percent(double? value) =>
+        value == null ? '—' : '${number.format(value)}%';
+    String label(DateTime start, DateTime end) => start == end
+        ? DateFormat('d MMM', 'ru').format(start)
+        : '${DateFormat('d MMM', 'ru').format(start)} — ${DateFormat('d MMM', 'ru').format(end)}';
+    String detail(int i) {
+      final g = groups[i];
+      if (widget.boundaries) {
+        return 'Начало ${time(g.begin)} · конец ${time(g.finish)}';
+      }
+      final ratio = g.available == Duration.zero
+          ? null
+          : g.worked.inMicroseconds / g.available.inMicroseconds * 100;
+      return '${formatDuration(g.worked)} · ${percent(ratio)} рабочего дня${g.outside > Duration.zero ? ' · вне границ ${formatDuration(g.outside)}' : ''}';
+    }
+
+    String axis(double v) => widget.boundaries
+        ? time(v * 60)
+        : '${number.format(v)}${percentages ? '%' : ' ч'}';
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Wrap(
+          spacing: 32,
+          runSpacing: 16,
+          children: [
+            if (widget.boundaries) ...[
+              _SmallTotal(
+                label: 'Среднее начало',
+                value: time(data.meanWorkdayStart),
+              ),
+              _SmallTotal(
+                label: 'Среднее завершение',
+                value: time(data.meanWorkdayEnd),
+              ),
+            ] else ...[
+              _SmallTotal(
+                label: 'Работа в границах дня',
+                value: formatDuration(data.workdayActual),
+              ),
+              _SmallTotal(
+                label: 'Доля рабочего времени',
+                value: percent(data.workdayPercent),
+              ),
+              if (data.outsideWorkday > Duration.zero)
+                _SmallTotal(
+                  label: 'Вне рабочего дня',
+                  value: formatDuration(data.outsideWorkday),
+                ),
+            ],
+          ],
+        ),
+        const SizedBox(height: 16),
+        if (widget.boundaries)
+          Wrap(
+            spacing: 20,
+            runSpacing: 8,
+            children: [
+              _Legend(color: context.palette.muted, text: 'Начало'),
+              _Legend(color: context.accentColor, text: 'Конец'),
+            ],
+          )
+        else
+          Align(
+            alignment: Alignment.centerLeft,
+            child: SegmentedButton<bool>(
+              key: const ValueKey('workday-chart-unit'),
+              showSelectedIcon: false,
+              segments: const [
+                ButtonSegment(value: true, label: Text('Доля дня')),
+                ButtonSegment(value: false, label: Text('Часы')),
+              ],
+              selected: {percentages},
+              onSelectionChanged: (v) => setState(() => percentages = v.single),
+            ),
+          ),
+        const SizedBox(height: 18),
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            SizedBox(
+              width: 46,
+              height: 180,
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  for (final value in [
+                    maximum,
+                    (minimum + maximum) / 2,
+                    minimum,
+                  ])
+                    Text(
+                      axis(value),
+                      style: TextStyle(
+                        fontSize: 10,
+                        color: context.palette.muted,
+                      ),
+                    ),
+                ],
+              ),
+            ),
+            Expanded(
+              child: SizedBox(
+                height: 180,
+                child: LayoutBuilder(
+                  builder: (context, constraints) {
+                    void pick(double x) => setState(
+                      () =>
+                          selected = (x / constraints.maxWidth * groups.length)
+                              .floor()
+                              .clamp(0, groups.length - 1),
+                    );
+                    return GestureDetector(
+                      onHorizontalDragStart: (d) => pick(d.localPosition.dx),
+                      onHorizontalDragUpdate: (d) => pick(d.localPosition.dx),
+                      child: Stack(
+                        children: [
+                          Positioned.fill(
+                            child: CustomPaint(
+                              key: ValueKey(
+                                widget.boundaries
+                                    ? 'workday-boundary-chart'
+                                    : 'workday-productivity-chart',
+                              ),
+                              painter: _LineChartPainter(
+                                plan: plan,
+                                fact: fact,
+                                minimum: minimum,
+                                maximum: maximum,
+                                selected: index,
+                                accent: context.accentColor,
+                                muted: context.palette.muted,
+                                border: context.palette.border,
+                                surface: context.palette.surface,
+                                fill: false,
+                                dashPlan: false,
+                              ),
+                            ),
+                          ),
+                          Row(
+                            children: [
+                              for (var i = 0; i < groups.length; i++)
+                                Expanded(
+                                  child: Tooltip(
+                                    message:
+                                        '${label(groups[i].start, groups[i].end)}\n${detail(i)}',
+                                    child: Semantics(
+                                      label:
+                                          '${label(groups[i].start, groups[i].end)}, ${detail(i)}',
+                                      selected: index == i,
+                                      button: true,
+                                      child: InkWell(
+                                        key: ValueKey(
+                                          'workday-${widget.boundaries ? 'boundary' : 'productivity'}-point-$i',
+                                        ),
+                                        onTap: () =>
+                                            setState(() => selected = i),
+                                        onHover: (hover) {
+                                          if (hover) {
+                                            setState(() => selected = i);
+                                          }
+                                        },
+                                        child: const SizedBox(height: 180),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        Padding(
+          padding: const EdgeInsets.only(left: 46),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              for (final i in {0, groups.length ~/ 2, groups.length - 1})
+                Text(
+                  DateFormat('d MMM', 'ru').format(groups[i].start),
+                  style: TextStyle(fontSize: 10, color: context.palette.muted),
+                ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 16),
+        Wrap(
+          spacing: 12,
+          runSpacing: 6,
+          children: [
+            Text(
+              label(picked.start, picked.end),
+              style: TextStyle(fontSize: 12, color: context.palette.muted),
+            ),
+            Text(
+              detail(index),
+              style: TextStyle(fontSize: 12, color: context.accentColor),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        Text(
+          widget.boundaries
+              ? 'Границы учитываются автоматически, когда наступает их время. ${step == 1 ? 'Точки показывают каждый рабочий день.' : 'Точки — среднее за $step дней.'}'
+              : 'Пересечения таймеров считаются один раз. Сегодня учитывается только прошедшая часть дня. Границы берутся из настроек с учётом ручных изменений в календаре.',
+          style: TextStyle(
+            fontSize: 11,
+            height: 1.5,
+            color: context.palette.muted,
+          ),
+        ),
+      ],
+    );
+  }
 }
 
 class _ActivityCalendar extends StatefulWidget {
@@ -1277,6 +1649,9 @@ class _ProjectCardState extends State<_ProjectCard> {
     );
     return _StatCard(
       title: 'Куда уходит время',
+      infoId: 'projects',
+      info:
+          'Фактическое время объединяется отдельно внутри каждого проекта за выбранный период. Полная полоска соответствует проекту с наибольшим фактом; остальные показаны относительно него. Под полоской — сумма запланированных блоков проекта. Без проекта — задачи без выбранного проекта. Пересекающиеся интервалы разных проектов входят в каждый из них, поэтому сумма проектов может превышать общий факт.',
       subtitle: 'Фактическое время по проектам за период',
       child: widget.projects.isEmpty
           ? Text(
@@ -1404,6 +1779,9 @@ class _EstimateCard extends StatelessWidget {
     ];
     return _StatCard(
       title: 'Ошибка эстимейта',
+      infoId: 'estimate',
+      info:
+          'Для завершённых задач с планом в периоде сравниваются полный план задачи и всё её учтённое время. Ошибка = |факт − план| / план × 100%. Средняя ошибка даёт каждой задаче одинаковый вес. Счётчик учитывает ошибку строго больше 10% до округления. Средняя недооценка считается только там, где факт больше плана; переоценка — где он меньше. Эти ошибки не компенсируют друг друга. Задачи без учёта времени или положительного плана исключены; прочерк означает отсутствие данных.',
       subtitle: 'Завершённые задачи с планом в периоде · задача целиком',
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1412,9 +1790,12 @@ class _EstimateCard extends StatelessWidget {
             LayoutBuilder(
               builder: (context, constraints) {
                 final scale = MediaQuery.textScalerOf(context);
-                final columns = constraints.maxWidth / scale.scale(1) < 300
-                    ? 1
-                    : 2;
+                final availableWidth = constraints.maxWidth / scale.scale(1);
+                final columns = availableWidth >= 800
+                    ? 4
+                    : availableWidth >= 300
+                    ? 2
+                    : 1;
                 final width =
                     (constraints.maxWidth - (columns - 1) * 12) / columns;
                 return Wrap(
@@ -1579,34 +1960,29 @@ class _EstimateCard extends StatelessWidget {
 }
 
 class _StatisticsExplanation extends StatelessWidget {
-  const _StatisticsExplanation();
+  const _StatisticsExplanation({
+    required this.id,
+    required this.title,
+    required this.description,
+  });
+  final String id, title, description;
   @override
-  Widget build(BuildContext context) => Card(
-    child: ExpansionTile(
-      title: const Text(
-        'Как считаются показатели',
-        style: TextStyle(fontSize: 13),
-      ),
-      leading: Icon(
+  Widget build(BuildContext context) => Tooltip(
+    message: description,
+    constraints: const BoxConstraints(maxWidth: 360),
+    padding: const EdgeInsets.all(14),
+    waitDuration: const Duration(milliseconds: 350),
+    triggerMode: TooltipTriggerMode.manual,
+    child: SizedBox(
+      key: ValueKey('statistics-info-$id'),
+      width: 32,
+      height: 32,
+      child: Icon(
         Icons.info_outline_rounded,
-        size: 19,
+        size: 18,
         color: context.palette.muted,
+        semanticLabel: 'О расчёте: $title',
       ),
-      childrenPadding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
-      children: [
-        Text(
-          'План — длительности блоков, попавшие в выбранный период, включая сохранённый невыполненный план прошлых дней. Событие на весь день учитывается целиком; дни рождения исключены.\n\n'
-          'Факт — таймер и ручной учёт до текущего момента. Отменённые записи исключены, пересечения в общей сумме считаются один раз. Границы дней соответствуют часовому поясу приложения.\n\n'
-          'Закрыто из плана — текущий статус задач, у которых есть блок в периоде. Это не история дат завершения. Удалённые задачи не учитываются.\n\n'
-          'Ошибка эстимейта считается для завершённых задач с планом в выбранном периоде. Сравниваются полный текущий план задачи и всё её учтённое время, включая блоки за пределами периода. Ошибка задачи = |факт − план| / план × 100%. Средняя ошибка — среднее этих процентов, каждая задача имеет одинаковый вес. Счётчик учитывает только ошибки строго больше 10%, до округления. Недооценка — факт больше плана, переоценка — меньше; их средние считаются отдельно по всем задачам соответствующей группы, включая отклонения до 10%. Точные совпадения входят только в общую среднюю с ошибкой 0%. Задачи без учёта или положительного плана исключены; прочерк означает, что подходящих задач нет. Дата завершения не определяет попадание в период.\n\n'
-          'Использование приложения сохраняется только на этом устройстве с момента обновления. Новый сеанс начинается при возвращении в приложение или после паузы без действий. Фоновое время не учитывается. Календарь активности показывает последние 365 дней независимо от периода графиков. Яркость растёт на отметках 5, 20 и 60 минут. Любое сохранённое активное время засчитывает день; текущая серия сохраняется до конца сегодняшнего дня, если он пока пуст.',
-          style: TextStyle(
-            color: context.palette.muted,
-            fontSize: 12,
-            height: 1.6,
-          ),
-        ),
-      ],
     ),
   );
 }

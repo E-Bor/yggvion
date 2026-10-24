@@ -9,6 +9,7 @@ import 'package:timezone/data/latest.dart' as tz;
 import 'package:yggvion/data/database.dart';
 import 'package:yggvion/data/repository.dart';
 import 'package:yggvion/data/sync.dart';
+import 'package:yggvion/domain/workday.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -84,6 +85,13 @@ void main() {
       expect(a.syncError, isNull);
       a.onChange = null;
       b.onChange = null;
+      await a.updateSettings(30, [0], 'UTC');
+      final workday = DateTime.utc(2026, 10, 19);
+      await a.setWorkdayBoundary(
+        workday,
+        start: true,
+        value: workday.add(const Duration(hours: 10)),
+      );
       final note = await a.createNote();
       final file = File('${dir.path}/private-file.txt');
       await file.writeAsString('PRIVATE_FILE_CONTENT');
@@ -136,6 +144,24 @@ void main() {
       await sb.unlockWithPassword(password);
       expect(b.syncError, isNull);
       expect(b.snapshot.note(note.id)!.title, 'PRIVATE_NOTE_TITLE');
+      expect(
+        WorkdaySchedule(
+          b.snapshot,
+        ).forDate(workday)!.record!.start!.toUtc().hour,
+        10,
+      );
+      await b.setWorkdayBoundary(
+        workday,
+        start: false,
+        value: workday.add(const Duration(hours: 25)),
+      );
+      await sb.sync();
+      await sa.sync();
+      expect(a.syncError, isNull);
+      expect(
+        WorkdaySchedule(a.snapshot).forDate(workday)!.record!.end!.toUtc(),
+        DateTime.utc(2026, 10, 20, 1),
+      );
       final files = await b.db.customSelect('SELECT * FROM files').get();
       expect(
         await File(files.single.read<String>('path')).readAsString(),

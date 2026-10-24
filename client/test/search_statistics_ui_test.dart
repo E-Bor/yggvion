@@ -47,6 +47,18 @@ Future<void> statisticsFixture(Repository repo) async {
     if (i.isEven) {
       await repo.status(repo.snapshot.task(task.id)!, TaskStatus.done);
     }
+    if (start.weekday <= 5 && i < 6) {
+      await repo.setWorkdayBoundary(
+        start,
+        start: true,
+        value: start.add(Duration(minutes: i * 10)),
+      );
+      await repo.setWorkdayBoundary(
+        start,
+        start: false,
+        value: start.add(Duration(hours: 8, minutes: i * 15)),
+      );
+    }
     final activity = await repo.db.beginActivity(start);
     await repo.db.endActivity(
       activity,
@@ -170,6 +182,27 @@ void main() {
         expect(find.text('Недооценка 48,9%'), findsOneWidget);
         expect(find.text('Переоценка 48%'), findsOneWidget);
         expect(tester.takeException(), isNull);
+        for (final title in ['Работа в течение дня', 'Начало и конец дня']) {
+          await tester.ensureVisible(find.text(title));
+          await settle(tester);
+          await expectLater(
+            find.byType(StatisticsPage),
+            matchesGoldenFile(
+              'goldens/workday_${title == 'Начало и конец дня' ? 'boundaries' : 'productivity'}_${mobile ? 390 : 1440}.png',
+            ),
+          );
+        }
+        await tester.ensureVisible(
+          find.byKey(const ValueKey('workday-chart-unit')),
+        );
+        await settle(tester);
+        await tester.tap(find.text('Часы'));
+        await settle(tester);
+        expect(
+          find.byKey(const ValueKey('workday-productivity-chart')),
+          findsOneWidget,
+        );
+        expect(tester.takeException(), isNull);
         await tester.ensureVisible(find.byKey(const ValueKey('work-point-6')));
         await tester.tap(find.byKey(const ValueKey('work-point-6')));
         await settle(tester);
@@ -234,6 +267,23 @@ void main() {
           findsOneWidget,
         );
         expect(tester.takeException(), isNull);
+        await tester.tap(find.text('За всё время'));
+        await settle(tester);
+        expect(
+          tester
+              .widget<IconButton>(
+                find.byWidgetPredicate(
+                  (w) => w is IconButton && w.tooltip == 'Предыдущий период',
+                ),
+              )
+              .onPressed,
+          isNull,
+        );
+        expect(
+          find.byKey(const ValueKey('estimate-mean-error')),
+          findsOneWidget,
+        );
+        expect(find.byKey(const ValueKey('work-point-53')), findsNothing);
         await tester.tap(find.byType(BackButton));
         await settle(tester);
         expect(find.byType(StatisticsPage), findsNothing);

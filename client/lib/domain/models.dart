@@ -328,6 +328,11 @@ class AppSettings {
   int get accentColor =>
       entity.data['task_color'] as int? ?? defaultAccentColor;
   int get searchTypos => (entity.data['search_typos'] as int? ?? 1).clamp(0, 2);
+
+  int get workdayStart => entity.data['workday_start'] as int? ?? 9 * 60;
+  int get workdayEnd => entity.data['workday_end'] as int? ?? 18 * 60;
+  List<int> get workdays =>
+      (entity.data['workdays'] as List? ?? const [1, 2, 3, 4, 5]).cast<int>();
 }
 
 class Birthday {

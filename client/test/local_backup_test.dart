@@ -11,6 +11,7 @@ import 'package:yggvion/data/database.dart';
 import 'package:yggvion/data/encryption.dart';
 import 'package:yggvion/data/local_backup.dart';
 import 'package:yggvion/data/repository.dart';
+import 'package:yggvion/domain/workday.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -298,6 +299,32 @@ void main() {
       expect(files.single.read<int>('uploaded'), 0);
     },
   );
+
+  test(
+    'local backup restores workday defaults and individual boundaries',
+    () async {
+      await repo.updateSettings(30, [0], 'UTC');
+      await repo.updateWorkdaySettings(480, 1500, [1, 2, 3, 4, 5]);
+      final date = DateTime.utc(2026, 10, 19);
+      await repo.setWorkdayBoundary(
+        date,
+        start: true,
+        value: date.add(const Duration(hours: 10)),
+      );
+      final saved = await backups.create();
+      await repo.setWorkdayBoundary(date, start: true, value: null);
+      await repo.updateWorkdaySettings(540, 1080, [1]);
+      await backups.restore(saved.path);
+      expect(repo.snapshot.settings.workdayStart, 480);
+      expect(repo.snapshot.settings.workdayEnd, 1500);
+      final day = WorkdaySchedule(repo.snapshot).forDate(date)!;
+      expect(day.start.toUtc().hour, 10);
+      expect(day.end.toUtc(), DateTime.utc(2026, 10, 20, 1));
+      expect(day.record!.start, isNotNull);
+      expect(day.record!.end, isNull);
+    },
+  );
+
   test(
     'corrupt snapshot attachment or unexpected paths never change live data',
     () async {

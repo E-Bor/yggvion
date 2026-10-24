@@ -1,5 +1,6 @@
 import 'package:timezone/timezone.dart' as tz;
 import 'models.dart';
+import 'workday.dart';
 
 class DailyStatistics {
   const DailyStatistics({
@@ -10,6 +11,23 @@ class DailyStatistics {
   });
   final DateTime date;
   final Duration planned, actual, application;
+}
+
+class DailyWorkdayStatistics {
+  const DailyWorkdayStatistics({
+    required this.date,
+    required this.worked,
+    required this.outside,
+    required this.available,
+    this.startMinutes,
+    this.endMinutes,
+  });
+  final DateTime date;
+  final Duration worked, outside, available;
+  final double? startMinutes, endMinutes;
+  double? get percent => available > Duration.zero
+      ? worked.inMicroseconds / available.inMicroseconds * 100
+      : null;
 }
 
 class DailyActivity {
@@ -171,6 +189,7 @@ class StatisticsReport {
     required this.projects,
     required this.estimates,
     required this.estimateStatistics,
+    this.workdays = const [],
     required this.plannedTasks,
     required this.completedTasks,
     required this.overlap,
@@ -191,6 +210,57 @@ class StatisticsReport {
 
   /// Period is [start, end), in the workspace timezone. Plan includes retained
   /// historical blocks; actual time ends at now and merges overlapping sessions.
+
+  final List<DailyWorkdayStatistics> workdays;
+  Duration get workdayActual => sumDurations(workdays.map((d) => d.worked));
+  Duration get workdayAvailable =>
+      sumDurations(workdays.map((d) => d.available));
+  Duration get outsideWorkday => sumDurations(workdays.map((d) => d.outside));
+  double? get workdayPercent => workdayAvailable > Duration.zero
+      ? workdayActual.inMicroseconds / workdayAvailable.inMicroseconds * 100
+      : null;
+  double? get meanWorkdayStart =>
+      _mean(workdays.map((d) => d.startMinutes).nonNulls);
+  double? get meanWorkdayEnd =>
+      _mean(workdays.map((d) => d.endMinutes).nonNulls);
+
+  static double? _mean(Iterable<double> values) {
+    var sum = 0.0;
+    var count = 0;
+    for (final value in values) {
+      sum += value;
+      count++;
+    }
+    return count == 0 ? null : sum / count;
+  }
+
+  static DateTime historyStart(
+    Snapshot snapshot,
+    DateTime now,
+    DateTime? firstActivity,
+  ) {
+    final zone = tz.getLocation(snapshot.settings.timezone);
+    var earliest = now;
+    for (final date in [
+      ?firstActivity,
+      ...snapshot.blocks
+          .where(
+            (b) =>
+                !b.entity.deleted &&
+                snapshot.task(b.taskId)?.isBirthday != true,
+          )
+          .map((b) => b.start),
+      ...snapshot.sessions
+          .where((s) => !s.entity.deleted && !s.discarded)
+          .map((s) => s.start),
+      ...WorkdaySchedule(snapshot).records.values.map((d) => d.plannedStart),
+    ]) {
+      if (date.isBefore(earliest)) earliest = date;
+    }
+    final local = tz.TZDateTime.from(earliest, zone);
+    return tz.TZDateTime(zone, local.year, local.month, local.day);
+  }
+
   static StatisticsReport calculate(
     Snapshot snapshot,
     List<TimeRange> usage,
@@ -231,6 +301,7 @@ class StatisticsReport {
       for (final entry in sessions.entries) entry.key: unionRanges(entry.value),
     };
     final actual = unionRanges(taskActual.values.expand((v) => v));
+    final allActual = unionRanges(allSessions.values.expand((v) => v));
     final planned = plans.values.expand((v) => v).toList();
     final application = unionRanges(
       usage
@@ -238,6 +309,8 @@ class StatisticsReport {
           .nonNulls,
     );
     final days = <DailyStatistics>[];
+    final workdays = <DailyWorkdayStatistics>[];
+    final schedule = WorkdaySchedule(snapshot, location: zone);
     var day = tz.TZDateTime.from(start, zone);
     while (day.isBefore(end)) {
       final next = tz.TZDateTime(zone, day.year, day.month, day.day + 1);
@@ -247,6 +320,65 @@ class StatisticsReport {
           planned: durationIn(planned, day, next),
           actual: durationIn(actual, day, next),
           application: durationIn(application, day, next),
+        ),
+      );
+
+      final window = schedule.forDate(day);
+      // Select workdays by their starting date, including the night after
+      // the last selected date. General plan/fact stays calendar-based.
+      final localEnd = tz.TZDateTime.from(end, zone);
+      final fullDays =
+          localEnd.hour == 0 &&
+          localEnd.minute == 0 &&
+          localEnd.second == 0 &&
+          localEnd.millisecond == 0 &&
+          localEnd.microsecond == 0;
+      final finish = !fullDays && end.isBefore(now) ? end : now;
+      final assigned = schedule.rangeForDate(day);
+      final workRange = assigned == null
+          ? null
+          : clipRange(assigned, start, finish);
+      final previous = tz.TZDateTime(zone, day.year, day.month, day.day - 1);
+      final covered = unionRanges([
+        ?schedule.rangeForDate(previous),
+        ?assigned,
+      ]);
+      final insideThisDate = sumDurations(
+        covered.map((range) {
+          final clipped = clipRange(range, day, next);
+          return clipped == null
+              ? Duration.zero
+              : durationIn(actual, clipped.start, clipped.end);
+        }),
+      );
+      final available = workRange == null
+          ? Duration.zero
+          : workRange.end.difference(workRange.start);
+      final worked = workRange == null
+          ? Duration.zero
+          : durationIn(allActual, workRange.start, workRange.end);
+      double? elapsedMinutes(DateTime? value) {
+        if (value == null || value.isAfter(now)) return null;
+        final local = tz.TZDateTime.from(value, zone);
+        final dateOffset = DateTime.utc(
+          local.year,
+          local.month,
+          local.day,
+        ).difference(DateTime.utc(day.year, day.month, day.day)).inDays;
+        return dateOffset * 1440 +
+            local.hour * 60 +
+            local.minute +
+            local.second / 60;
+      }
+
+      workdays.add(
+        DailyWorkdayStatistics(
+          date: day,
+          worked: worked,
+          available: available,
+          outside: durationIn(actual, day, next) - insideThisDate,
+          startMinutes: elapsedMinutes(window?.start),
+          endMinutes: elapsedMinutes(window?.end),
         ),
       );
       day = next;
@@ -293,6 +425,7 @@ class StatisticsReport {
     });
     return StatisticsReport(
       days: days,
+      workdays: workdays,
       projects: projects,
       estimates: comparisons,
       estimateStatistics: EstimateStatistics.calculate(comparisons),

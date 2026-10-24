@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:markdown/markdown.dart' as md;
@@ -298,6 +299,7 @@ class LiveMarkdownEditorState extends ConsumerState<LiveMarkdownEditor> {
   bool _pasting = false;
   TextSelection? _rememberedSelection;
   final _controller = TextEditingController();
+  final _inputKey = GlobalKey();
   final _focus = FocusNode();
   String _last = '';
   bool get _isEditing => _active != null || _source;
@@ -552,12 +554,42 @@ class LiveMarkdownEditorState extends ConsumerState<LiveMarkdownEditor> {
     _focus.requestFocus();
   }
 
+  void _selectAll() {
+    if (widget.readOnly || _pasting) return;
+    final wasEditing = _isEditing;
+    setState(() {
+      // Temporarily edit the entire note as one block. On blur, Live Preview
+      // splits it again without changing whitespace or the Markdown source.
+      _blocks = [_last];
+      _active = _source ? null : 0;
+      _rememberedSelection = null;
+      _controller.value = TextEditingValue(
+        text: _last,
+        selection: TextSelection(baseOffset: 0, extentOffset: _last.length),
+      );
+    });
+    _focus.requestFocus();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && !widget.readOnly) _focus.requestFocus();
+    });
+    if (!wasEditing) widget.onEditingChanged?.call(true);
+  }
+
   Widget _contextMenu(BuildContext context, EditableTextState state) =>
       AdaptiveTextSelectionToolbar.buttonItems(
         anchors: state.contextMenuAnchors,
         buttonItems: [
           for (final item in state.contextMenuButtonItems)
-            if (item.type != ContextMenuButtonType.paste) item,
+            if (item.type == ContextMenuButtonType.selectAll)
+              ContextMenuButtonItem(
+                type: ContextMenuButtonType.selectAll,
+                onPressed: () {
+                  state.hideToolbar();
+                  _selectAll();
+                },
+              )
+            else if (item.type != ContextMenuButtonType.paste)
+              item,
           ContextMenuButtonItem(
             type: ContextMenuButtonType.paste,
             onPressed: () {
@@ -665,6 +697,7 @@ class LiveMarkdownEditorState extends ConsumerState<LiveMarkdownEditor> {
           else if (_source)
             _autocomplete(
               TextField(
+                key: _inputKey,
                 controller: _controller,
                 focusNode: _focus,
                 groupId: _focus,
@@ -697,6 +730,7 @@ class LiveMarkdownEditorState extends ConsumerState<LiveMarkdownEditor> {
               (index) => _active == index
                   ? _autocomplete(
                       TextField(
+                        key: _inputKey,
                         controller: _controller,
                         focusNode: _focus,
                         groupId: _focus,
@@ -792,13 +826,19 @@ class LiveMarkdownEditorState extends ConsumerState<LiveMarkdownEditor> {
     );
   }
 
-  Widget _autocomplete(Widget child) => WikiAutocomplete(
-    controller: _controller,
-    focusNode: _focus,
-    onChanged: _changed,
-    readOnly: _pasting || widget.readOnly,
-    noteId: widget.noteId,
-    child: child,
+  Widget _autocomplete(Widget child) => CallbackShortcuts(
+    bindings: {
+      const SingleActivator(LogicalKeyboardKey.keyA, meta: true): _selectAll,
+      const SingleActivator(LogicalKeyboardKey.keyA, control: true): _selectAll,
+    },
+    child: WikiAutocomplete(
+      controller: _controller,
+      focusNode: _focus,
+      onChanged: _changed,
+      readOnly: _pasting || widget.readOnly,
+      noteId: widget.noteId,
+      child: child,
+    ),
   );
 }
 

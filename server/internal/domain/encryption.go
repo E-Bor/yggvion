@@ -46,7 +46,7 @@ func ReadEnvelope(r Record) (Envelope, error) {
 		}
 	}
 	switch r.Kind {
-	case "task", "block", "session", "note", "note_folder", "project", "settings", "series", "snooze":
+	case "task", "block", "session", "note", "note_folder", "project", "settings", "series", "snooze", "workday":
 	default:
 		return e, errors.New("unknown record kind")
 	}

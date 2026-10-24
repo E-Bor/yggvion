@@ -1071,7 +1071,11 @@ class _WorkspaceState extends ConsumerState<Workspace>
     }
     return Padding(
       padding: const EdgeInsets.fromLTRB(24, 0, 24, 20),
-      child: Dashboard(projectId: projectId, date: homeDate),
+      child: Dashboard(
+        projectId: projectId,
+        date: homeDate,
+        onDateChanged: (value) => setState(() => homeDate = value),
+      ),
     );
   }
 
