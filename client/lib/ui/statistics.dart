@@ -290,6 +290,7 @@ class _StatisticsPageState extends ConsumerState<StatisticsPage> {
                             );
                             final estimates = _EstimateCard(
                               estimates: data.estimates,
+                              statistics: data.estimateStatistics,
                             );
                             if (constraints.maxWidth < 850) {
                               return Column(
@@ -1365,83 +1366,212 @@ class _ProjectCardState extends State<_ProjectCard> {
 }
 
 class _EstimateCard extends StatelessWidget {
-  const _EstimateCard({required this.estimates});
+  const _EstimateCard({required this.estimates, required this.statistics});
   final List<EstimateComparison> estimates;
+  final EstimateStatistics statistics;
+
   @override
   Widget build(BuildContext context) {
-    final measured = estimates.where((e) => e.actual > Duration.zero).toList();
-    final delta = sumDurations(measured.map((e) => e.difference));
+    final number = NumberFormat('0.#', 'ru');
+    String percent(double? value) =>
+        value == null ? '—' : '${number.format(value)}%';
+    final metrics = [
+      (
+        key: 'estimate-mean-error',
+        label: 'Средняя ошибка',
+        value: percent(statistics.meanErrorPercent),
+        detail: 'Задач в расчёте: ${statistics.measuredTasks}',
+      ),
+      (
+        key: 'estimate-outside-tolerance',
+        label: 'Ошибка больше 10%',
+        value:
+            '${statistics.outsideToleranceTasks} из ${statistics.measuredTasks}',
+        detail: 'Недооценка и переоценка',
+      ),
+      (
+        key: 'estimate-underestimated',
+        label: 'Средняя недооценка',
+        value: percent(statistics.meanUnderestimatePercent),
+        detail: 'Факт дольше плана · задач: ${statistics.underestimatedTasks}',
+      ),
+      (
+        key: 'estimate-overestimated',
+        label: 'Средняя переоценка',
+        value: percent(statistics.meanOverestimatePercent),
+        detail: 'Факт короче плана · задач: ${statistics.overestimatedTasks}',
+      ),
+    ];
     return _StatCard(
-      title: 'Точность эстимейта',
+      title: 'Ошибка эстимейта',
       subtitle: 'Завершённые задачи с планом в периоде · задача целиком',
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          if (measured.isNotEmpty) ...[
-            _SmallTotal(
-              label: delta == Duration.zero
-                  ? 'План совпал с фактом · ${measured.length} задач'
-                  : '${delta.isNegative ? 'Меньше' : 'Больше'} плана · ${measured.length} задач с учётом',
-              value:
-                  '${delta.isNegative
-                      ? '−'
-                      : delta == Duration.zero
-                      ? ''
-                      : '+'}${formatDuration(delta.abs())}',
+          if (statistics.measuredTasks > 0) ...[
+            LayoutBuilder(
+              builder: (context, constraints) {
+                final scale = MediaQuery.textScalerOf(context);
+                final columns = constraints.maxWidth / scale.scale(1) < 300
+                    ? 1
+                    : 2;
+                final width =
+                    (constraints.maxWidth - (columns - 1) * 12) / columns;
+                return Wrap(
+                  spacing: 12,
+                  runSpacing: 12,
+                  children: [
+                    for (final metric in metrics)
+                      Container(
+                        key: ValueKey(metric.key),
+                        width: width,
+                        padding: const EdgeInsets.all(14),
+                        decoration: BoxDecoration(
+                          color: context.palette.raised,
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            ConstrainedBox(
+                              constraints: BoxConstraints(
+                                minHeight: scale.scale(12) * 2.8,
+                              ),
+                              child: Text(
+                                metric.label,
+                                style: const TextStyle(
+                                  fontSize: 12,
+                                  height: 1.4,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                            ),
+                            const SizedBox(height: 12),
+                            FittedBox(
+                              fit: BoxFit.scaleDown,
+                              alignment: Alignment.centerLeft,
+                              child: Text(
+                                metric.value,
+                                style: TextStyle(
+                                  fontSize: 25,
+                                  fontWeight: FontWeight.w600,
+                                  letterSpacing: -.5,
+                                  color: context.accentColor,
+                                ),
+                              ),
+                            ),
+                            const SizedBox(height: 6),
+                            ConstrainedBox(
+                              constraints: BoxConstraints(
+                                minHeight: scale.scale(11) * 2.8,
+                              ),
+                              child: Text(
+                                metric.detail,
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  height: 1.4,
+                                  color: context.palette.muted,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                  ],
+                );
+              },
             ),
-            const SizedBox(height: 20),
-          ],
-          if (estimates.isEmpty)
+            const SizedBox(height: 14),
+            Text(
+              'Проценты от плана каждой задачи. Недооценка и переоценка не компенсируют друг друга.',
+              style: TextStyle(
+                fontSize: 11,
+                height: 1.5,
+                color: context.palette.muted,
+              ),
+            ),
+          ] else
             Text(
               'Завершите запланированную задачу и запишите потраченное время, чтобы сравнить оценку с фактом.',
               style: TextStyle(color: context.palette.muted, height: 1.5),
             ),
-          for (final item in estimates.take(8))
+          if (statistics.missingTimeTasks > 0)
             Padding(
-              padding: const EdgeInsets.only(bottom: 16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Text(
-                    item.task.title,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(fontSize: 13),
-                  ),
-                  const SizedBox(height: 5),
-                  Wrap(
-                    alignment: WrapAlignment.spaceBetween,
-                    spacing: 10,
-                    runSpacing: 4,
-                    children: [
-                      Text(
-                        'План ${formatDuration(item.planned)}',
-                        style: TextStyle(
-                          fontSize: 11,
-                          color: context.palette.muted,
-                        ),
-                      ),
-                      Text(
-                        item.actual == Duration.zero
-                            ? 'Нет учёта времени'
-                            : 'Факт ${formatDuration(item.actual)}',
-                        style: TextStyle(
-                          fontSize: 11,
-                          color: item.actual == Duration.zero
-                              ? context.palette.muted
-                              : context.accentColor,
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
+              padding: const EdgeInsets.only(top: 12),
+              child: Text(
+                'Без учёта времени: ${statistics.missingTimeTasks}. Эти задачи не включены в проценты.',
+                style: TextStyle(
+                  fontSize: 12,
+                  height: 1.5,
+                  color: context.palette.muted,
+                ),
               ),
             ),
-          if (estimates.length > 8)
-            Text(
-              'Показаны 8 задач с наибольшим отклонением.',
-              style: TextStyle(fontSize: 11, color: context.palette.muted),
+          if (estimates.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            ExpansionTile(
+              key: const ValueKey('estimate-task-details'),
+              tilePadding: EdgeInsets.zero,
+              childrenPadding: const EdgeInsets.only(top: 8),
+              title: const Text('По задачам', style: TextStyle(fontSize: 13)),
+              subtitle: Text(
+                estimates.length > 8
+                    ? '8 задач с наибольшей ошибкой'
+                    : 'План, факт и отклонение',
+                style: TextStyle(fontSize: 11, color: context.palette.muted),
+              ),
+              children: [
+                for (final item in estimates.take(8))
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 16),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Text(
+                          item.task.title,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(fontSize: 13),
+                        ),
+                        const SizedBox(height: 5),
+                        Wrap(
+                          spacing: 10,
+                          runSpacing: 4,
+                          children: [
+                            Text(
+                              'План ${formatDuration(item.planned)}',
+                              style: TextStyle(
+                                fontSize: 11,
+                                color: context.palette.muted,
+                              ),
+                            ),
+                            Text(
+                              item.errorPercent == null
+                                  ? 'Нет учёта времени'
+                                  : 'Факт ${formatDuration(item.actual)}',
+                              style: TextStyle(
+                                fontSize: 11,
+                                color: context.palette.muted,
+                              ),
+                            ),
+                            if (item.errorPercent case final error?)
+                              Text(
+                                error == 0
+                                    ? 'Точно по плану'
+                                    : '${error > 0 ? 'Недооценка' : 'Переоценка'} ${percent(error.abs())}',
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  color: context.accentColor,
+                                ),
+                              ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+              ],
             ),
+          ],
         ],
       ),
     );
@@ -1468,7 +1598,7 @@ class _StatisticsExplanation extends StatelessWidget {
           'План — длительности блоков, попавшие в выбранный период, включая сохранённый невыполненный план прошлых дней. Событие на весь день учитывается целиком; дни рождения исключены.\n\n'
           'Факт — таймер и ручной учёт до текущего момента. Отменённые записи исключены, пересечения в общей сумме считаются один раз. Границы дней соответствуют часовому поясу приложения.\n\n'
           'Закрыто из плана — текущий статус задач, у которых есть блок в периоде. Это не история дат завершения. Удалённые задачи не учитываются.\n\n'
-          'Точность эстимейта сравнивает текущий полный план завершённой задачи со всем её учтённым временем. Задачи без учёта не принимаются за нулевую фактическую длительность.\n\n'
+          'Ошибка эстимейта считается для завершённых задач с планом в выбранном периоде. Сравниваются полный текущий план задачи и всё её учтённое время, включая блоки за пределами периода. Ошибка задачи = |факт − план| / план × 100%. Средняя ошибка — среднее этих процентов, каждая задача имеет одинаковый вес. Счётчик учитывает только ошибки строго больше 10%, до округления. Недооценка — факт больше плана, переоценка — меньше; их средние считаются отдельно по всем задачам соответствующей группы, включая отклонения до 10%. Точные совпадения входят только в общую среднюю с ошибкой 0%. Задачи без учёта или положительного плана исключены; прочерк означает, что подходящих задач нет. Дата завершения не определяет попадание в период.\n\n'
           'Использование приложения сохраняется только на этом устройстве с момента обновления. Новый сеанс начинается при возвращении в приложение или после паузы без действий. Фоновое время не учитывается. Календарь активности показывает последние 365 дней независимо от периода графиков. Яркость растёт на отметках 5, 20 и 60 минут. Любое сохранённое активное время засчитывает день; текущая серия сохраняется до конца сегодняшнего дня, если он пока пуст.',
           style: TextStyle(
             color: context.palette.muted,

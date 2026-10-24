@@ -103,6 +103,66 @@ class EstimateComparison {
   final Task task;
   final Duration planned, actual;
   Duration get difference => actual - planned;
+  double? get errorPercent => planned > Duration.zero && actual > Duration.zero
+      ? 100 * difference.inMicroseconds / planned.inMicroseconds
+      : null;
+}
+
+class EstimateStatistics {
+  const EstimateStatistics({
+    required this.measuredTasks,
+    required this.missingTimeTasks,
+    required this.outsideToleranceTasks,
+    required this.underestimatedTasks,
+    required this.overestimatedTasks,
+    required this.meanErrorPercent,
+    required this.meanUnderestimatePercent,
+    required this.meanOverestimatePercent,
+  });
+
+  final int measuredTasks, missingTimeTasks, outsideToleranceTasks;
+  final int underestimatedTasks, overestimatedTasks;
+  final double? meanErrorPercent,
+      meanUnderestimatePercent,
+      meanOverestimatePercent;
+
+  static EstimateStatistics calculate(Iterable<EstimateComparison> estimates) {
+    var measured = 0, missing = 0, outside = 0, under = 0, over = 0;
+    var totalError = 0.0, totalUnder = 0.0, totalOver = 0.0;
+    for (final item in estimates) {
+      if (item.planned <= Duration.zero) continue;
+      final error = item.errorPercent;
+      if (error == null) {
+        missing++;
+        continue;
+      }
+      measured++;
+      totalError += error.abs();
+      // Strictly more than 10%, before display rounding and without floating
+      // point boundary errors. Every task has equal weight in the averages.
+      if (item.difference.inMicroseconds.abs() * 10 >
+          item.planned.inMicroseconds) {
+        outside++;
+      }
+      if (error > 0) {
+        under++;
+        totalUnder += error;
+      } else if (error < 0) {
+        over++;
+        totalOver -= error;
+      }
+    }
+    return EstimateStatistics(
+      measuredTasks: measured,
+      missingTimeTasks: missing,
+      outsideToleranceTasks: outside,
+      underestimatedTasks: under,
+      overestimatedTasks: over,
+      meanErrorPercent: measured == 0 ? null : totalError / measured,
+      meanUnderestimatePercent: under == 0 ? null : totalUnder / under,
+      meanOverestimatePercent: over == 0 ? null : totalOver / over,
+    );
+  }
 }
 
 class StatisticsReport {
@@ -110,6 +170,7 @@ class StatisticsReport {
     required this.days,
     required this.projects,
     required this.estimates,
+    required this.estimateStatistics,
     required this.plannedTasks,
     required this.completedTasks,
     required this.overlap,
@@ -120,6 +181,7 @@ class StatisticsReport {
   final List<DailyStatistics> days;
   final List<ProjectStatistics> projects;
   final List<EstimateComparison> estimates;
+  final EstimateStatistics estimateStatistics;
   final int plannedTasks, completedTasks, applicationSessions, notes, tasks;
   final Duration overlap;
   Duration get planned => sumDurations(days.map((d) => d.planned));
@@ -223,16 +285,17 @@ class StatisticsReport {
       );
     }
     comparisons.sort((a, b) {
-      if (a.actual == Duration.zero && b.actual != Duration.zero) return 1;
-      if (b.actual == Duration.zero && a.actual != Duration.zero) return -1;
-      return b.difference.inMicroseconds.abs().compareTo(
-        a.difference.inMicroseconds.abs(),
-      );
+      final aError = a.errorPercent?.abs(), bError = b.errorPercent?.abs();
+      if (aError == null && bError != null) return 1;
+      if (bError == null && aError != null) return -1;
+      final order = (bError ?? 0).compareTo(aError ?? 0);
+      return order != 0 ? order : a.task.id.compareTo(b.task.id);
     });
     return StatisticsReport(
       days: days,
       projects: projects,
       estimates: comparisons,
+      estimateStatistics: EstimateStatistics.calculate(comparisons),
       plannedTasks: plans.length,
       completedTasks: plans.keys.where((id) => tasks[id]!.done).length,
       overlap:

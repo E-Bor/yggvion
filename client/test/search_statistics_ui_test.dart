@@ -131,6 +131,45 @@ void main() {
           find.byType(StatisticsPage),
           matchesGoldenFile('goldens/statistics_${mobile ? 390 : 1440}.png'),
         );
+        await tester.ensureVisible(find.text('Ошибка эстимейта'));
+        await settle(tester);
+        for (final entry in {
+          'estimate-mean-error': '38,2%',
+          'estimate-outside-tolerance': '4 из 4',
+          'estimate-underestimated': '48,9%',
+          'estimate-overestimated': '34,7%',
+        }.entries) {
+          expect(
+            find.descendant(
+              of: find.byKey(ValueKey(entry.key)),
+              matching: find.text(entry.value),
+            ),
+            findsOneWidget,
+            reason: tester
+                .widgetList<Text>(
+                  find.descendant(
+                    of: find.byKey(ValueKey(entry.key)),
+                    matching: find.byType(Text),
+                  ),
+                )
+                .map((text) => text.data)
+                .join(' · '),
+          );
+        }
+        await expectLater(
+          find.byType(StatisticsPage),
+          matchesGoldenFile(
+            'goldens/estimate_accuracy_${mobile ? 390 : 1440}.png',
+          ),
+        );
+        await tester.ensureVisible(
+          find.byKey(const ValueKey('estimate-task-details')),
+        );
+        await tester.tap(find.text('По задачам'));
+        await settle(tester);
+        expect(find.text('Недооценка 48,9%'), findsOneWidget);
+        expect(find.text('Переоценка 48%'), findsOneWidget);
+        expect(tester.takeException(), isNull);
         await tester.ensureVisible(find.byKey(const ValueKey('work-point-6')));
         await tester.tap(find.byKey(const ValueKey('work-point-6')));
         await settle(tester);
@@ -181,6 +220,11 @@ void main() {
         await tester.tap(find.byTooltip('Предыдущий период'));
         await settle(tester);
         expect(find.text('За этот период пока нет данных.'), findsWidgets);
+        expect(find.byKey(const ValueKey('estimate-mean-error')), findsNothing);
+        expect(
+          find.byKey(const ValueKey('estimate-task-details')),
+          findsNothing,
+        );
         expect(
           find.byKey(const ValueKey('activity-day-2026-10-13')),
           findsOneWidget,

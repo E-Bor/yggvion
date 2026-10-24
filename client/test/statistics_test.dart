@@ -264,7 +264,168 @@ void main() {
       expect(report.estimates.first.planned, const Duration(hours: 3));
       expect(report.estimates.first.actual, const Duration(hours: 4));
       expect(report.estimates.last.actual, Duration.zero);
+      expect(report.estimateStatistics.measuredTasks, 1);
+      expect(report.estimateStatistics.missingTimeTasks, 1);
+      expect(
+        report.estimateStatistics.meanErrorPercent,
+        closeTo(100 / 3, 1e-9),
+      );
+      expect(
+        report.estimateStatistics.meanUnderestimatePercent,
+        closeTo(100 / 3, 1e-9),
+      );
+      expect(report.estimateStatistics.meanOverestimatePercent, isNull);
+      expect(report.estimateStatistics.outsideToleranceTasks, 1);
       expect(report.actual, const Duration(hours: 2));
+    },
+  );
+
+  EstimateComparison comparison(String id, int planned, int actual) =>
+      EstimateComparison(
+        Task(Task.create(id, id)),
+        Duration(minutes: planned),
+        Duration(minutes: actual),
+      );
+
+  test(
+    'estimate percentages use equal task weights and separate all directions',
+    () {
+      final stats = EstimateStatistics.calculate([
+        comparison('under-large', 10, 15), // +50%
+        comparison(
+          'over-large',
+          200,
+          100,
+        ), // -50%, not weighted by its duration
+        comparison(
+          'under-small',
+          100,
+          105,
+        ), // +5%, still part of underestimation
+        comparison('over-small', 200, 190), // -5%, still part of overestimation
+        comparison('exact', 1, 1),
+        comparison('missing', 30, 0),
+        comparison('unplanned', 0, 120),
+      ]);
+      expect(stats.measuredTasks, 5);
+      expect(stats.missingTimeTasks, 1);
+      expect(stats.outsideToleranceTasks, 2);
+      expect(stats.meanErrorPercent, 22);
+      expect(stats.underestimatedTasks, 2);
+      expect(stats.overestimatedTasks, 2);
+      expect(stats.meanUnderestimatePercent, 27.5);
+      expect(stats.meanOverestimatePercent, 27.5);
+      expect(comparison('severe', 10, 40).errorPercent, 300);
+    },
+  );
+
+  test(
+    'ten percent tolerance is strict and evaluated before display rounding',
+    () {
+      final stats = EstimateStatistics.calculate([
+        comparison('plus-ten', 100, 110),
+        comparison('minus-ten', 100, 90),
+        EstimateComparison(
+          Task(Task.create('above', 'above')),
+          const Duration(minutes: 100),
+          const Duration(minutes: 110, microseconds: 1),
+        ),
+        EstimateComparison(
+          Task(Task.create('below', 'below')),
+          const Duration(minutes: 100),
+          const Duration(minutes: 90) - const Duration(microseconds: 1),
+        ),
+      ]);
+      expect(stats.measuredTasks, 4);
+      expect(stats.outsideToleranceTasks, 2);
+      expect(stats.underestimatedTasks, 2);
+      expect(stats.overestimatedTasks, 2);
+    },
+  );
+
+  test(
+    'absent measurements and directions stay unknown instead of zero percent',
+    () {
+      for (final items in [
+        <EstimateComparison>[],
+        [comparison('missing', 10, 0)],
+      ]) {
+        final stats = EstimateStatistics.calculate(items);
+        expect(stats.measuredTasks, 0);
+        expect(stats.missingTimeTasks, items.length);
+        expect(stats.outsideToleranceTasks, 0);
+        expect(stats.meanErrorPercent, isNull);
+        expect(stats.meanUnderestimatePercent, isNull);
+        expect(stats.meanOverestimatePercent, isNull);
+      }
+      final exact = EstimateStatistics.calculate([comparison('exact', 10, 10)]);
+      expect(exact.meanErrorPercent, 0);
+      expect(exact.outsideToleranceTasks, 0);
+      expect(exact.meanUnderestimatePercent, isNull);
+      expect(exact.meanOverestimatePercent, isNull);
+      final under = EstimateStatistics.calculate([comparison('under', 10, 40)]);
+      expect(under.meanErrorPercent, 300);
+      expect(under.meanUnderestimatePercent, 300);
+      expect(under.meanOverestimatePercent, isNull);
+      final over = EstimateStatistics.calculate([comparison('over', 10, 5)]);
+      expect(over.meanErrorPercent, 50);
+      expect(over.meanUnderestimatePercent, isNull);
+      expect(over.meanOverestimatePercent, 50);
+    },
+  );
+
+  test(
+    'estimate summary follows the period, counts a task once and sorts by percent',
+    () {
+      final snapshot = Snapshot([
+        ...Repository.workspaceDefaults('UTC'),
+        Task.create('short', 'Короткая').change({'status': 'done'}),
+        block('short-plan', 'short', at(9), at(9, 10)),
+        session('short-work', 'short', at(9), at(9, 20)), // 100%, 10 min
+        Task.create('long', 'Длинная').change({'status': 'done'}),
+        block('long-plan-a', 'long', at(10), at(12)),
+        block('long-plan-b', 'long', at(13), at(15)),
+        session('long-work', 'long', at(10), at(16)), // 50%, 2 hours
+        Task.create('previous', 'Прошлый период').change({'status': 'done'}),
+        block(
+          'previous-plan',
+          'previous',
+          start.subtract(const Duration(hours: 1)),
+          start,
+        ),
+        session(
+          'previous-work',
+          'previous',
+          start.subtract(const Duration(hours: 2)),
+          start,
+        ),
+        Task.create('next', 'Следующий период').change({'status': 'done'}),
+        block('next-plan', 'next', end, end.add(const Duration(hours: 1))),
+        session('next-work', 'next', end, end.add(const Duration(hours: 3))),
+        Task.create('ongoing', 'Ещё в работе'),
+        block('ongoing-plan', 'ongoing', at(16), at(17)),
+        session('ongoing-work', 'ongoing', at(16), at(19)),
+      ]);
+      final now = end.add(const Duration(days: 1));
+      final report = StatisticsReport.calculate(snapshot, [], start, end, now);
+      expect(report.estimates.map((e) => e.task.id), ['short', 'long']);
+      expect(report.estimateStatistics.measuredTasks, 2);
+      expect(report.estimateStatistics.meanErrorPercent, 75);
+      expect(report.estimateStatistics.meanUnderestimatePercent, 75);
+      expect(report.estimateStatistics.meanOverestimatePercent, isNull);
+      expect(report.estimateStatistics.outsideToleranceTasks, 2);
+      final previous = StatisticsReport.calculate(
+        snapshot,
+        [],
+        start.subtract(const Duration(days: 1)),
+        start,
+        now,
+      );
+      expect(previous.estimates.single.task.id, 'previous');
+      expect(previous.estimateStatistics.meanErrorPercent, 100);
+      final next = StatisticsReport.calculate(snapshot, [], end, now, now);
+      expect(next.estimates.single.task.id, 'next');
+      expect(next.estimateStatistics.meanErrorPercent, 200);
     },
   );
 
@@ -281,6 +442,9 @@ void main() {
     expect(report.planned, Duration.zero);
     expect(report.actual, Duration.zero);
     expect(report.estimates, isEmpty);
+    expect(report.estimateStatistics.measuredTasks, 0);
+    expect(report.estimateStatistics.meanErrorPercent, isNull);
+    expect(report.estimateStatistics.outsideToleranceTasks, 0);
     expect(report.projects, isEmpty);
   });
 
