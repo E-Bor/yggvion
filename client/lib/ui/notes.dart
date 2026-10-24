@@ -669,17 +669,6 @@ class _NoteLibraryState extends ConsumerState<NoteLibrary> {
         group('', 'Без папки'),
         for (final folder in snapshot.noteFolders)
           group(folder.id, folder.title, folder: folder),
-        Padding(
-          padding: EdgeInsets.all(8),
-          child: Text(
-            'Перетащите значок слева, чтобы изменить порядок',
-            style: TextStyle(
-              fontSize: 11,
-              color: context.palette.muted,
-              height: 1.5,
-            ),
-          ),
-        ),
       ],
     );
   }

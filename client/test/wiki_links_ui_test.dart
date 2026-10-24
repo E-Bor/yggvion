@@ -204,13 +204,7 @@ void main() {
         'До [[Материалы проекта]] после',
       );
       expect(repo.snapshot.tasks, isEmpty);
-      await tester.tap(
-        find.descendant(
-          of: find.byType(TaskEditor),
-          matching: find.byTooltip('Исходный Markdown'),
-        ),
-      );
-      await settle(tester);
+      await command(tester, LogicalKeyboardKey.keyA);
       final source = editorField(find.byType(TaskEditor));
       await tester.enterText(source, '[[материалы встречи');
       await settle(tester);

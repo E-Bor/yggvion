@@ -1,5 +1,4 @@
 import 'dart:io';
-import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
@@ -295,18 +294,13 @@ class LiveMarkdownEditor extends ConsumerStatefulWidget {
 class LiveMarkdownEditorState extends ConsumerState<LiveMarkdownEditor> {
   late List<String> _blocks;
   int? _active;
-  bool _source = false;
   bool _pasting = false;
   TextSelection? _rememberedSelection;
   final _controller = TextEditingController();
   final _inputKey = GlobalKey();
   final _focus = FocusNode();
   String _last = '';
-  bool get _isEditing => _active != null || _source;
-  bool get _showToolbarActions =>
-      widget.toolbar &&
-      !widget.readOnly &&
-      (!widget.editOnLongPress || _isEditing);
+  bool get _isEditing => _active != null;
 
   void finishEditing() {
     _focus.unfocus(disposition: UnfocusDisposition.previouslyFocusedChild);
@@ -315,7 +309,7 @@ class LiveMarkdownEditorState extends ConsumerState<LiveMarkdownEditor> {
 
   void focusEditor() {
     if (widget.readOnly || _pasting) return;
-    if (!_source && _active == null) {
+    if (_active == null) {
       _edit(0);
     } else {
       _focus.requestFocus();
@@ -405,7 +399,6 @@ class LiveMarkdownEditorState extends ConsumerState<LiveMarkdownEditor> {
     setState(() {
       _load(_last);
       _active = null;
-      if (widget.editOnLongPress) _source = false;
     });
     if (notify) widget.onEditingChanged?.call(false);
   }
@@ -429,23 +422,17 @@ class LiveMarkdownEditorState extends ConsumerState<LiveMarkdownEditor> {
   }
 
   void _changed(String value) {
-    if (_source) {
-      _last = value;
-    } else {
-      _blocks[_active!] = value;
-      _last = _blocks.join('\n\n');
-    }
+    _blocks[_active!] = value;
+    _last = _blocks.join('\n\n');
     widget.onChanged(_last);
   }
 
   TextSelection get _selection {
     final selection = _controller.selection;
-    if ((_source || _active != null) && selection.isValid) {
-      final offset = _source
-          ? 0
-          : _blocks
-                .take(_active!)
-                .fold<int>(0, (n, block) => n + block.length + 2);
+    if (_active != null && selection.isValid) {
+      final offset = _blocks
+          .take(_active!)
+          .fold<int>(0, (n, block) => n + block.length + 2);
       return TextSelection(
         baseOffset: offset + selection.baseOffset,
         extentOffset: offset + selection.extentOffset,
@@ -488,33 +475,6 @@ class LiveMarkdownEditorState extends ConsumerState<LiveMarkdownEditor> {
     return content;
   });
 
-  Future<void> _attach() => _insertFrom(() async {
-    final repo = ref.read(appProvider);
-    final selection = await FilePicker.platform.pickFiles(allowMultiple: true);
-    if (selection == null) return null;
-    final links = <String>[];
-    for (final file in selection.files) {
-      if (file.path == null) {
-        throw StateError('Не удалось прочитать файл ${file.name}');
-      }
-      links.add(await repo.attachFile(file.path!));
-    }
-    return ClipboardPaste(links.join('\n\n'), hasAttachments: true);
-  });
-
-  Future<void> _linkNote() async {
-    final selection = _selection;
-    final note = await pickNote(context, excludeId: widget.noteId);
-    if (note == null || !mounted || widget.readOnly) return;
-    _insert(
-      ClipboardPaste(
-        WikiNoteIndex(ref.read(appProvider).snapshot).linkFor(note),
-        hasAttachments: false,
-      ),
-      selection,
-    );
-  }
-
   void _insert(ClipboardPaste content, TextSelection selection) {
     final start = selection.start.clamp(0, _last.length);
     final end = selection.end.clamp(start, _last.length);
@@ -531,18 +491,13 @@ class LiveMarkdownEditorState extends ConsumerState<LiveMarkdownEditor> {
     setState(() {
       _load(next);
       _rememberedSelection = null;
-      String edited;
-      if (_source) {
-        edited = next;
-      } else {
-        var index = 0;
-        while (index < _blocks.length - 1 && caret > _blocks[index].length) {
-          caret -= _blocks[index].length + 2;
-          index++;
-        }
-        _active = index;
-        edited = _blocks[index];
+      var index = 0;
+      while (index < _blocks.length - 1 && caret > _blocks[index].length) {
+        caret -= _blocks[index].length + 2;
+        index++;
       }
+      _active = index;
+      final edited = _blocks[index];
       _controller.value = TextEditingValue(
         text: edited,
         selection: TextSelection.collapsed(
@@ -561,7 +516,7 @@ class LiveMarkdownEditorState extends ConsumerState<LiveMarkdownEditor> {
       // Temporarily edit the entire note as one block. On blur, Live Preview
       // splits it again without changing whitespace or the Markdown source.
       _blocks = [_last];
-      _active = _source ? null : 0;
+      _active = 0;
       _rememberedSelection = null;
       _controller.value = TextEditingValue(
         text: _last,
@@ -622,7 +577,7 @@ class LiveMarkdownEditorState extends ConsumerState<LiveMarkdownEditor> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         mainAxisSize: MainAxisSize.min,
         children: [
-          if (_showToolbarActions ||
+          if ((widget.toolbar && widget.toolbarLabel.isNotEmpty) ||
               widget.toolbarLeading != null ||
               widget.toolbarTrailing != null)
             Row(
@@ -638,52 +593,6 @@ class LiveMarkdownEditorState extends ConsumerState<LiveMarkdownEditor> {
                     ),
                   ),
                 const Spacer(),
-                if (_showToolbarActions) ...[
-                  IconButton(
-                    tooltip: 'Ссылка на заметку',
-                    onPressed: _pasting ? null : _linkNote,
-                    icon: const Icon(Icons.add_link_rounded, size: 19),
-                  ),
-                  IconButton(
-                    tooltip: 'Прикрепить изображение или файл',
-                    onPressed: _pasting ? null : _attach,
-                    icon: const Icon(Icons.attach_file_rounded, size: 19),
-                  ),
-                  IconButton(
-                    tooltip: 'Вставить из буфера обмена',
-                    onPressed: _pasting ? null : _paste,
-                    icon: _pasting
-                        ? const SizedBox(
-                            width: 18,
-                            height: 18,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : const Icon(Icons.content_paste_rounded, size: 18),
-                  ),
-                  IconButton(
-                    tooltip: _source ? 'Live Preview' : 'Исходный Markdown',
-                    onPressed: _pasting
-                        ? null
-                        : () {
-                            if (widget.editOnLongPress && _source) {
-                              finishEditing();
-                              return;
-                            }
-                            setState(() {
-                              _source = !_source;
-                              _active = null;
-                              _controller.text = _last;
-                              _rememberedSelection = null;
-                              _load(_last);
-                            });
-                            if (widget.editOnLongPress) _focus.requestFocus();
-                          },
-                    icon: Icon(
-                      _source ? Icons.visibility_outlined : Icons.code_rounded,
-                      size: 19,
-                    ),
-                  ),
-                ],
                 if (widget.toolbarTrailing != null) widget.toolbarTrailing!,
               ],
             ),
@@ -692,36 +601,6 @@ class LiveMarkdownEditorState extends ConsumerState<LiveMarkdownEditor> {
               padding: const EdgeInsets.symmetric(vertical: 8),
               child: MarkdownPreview(
                 text: _last.isEmpty ? 'Пока пусто' : _last,
-              ),
-            )
-          else if (_source)
-            _autocomplete(
-              TextField(
-                key: _inputKey,
-                controller: _controller,
-                focusNode: _focus,
-                groupId: _focus,
-                onTapOutside: widget.editOnLongPress
-                    ? (_) => finishEditing()
-                    : null,
-                readOnly: _pasting,
-                contextMenuBuilder: _contextMenu,
-                inputFormatters: const [MarkdownTaskInputFormatter()],
-                maxLines: null,
-                minLines: 5,
-                style: const TextStyle(
-                  fontFamily: 'monospace',
-                  fontSize: 13,
-                  height: 1.6,
-                ),
-                decoration: InputDecoration(
-                  hintText: widget.placeholder,
-                  border: InputBorder.none,
-                  enabledBorder: InputBorder.none,
-                  focusedBorder: InputBorder.none,
-                  fillColor: Colors.transparent,
-                ),
-                onChanged: _changed,
               ),
             )
           else
@@ -744,7 +623,9 @@ class LiveMarkdownEditorState extends ConsumerState<LiveMarkdownEditor> {
                         minLines: 1,
                         style: const TextStyle(fontSize: 14, height: 1.65),
                         decoration: InputDecoration(
-                          hintText: widget.placeholder,
+                          hintText: _last.trim().isEmpty
+                              ? widget.placeholder
+                              : '',
                           filled: false,
                           border: InputBorder.none,
                           enabledBorder: InputBorder.none,
@@ -774,7 +655,9 @@ class LiveMarkdownEditorState extends ConsumerState<LiveMarkdownEditor> {
                           ),
                           child: _blocks[index].isEmpty
                               ? Text(
-                                  widget.placeholder,
+                                  _last.trim().isEmpty
+                                      ? widget.placeholder
+                                      : '',
                                   style: TextStyle(
                                     color: context.palette.muted,
                                     height: 1.65,
@@ -785,7 +668,7 @@ class LiveMarkdownEditorState extends ConsumerState<LiveMarkdownEditor> {
                       ),
                     ),
             ),
-          if (!widget.readOnly && !_source)
+          if (!widget.readOnly)
             GestureDetector(
               behavior: HitTestBehavior.opaque,
               onTap: widget.editOnLongPress ? finishEditing : _editEnd,

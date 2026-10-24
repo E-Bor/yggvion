@@ -74,9 +74,9 @@ void main() {
     },
   );
 
-  for (final source in [false, true]) {
+  for (final selectAll in [false, true]) {
     testInteraction(
-      'desktop shortcuts survive clicking outside a note (source: $source)',
+      'desktop shortcuts survive clicking outside a note (select all: $selectAll)',
       (tester) async {
         final repo = await workspace(
           tester,
@@ -87,15 +87,15 @@ void main() {
           ),
         );
         await command(tester, LogicalKeyboardKey.digit4);
-        if (source) {
-          await tester.tap(find.byTooltip('Исходный Markdown'));
-        } else {
-          await tester.tap(
-            find.text('Текст для редактирования', findRichText: true),
-          );
-        }
+        await tester.tap(
+          find.text('Текст для редактирования', findRichText: true),
+        );
         await settle(tester);
-        await tester.enterText(find.byType(TextField), 'Сохранённая правка');
+        if (selectAll) await command(tester, LogicalKeyboardKey.keyA);
+        await tester.enterText(
+          find.byType(TextField),
+          'Сохранённая правка\n\n',
+        );
         await settle(tester);
         // A real mouse click invokes TextField's default onTapOutside.
         await tester.tapAt(
@@ -105,6 +105,10 @@ void main() {
         );
         await settle(tester);
         expect(tester.testTextInput.isVisible, isFalse);
+        expect(
+          find.text('Черновики, конфиги, файлы — просто начните писать…'),
+          findsNothing,
+        );
         await command(tester, LogicalKeyboardKey.keyF);
         expect(find.byType(SearchDialog), findsOneWidget);
         await tester.sendKeyEvent(LogicalKeyboardKey.escape);
@@ -127,7 +131,7 @@ void main() {
         expect(find.byType(NotesPage), findsOneWidget);
         expect(
           repo.snapshot.notes.singleWhere((n) => n.id == 'scratchpad').content,
-          'Сохранённая правка',
+          'Сохранённая правка\n\n',
         );
         expect(tester.takeException(), isNull);
       },

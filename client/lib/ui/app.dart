@@ -528,16 +528,10 @@ class _WorkspaceState extends ConsumerState<Workspace>
                     letterSpacing: -.8,
                   ),
                 ),
-                if (desktop)
+                if (desktop && page == PageKind.settings)
                   Text(
                     birthdays
                         ? 'Настройки · Близкие люди и важные даты'
-                        : page == PageKind.planner
-                        ? 'Найдите время для важного'
-                        : page == PageKind.board
-                        ? 'От идеи до завершения'
-                        : page == PageKind.notes
-                        ? 'Место для мыслей и знаний'
                         : 'Ваше рабочее пространство',
                     style: TextStyle(
                       color: context.palette.muted,

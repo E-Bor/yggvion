@@ -359,9 +359,9 @@ void main() {
     await tester.pumpAndSettle();
   }
 
-  for (final source in [false, true]) {
+  for (final selectAll in [false, true]) {
     testWidgets(
-      'keyboard paste replaces the selection and keeps surrounding Markdown (source: $source)',
+      'keyboard paste replaces the selection and keeps surrounding Markdown (select all: $selectAll)',
       (tester) async {
         var value = 'Before middle after';
         await tester.pumpWidget(
@@ -386,12 +386,14 @@ void main() {
             ),
           ),
         );
-        if (source) {
-          await tester.tap(find.byTooltip('Исходный Markdown'));
-        } else {
-          await tester.tap(find.text(value));
-        }
+        await tester.tap(find.text(value));
         await tester.pumpAndSettle();
+        if (selectAll) {
+          await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+          await tester.sendKeyEvent(LogicalKeyboardKey.keyA);
+          await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+          await tester.pumpAndSettle();
+        }
         final field = tester.widget<TextField>(find.byType(TextField));
         await tester.tap(find.byType(TextField));
         field.controller!.selection = const TextSelection(
@@ -410,7 +412,7 @@ void main() {
   }
 
   testWidgets(
-    'paste button attaches a file, preserves the caret, and reports failures without changing text',
+    'context menu paste attaches a file, preserves the caret, and reports failures without changing text',
     (tester) async {
       final file = File('${directory.path}/notes.txt');
       await tester.runAsync(() => file.writeAsString('attachment text'));
@@ -445,10 +447,15 @@ void main() {
       );
       await tester.tap(find.text(value));
       await tester.pumpAndSettle();
+      await tester.tap(find.byType(TextField));
       tester.widget<TextField>(find.byType(TextField)).controller!.selection =
           const TextSelection.collapsed(offset: 7);
+      await tester.pumpAndSettle();
+      final input = tester.state<EditableTextState>(find.byType(EditableText));
+      expect(input.showToolbar(), isTrue);
+      await tester.pumpAndSettle();
       await tester.runAsync(() async {
-        await tester.tap(find.byTooltip('Вставить из буфера обмена'));
+        await tester.tap(find.text('Paste'));
         await Future<void>.delayed(const Duration(milliseconds: 100));
       });
       await finishPaste(tester);
@@ -456,7 +463,9 @@ void main() {
       expect(value, endsWith('\n\nafter'));
       final before = value;
       fail = true;
-      await tester.tap(find.byTooltip('Вставить из буфера обмена'));
+      tester.state<EditableTextState>(find.byType(EditableText)).showToolbar();
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Paste'));
       await finishPaste(tester);
       expect(value, before);
       expect(find.textContaining('Clipboard unavailable'), findsOneWidget);

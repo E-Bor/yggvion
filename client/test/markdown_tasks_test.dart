@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:intl/date_symbol_data_local.dart';
@@ -288,9 +289,9 @@ void main() {
     },
   );
 
-  for (final source in [false, true]) {
+  for (final selectAll in [false, true]) {
     testInteraction(
-      'Enter continues tasks in the actual editor (source: $source)',
+      'Enter continues tasks in the actual editor (select all: $selectAll)',
       (tester) async {
         var text = '- [x] Готово';
         await preview(
@@ -304,12 +305,14 @@ void main() {
             },
           ),
         );
-        if (source) {
-          await tester.tap(find.byTooltip('Исходный Markdown'));
-        } else {
-          await tester.tap(find.textContaining('Готово', findRichText: true));
-        }
+        await tester.tap(find.textContaining('Готово', findRichText: true));
         await tester.pumpAndSettle();
+        if (selectAll) {
+          await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+          await tester.sendKeyEvent(LogicalKeyboardKey.keyA);
+          await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+          await tester.pumpAndSettle();
+        }
         final field = find.byType(TextField);
         await tester.showKeyboard(field);
         await tester.enterText(field, text);

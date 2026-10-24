@@ -232,7 +232,7 @@ void main() {
   }
 
   testInteraction(
-    'phone Markdown toolbar stays interactive and source mode closes on outside tap',
+    'phone Markdown editing stays usable with the keyboard and closes on outside tap',
     (tester) async {
       final repo = await workspace(
         tester,
@@ -256,10 +256,14 @@ void main() {
         find.byType(YggvionApp),
         matchesGoldenFile('goldens/notes_editing_390.png'),
       );
-      await tester.ensureVisible(find.byTooltip('Исходный Markdown'));
-      await tester.tap(find.byTooltip('Исходный Markdown'));
-      await settle(tester);
-      expect(find.byTooltip('Live Preview'), findsOneWidget);
+      expect(find.byTooltip('Исходный Markdown'), findsNothing);
+      expect(find.byTooltip('Ссылка на заметку'), findsNothing);
+      expect(find.byTooltip('Прикрепить изображение или файл'), findsNothing);
+      expect(find.byTooltip('Вставить из буфера обмена'), findsNothing);
+      expect(
+        find.byKey(const ValueKey('finish-note-scratchpad')),
+        findsOneWidget,
+      );
       expect(tester.testTextInput.isVisible, isTrue);
       await tester.enterText(
         find.byWidgetPredicate((w) => w is TextField && w.maxLines == null),

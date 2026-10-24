@@ -33,14 +33,16 @@ void main() {
           find.byKey(const ValueKey('task-title')),
           'Обсудить проект',
         );
-        final link = find.descendant(
-          of: find.byType(TaskEditor),
-          matching: find.byTooltip('Ссылка на заметку'),
+        await command(tester, LogicalKeyboardKey.enter);
+        final description = find.descendant(
+          of: find.byType(LiveMarkdownEditor),
+          matching: find.byType(TextField),
         );
-        await tester.ensureVisible(link);
-        await tester.tap(link);
+        await tester.enterText(description, '[[Материалы');
         await settle(tester);
-        await tester.tap(find.text('Материалы встречи'));
+        final option = find.byKey(ValueKey('wiki-option-$id'));
+        await tester.ensureVisible(option);
+        await tester.tap(option);
         await settle(tester);
         await tester.tap(find.text('Сохранить'));
         await settle(tester);
