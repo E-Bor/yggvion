@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -59,10 +61,11 @@ class TaskCard extends ConsumerWidget {
     this.selected = false,
     this.onSelect,
     this.compact = false,
+    this.showDescription = false,
     this.enableLongPress = true,
   });
   final Task task;
-  final bool selected, compact, enableLongPress;
+  final bool selected, compact, enableLongPress, showDescription;
   final VoidCallback? onSelect;
   void action(BuildContext context, WidgetRef ref, String value) {
     final repo = ref.read(appProvider);
@@ -199,6 +202,8 @@ class TaskCard extends ConsumerWidget {
                               : context.palette.text,
                         ),
                       ),
+                      if (showDescription)
+                        TaskDescriptionPreview(description: task.description),
                       const SizedBox(height: 7),
                       Wrap(
                         spacing: 8,
@@ -274,6 +279,29 @@ class TaskCard extends ConsumerWidget {
             ),
           ),
         ),
+      ),
+    );
+  }
+}
+
+class TaskDescriptionPreview extends StatelessWidget {
+  const TaskDescriptionPreview({super.key, required this.description});
+
+  final String description;
+
+  @override
+  Widget build(BuildContext context) {
+    final firstLine = LineSplitter.split(
+      description,
+    ).map((line) => line.trim()).where((line) => line.isNotEmpty).firstOrNull;
+    if (firstLine == null) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.only(top: 5),
+      child: Text(
+        firstLine,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: TextStyle(fontSize: 12, color: context.palette.muted),
       ),
     );
   }

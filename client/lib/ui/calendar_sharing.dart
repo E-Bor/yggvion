@@ -9,6 +9,7 @@ import 'package:timezone/timezone.dart' as tz;
 
 import '../domain/models.dart';
 import 'providers.dart';
+import 'task_card.dart';
 import 'task_editor.dart';
 import 'theme.dart';
 
@@ -370,19 +371,7 @@ class ProposedTaskCard extends ConsumerWidget {
                   fontWeight: FontWeight.w600,
                 ),
               ),
-              if (task.description.trim().isNotEmpty)
-                Padding(
-                  padding: const EdgeInsets.only(top: 5),
-                  child: Text(
-                    task.description,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: context.palette.muted,
-                    ),
-                  ),
-                ),
+              TaskDescriptionPreview(description: task.description),
               const SizedBox(height: 12),
               Row(
                 children: [

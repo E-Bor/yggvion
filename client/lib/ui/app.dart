@@ -1181,6 +1181,7 @@ class _WorkspaceState extends ConsumerState<Workspace>
                           TaskCard(
                             task: task,
                             selected: selected?.id == task.id,
+                            showDescription: true,
                             onSelect: choose,
                           ),
                       ],
