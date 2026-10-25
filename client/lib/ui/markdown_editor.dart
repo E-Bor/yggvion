@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart' show defaultTargetPlatform;
 import 'package:flutter/services.dart';
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -11,6 +12,7 @@ import '../domain/models.dart';
 import '../domain/markdown_blocks.dart';
 import '../domain/markdown_tasks.dart';
 import 'markdown_tasks.dart';
+import 'markdown_live_controller.dart';
 import 'markdown_code_block.dart';
 import '../domain/note_links.dart';
 import 'providers.dart';
@@ -264,8 +266,8 @@ Future<void> _openWikiLink(
   }
 }
 
-/// The focused Markdown block exposes source; other blocks render immediately.
-/// Raw text remains authoritative, preserving Markdown that the renderer cannot display.
+/// One native text input keeps source offsets, selection and newlines intact.
+/// Closed Markdown renders inline; source markers return around the caret.
 class LiveMarkdownEditor extends ConsumerStatefulWidget {
   const LiveMarkdownEditor({
     super.key,
@@ -291,16 +293,68 @@ class LiveMarkdownEditor extends ConsumerStatefulWidget {
   ConsumerState<LiveMarkdownEditor> createState() => LiveMarkdownEditorState();
 }
 
-class LiveMarkdownEditorState extends ConsumerState<LiveMarkdownEditor> {
+class LiveMarkdownEditorState extends ConsumerState<LiveMarkdownEditor>
+    with UndoManagerClient {
   late List<String> _blocks;
-  int? _active;
+  bool _isEditing = false;
   bool _pasting = false;
   TextSelection? _rememberedSelection;
-  final _controller = TextEditingController();
+  final _controller = MarkdownLiveController();
   final _inputKey = GlobalKey();
   final _focus = FocusNode();
   String _last = '';
-  bool get _isEditing => _active != null;
+
+  final _document = ValueNotifier<TextEditingValue>(TextEditingValue.empty);
+  final _history = UndoHistoryController();
+  Key _historyKey = UniqueKey();
+
+  @override
+  bool get canUndo => _history.value.canUndo && !_pasting && !widget.readOnly;
+  @override
+  bool get canRedo => _history.value.canRedo && !_pasting && !widget.readOnly;
+  @override
+  void undo() {
+    if (!_pasting && !widget.readOnly) _history.undo();
+  }
+
+  @override
+  void redo() {
+    if (!_pasting && !widget.readOnly) _history.redo();
+  }
+
+  @override
+  void handlePlatformUndo(UndoDirection direction) {
+    switch (direction) {
+      case UndoDirection.undo:
+        undo();
+      case UndoDirection.redo:
+        redo();
+    }
+  }
+
+  void _updatePlatformUndo() {
+    if (_focus.hasFocus &&
+        UndoManager.client == this &&
+        defaultTargetPlatform == TargetPlatform.iOS) {
+      UndoManager.setUndoState(canUndo: canUndo, canRedo: canRedo);
+    }
+  }
+
+  void _publishEdit() {
+    _document.value = TextEditingValue(text: _last, selection: _selection);
+    widget.onChanged(normalizeMarkdownEnding(_last));
+  }
+
+  void _restoreDocument(TextEditingValue value) {
+    setState(() {
+      _document.value = value;
+      _last = value.text;
+      _isEditing = true;
+      _controller.value = value;
+    });
+    widget.onChanged(normalizeMarkdownEnding(_last));
+    _focus.requestFocus();
+  }
 
   void finishEditing() {
     _focus.unfocus(disposition: UnfocusDisposition.previouslyFocusedChild);
@@ -309,7 +363,7 @@ class LiveMarkdownEditorState extends ConsumerState<LiveMarkdownEditor> {
 
   void focusEditor() {
     if (widget.readOnly || _pasting) return;
-    if (_active == null) {
+    if (!_isEditing) {
       _edit(0);
     } else {
       _focus.requestFocus();
@@ -329,7 +383,12 @@ class LiveMarkdownEditorState extends ConsumerState<LiveMarkdownEditor> {
   void initState() {
     super.initState();
     _load(widget.value);
+    _document.value = TextEditingValue(
+      text: _last,
+      selection: TextSelection.collapsed(offset: _last.length),
+    );
     _focus.addListener(_focusChanged);
+    _history.addListener(_updatePlatformUndo);
   }
 
   void _load(String value) {
@@ -339,25 +398,36 @@ class LiveMarkdownEditorState extends ConsumerState<LiveMarkdownEditor> {
 
   static List<String> _split(String value) {
     final parts = <String>[];
-    var buffer = <String>[];
     MarkdownFence? fence;
+    var start = 0, offset = 0;
     for (final line in value.split('\n')) {
       if (fence != null) {
-        buffer.add(line);
-        if (fence.closes(line)) fence = null;
-        continue;
-      }
-      fence = MarkdownFence.open(line);
-      if (line.isEmpty && fence == null && buffer.isNotEmpty) {
-        parts.add(buffer.join('\n'));
-        buffer = [];
+        if (fence.closes(line)) {
+          fence = null;
+          if (offset + line.length < value.length) {
+            parts.add(value.substring(start, offset + line.length + 1));
+            start = offset + line.length + 1;
+          }
+        }
       } else {
-        buffer.add(line);
+        fence = MarkdownFence.open(line);
+        if (fence != null && offset > start) {
+          parts.add(value.substring(start, offset));
+          start = offset;
+        }
+        // Consume an actual blank-line separator, never the single final
+        // newline needed to keep typing on the next line.
+        if (fence == null &&
+            line.isEmpty &&
+            offset > start &&
+            offset < value.length) {
+          parts.add(value.substring(start, offset + 1));
+          start = offset + 1;
+        }
       }
+      offset += line.length + 1;
     }
-    if (buffer.isNotEmpty) parts.add(buffer.join('\n'));
-    // Blank lines may belong to a loose list. Rendering its indented children
-    // separately would turn nested checkboxes into code blocks.
+    parts.add(value.substring(start));
     final listStart = RegExp(r'^\n* {0,3}(?:[-+*]|[0-9]{1,9}[.)])[ \t]+');
     final indented = RegExp(r'^\n*(?: {2,}|\t)');
     final blocks = <String>[];
@@ -365,12 +435,12 @@ class LiveMarkdownEditorState extends ConsumerState<LiveMarkdownEditor> {
       if (blocks.isNotEmpty &&
           listStart.hasMatch(blocks.last) &&
           (listStart.hasMatch(part) || indented.hasMatch(part))) {
-        blocks[blocks.length - 1] = '${blocks.last}\n\n$part';
+        blocks[blocks.length - 1] = '${blocks.last}$part';
       } else {
         blocks.add(part);
       }
     }
-    return blocks.isEmpty ? [''] : blocks;
+    return blocks;
   }
 
   @override
@@ -378,7 +448,12 @@ class LiveMarkdownEditorState extends ConsumerState<LiveMarkdownEditor> {
     super.didUpdateWidget(oldWidget);
     if (widget.value != _last && !_focus.hasFocus) {
       _load(widget.value);
-      _active = null;
+      _historyKey = UniqueKey();
+      _document.value = TextEditingValue(
+        text: _last,
+        selection: TextSelection.collapsed(offset: _last.length),
+      );
+      _isEditing = false;
       _rememberedSelection = null;
     }
     if (widget.readOnly && !oldWidget.readOnly) {
@@ -388,7 +463,16 @@ class LiveMarkdownEditorState extends ConsumerState<LiveMarkdownEditor> {
   }
 
   void _focusChanged() {
+    if (_focus.hasFocus) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted || !_focus.hasFocus) return;
+        // Native iOS undo must restore the document, not the active paragraph.
+        UndoManager.client = this;
+        _updatePlatformUndo();
+      });
+    }
     if (!_focus.hasFocus && mounted) {
+      if (UndoManager.client == this) UndoManager.client = null;
       _rememberedSelection = _selection;
       if (!_pasting) _finish();
     }
@@ -397,19 +481,24 @@ class LiveMarkdownEditorState extends ConsumerState<LiveMarkdownEditor> {
   void _finish({bool notify = true}) {
     if (!_isEditing) return;
     setState(() {
-      _load(_last);
-      _active = null;
+      _load(normalizeMarkdownEnding(_last));
+      _isEditing = false;
     });
     if (notify) widget.onEditingChanged?.call(false);
   }
 
   void _edit(int index) {
     final wasEditing = _isEditing;
+    final offset =
+        _blocks.take(index).fold<int>(0, (n, part) => n + part.length) +
+        _blocks[index].trimRight().length;
     setState(() {
-      _active = index;
-      _controller.text = _blocks[index];
-      _controller.selection = TextSelection.collapsed(
-        offset: _controller.text.length,
+      _isEditing = true;
+      _controller.value = TextEditingValue(
+        text: _last,
+        selection: TextSelection.collapsed(
+          offset: offset.clamp(0, _last.length),
+        ),
       );
     });
     _focus.requestFocus();
@@ -417,26 +506,23 @@ class LiveMarkdownEditorState extends ConsumerState<LiveMarkdownEditor> {
   }
 
   void _editEnd() {
-    if (_blocks.last.isNotEmpty) _blocks.add('');
-    _edit(_blocks.length - 1);
+    // Clicking the empty area only moves the caret; it must not insert text.
+    if (!_isEditing) _edit(_blocks.length - 1);
+    _controller.selection = TextSelection.collapsed(offset: _last.length);
+    _focus.requestFocus();
   }
 
   void _changed(String value) {
-    _blocks[_active!] = value;
-    _last = _blocks.join('\n\n');
-    widget.onChanged(_last);
+    final wasEmpty = _last.isEmpty;
+    _last = value;
+    if (wasEmpty != value.isEmpty) setState(() {});
+    _publishEdit();
   }
 
   TextSelection get _selection {
     final selection = _controller.selection;
-    if (_active != null && selection.isValid) {
-      final offset = _blocks
-          .take(_active!)
-          .fold<int>(0, (n, block) => n + block.length + 2);
-      return TextSelection(
-        baseOffset: offset + selection.baseOffset,
-        extentOffset: offset + selection.extentOffset,
-      );
+    if (_isEditing && selection.isValid) {
+      return selection;
     }
     return _rememberedSelection ??
         TextSelection.collapsed(offset: _last.length);
@@ -487,25 +573,18 @@ class LiveMarkdownEditorState extends ConsumerState<LiveMarkdownEditor> {
       if (!suffix.startsWith('\n\n')) inserted = '$inserted\n\n';
     }
     final next = '$prefix$inserted$suffix';
-    var caret = prefix.length + inserted.length;
     setState(() {
-      _load(next);
+      _last = next;
       _rememberedSelection = null;
-      var index = 0;
-      while (index < _blocks.length - 1 && caret > _blocks[index].length) {
-        caret -= _blocks[index].length + 2;
-        index++;
-      }
-      _active = index;
-      final edited = _blocks[index];
+      _isEditing = true;
       _controller.value = TextEditingValue(
-        text: edited,
+        text: next,
         selection: TextSelection.collapsed(
-          offset: caret.clamp(0, edited.length),
+          offset: prefix.length + inserted.length,
         ),
       );
     });
-    widget.onChanged(next);
+    _publishEdit();
     _focus.requestFocus();
   }
 
@@ -513,10 +592,8 @@ class LiveMarkdownEditorState extends ConsumerState<LiveMarkdownEditor> {
     if (widget.readOnly || _pasting) return;
     final wasEditing = _isEditing;
     setState(() {
-      // Temporarily edit the entire note as one block. On blur, Live Preview
-      // splits it again without changing whitespace or the Markdown source.
-      _blocks = [_last];
-      _active = 0;
+      // Native selection spans the complete source document.
+      _isEditing = true;
       _rememberedSelection = null;
       _controller.value = TextEditingValue(
         text: _last,
@@ -559,123 +636,175 @@ class LiveMarkdownEditorState extends ConsumerState<LiveMarkdownEditor> {
   void dispose() {
     _focus.removeListener(_focusChanged);
     _focus.dispose();
+
     _controller.dispose();
+    _document.dispose();
+    _history.removeListener(_updatePlatformUndo);
+    _history.dispose();
+    if (UndoManager.client == this) UndoManager.client = null;
     super.dispose();
   }
 
   @override
-  Widget build(BuildContext context) => Actions(
-    actions: {
-      if (!widget.readOnly)
-        PasteTextIntent: CallbackAction<PasteTextIntent>(
-          onInvoke: (_) => _paste(),
+  Widget build(BuildContext context) => UndoHistory<TextEditingValue>(
+    key: _historyKey,
+    controller: _history,
+    value: _document,
+    focusNode: _focus,
+    shouldChangeUndoStack: (before, after) => before?.text != after.text,
+    onTriggered: _restoreDocument,
+    child: Actions(
+      actions: {
+        UndoTextIntent: CallbackAction<UndoTextIntent>(
+          onInvoke: (_) {
+            undo();
+            return null;
+          },
         ),
-    },
-    child: TextFieldTapRegion(
-      groupId: _focus,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          if ((widget.toolbar && widget.toolbarLabel.isNotEmpty) ||
-              widget.toolbarLeading != null ||
-              widget.toolbarTrailing != null)
-            Row(
-              children: [
-                if (widget.toolbarLeading != null)
-                  widget.toolbarLeading!
-                else if (widget.toolbarLabel.isNotEmpty)
-                  Text(
-                    widget.toolbarLabel,
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: context.palette.muted,
+        RedoTextIntent: CallbackAction<RedoTextIntent>(
+          onInvoke: (_) {
+            redo();
+            return null;
+          },
+        ),
+        if (!widget.readOnly)
+          PasteTextIntent: CallbackAction<PasteTextIntent>(
+            onInvoke: (_) => _paste(),
+          ),
+      },
+      child: TextFieldTapRegion(
+        groupId: _focus,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if ((widget.toolbar && widget.toolbarLabel.isNotEmpty) ||
+                widget.toolbarLeading != null ||
+                widget.toolbarTrailing != null)
+              Row(
+                children: [
+                  if (widget.toolbarLeading != null)
+                    widget.toolbarLeading!
+                  else if (widget.toolbarLabel.isNotEmpty)
+                    Text(
+                      widget.toolbarLabel,
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: context.palette.muted,
+                      ),
+                    ),
+                  const Spacer(),
+                  if (widget.toolbarTrailing != null) widget.toolbarTrailing!,
+                ],
+              ),
+            if (widget.readOnly)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 8),
+                child: MarkdownPreview(
+                  text: _last.isEmpty ? 'Пока пусто' : _last,
+                ),
+              )
+            else if (_isEditing)
+              LayoutBuilder(
+                builder: (context, bounds) {
+                  _controller.previewWidth = (bounds.maxWidth - 10).clamp(
+                    1,
+                    double.infinity,
+                  );
+                  _controller.preview = (source) =>
+                      MarkdownPreview(text: source, selectable: false);
+                  _controller.toggleTask = _pasting
+                      ? null
+                      : (offset, checked) {
+                          if (widget.readOnly || offset >= _last.length) return;
+                          final next = _last.replaceRange(
+                            offset,
+                            offset + 1,
+                            checked ? 'x' : ' ',
+                          );
+                          _controller.value = _controller.value.copyWith(
+                            text: next,
+                          );
+                          _changed(next);
+                        };
+                  return _autocomplete(
+                    TextField(
+                      key: _inputKey,
+                      controller: _controller,
+                      focusNode: _focus,
+                      groupId: _focus,
+                      onTapOutside: widget.editOnLongPress
+                          ? (_) => finishEditing()
+                          : null,
+                      readOnly: _pasting,
+                      contextMenuBuilder: _contextMenu,
+                      inputFormatters: const [MarkdownTaskInputFormatter()],
+                      maxLines: null,
+                      minLines: 1,
+                      style: const TextStyle(fontSize: 14, height: 1.65),
+                      strutStyle: const StrutStyle(
+                        fontSize: 14,
+                        height: 1.65,
+                        forceStrutHeight: false,
+                      ),
+                      decoration: InputDecoration(
+                        hintText: _last.isEmpty ? widget.placeholder : '',
+                        filled: false,
+                        border: InputBorder.none,
+                        enabledBorder: InputBorder.none,
+                        focusedBorder: InputBorder.none,
+                        contentPadding: const EdgeInsets.symmetric(
+                          vertical: 9,
+                          horizontal: 3,
+                        ),
+                      ),
+                      onChanged: _changed,
+                    ),
+                  );
+                },
+              )
+            else
+              ...List.generate(
+                _blocks.length,
+                (index) => GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: widget.editOnLongPress
+                      ? finishEditing
+                      : () => _edit(index),
+                  onLongPress: widget.editOnLongPress
+                      ? () => _edit(index)
+                      : null,
+                  child: MouseRegion(
+                    cursor: SystemMouseCursors.text,
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        vertical: 9,
+                        horizontal: 3,
+                      ),
+                      child: _blocks[index].isEmpty
+                          ? Text(
+                              _last.isEmpty && index == 0
+                                  ? widget.placeholder
+                                  : '',
+                              style: TextStyle(
+                                color: context.palette.muted,
+                                height: 1.65,
+                              ),
+                            )
+                          : _previewBlock(index),
                     ),
                   ),
-                const Spacer(),
-                if (widget.toolbarTrailing != null) widget.toolbarTrailing!,
-              ],
-            ),
-          if (widget.readOnly)
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 8),
-              child: MarkdownPreview(
-                text: _last.isEmpty ? 'Пока пусто' : _last,
+                ),
               ),
-            )
-          else
-            ...List.generate(
-              _blocks.length,
-              (index) => _active == index
-                  ? _autocomplete(
-                      TextField(
-                        key: _inputKey,
-                        controller: _controller,
-                        focusNode: _focus,
-                        groupId: _focus,
-                        onTapOutside: widget.editOnLongPress
-                            ? (_) => finishEditing()
-                            : null,
-                        readOnly: _pasting,
-                        contextMenuBuilder: _contextMenu,
-                        inputFormatters: const [MarkdownTaskInputFormatter()],
-                        maxLines: null,
-                        minLines: 1,
-                        style: const TextStyle(fontSize: 14, height: 1.65),
-                        decoration: InputDecoration(
-                          hintText: _last.trim().isEmpty
-                              ? widget.placeholder
-                              : '',
-                          filled: false,
-                          border: InputBorder.none,
-                          enabledBorder: InputBorder.none,
-                          focusedBorder: InputBorder.none,
-                          contentPadding: const EdgeInsets.symmetric(
-                            vertical: 9,
-                            horizontal: 3,
-                          ),
-                        ),
-                        onChanged: _changed,
-                      ),
-                    )
-                  : GestureDetector(
-                      behavior: HitTestBehavior.opaque,
-                      onTap: widget.editOnLongPress
-                          ? finishEditing
-                          : () => _edit(index),
-                      onLongPress: widget.editOnLongPress
-                          ? () => _edit(index)
-                          : null,
-                      child: MouseRegion(
-                        cursor: SystemMouseCursors.text,
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(
-                            vertical: 9,
-                            horizontal: 3,
-                          ),
-                          child: _blocks[index].isEmpty
-                              ? Text(
-                                  _last.trim().isEmpty
-                                      ? widget.placeholder
-                                      : '',
-                                  style: TextStyle(
-                                    color: context.palette.muted,
-                                    height: 1.65,
-                                  ),
-                                )
-                              : _previewBlock(index),
-                        ),
-                      ),
-                    ),
-            ),
-          if (!widget.readOnly)
-            GestureDetector(
-              behavior: HitTestBehavior.opaque,
-              onTap: widget.editOnLongPress ? finishEditing : _editEnd,
-              onLongPress: widget.editOnLongPress ? _editEnd : null,
-              child: const SizedBox(height: 40),
-            ),
-        ],
+            if (!widget.readOnly)
+              GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: widget.editOnLongPress ? finishEditing : _editEnd,
+                onLongPress: widget.editOnLongPress ? _editEnd : null,
+                child: const SizedBox(height: 40),
+              ),
+          ],
+        ),
       ),
     ),
   );
@@ -684,7 +813,7 @@ class LiveMarkdownEditorState extends ConsumerState<LiveMarkdownEditor> {
     final block = _blocks[index], document = _last;
     final start = _blocks
         .take(index)
-        .fold<int>(0, (n, part) => n + part.length + 2);
+        .fold<int>(0, (n, part) => n + part.length);
     return MarkdownPreview(
       text: block,
       selectable: false,
@@ -698,13 +827,9 @@ class LiveMarkdownEditorState extends ConsumerState<LiveMarkdownEditor> {
                   start + block.length,
                   value,
                 );
-                if (_active == null) {
-                  _load(_last);
-                } else {
-                  _blocks[index] = value;
-                }
+                _load(_last);
               });
-              widget.onChanged(_last);
+              _publishEdit();
             },
     );
   }

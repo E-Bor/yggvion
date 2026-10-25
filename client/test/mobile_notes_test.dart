@@ -166,7 +166,7 @@ void main() {
         expect(field, findsOneWidget);
         expect(
           tester.widget<TextField>(field).controller!.text,
-          'Второй абзац',
+          'Первый абзац\n\nВторой абзац',
         );
         expect(tester.widget<TextField>(field).focusNode!.hasFocus, isTrue);
         expect(tester.testTextInput.isVisible, isTrue);
@@ -174,14 +174,23 @@ void main() {
         await tester.tap(field);
         await settle(tester);
         expect(tester.testTextInput.isVisible, isTrue);
-        await tester.enterText(field, 'Второй абзац с правкой');
+        await tester.enterText(field, 'Первый абзац\n\nВторой абзац с правкой');
         await settle(tester);
         expect(
           repo.snapshot.notes.singleWhere((n) => n.id == id).content,
           'Первый абзац\n\nВторой абзац с правкой',
         );
 
-        await tester.tap(find.text('Первый абзац', findRichText: true));
+        // The whole document now belongs to one input. Leave editing via the
+        // surrounding note card, keeping taps within text for cursor movement.
+        await tester.tapAt(
+          tester.getTopLeft(
+                find.byWidgetPredicate(
+                  (widget) => widget is NotePanel && widget.noteId == id,
+                ),
+              ) +
+              const Offset(12, 8),
+        );
         await settle(tester);
         expect(
           find.byWidgetPredicate((w) => w is TextField && w.maxLines == null),

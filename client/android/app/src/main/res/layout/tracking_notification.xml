@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent" android:layout_height="wrap_content"
+    android:orientation="vertical">
+    <TextView android:id="@+id/tracking_title" android:layout_width="match_parent"
+        android:layout_height="wrap_content" android:maxLines="1" android:ellipsize="end"
+        android:textAppearance="@android:style/TextAppearance.Material.Notification.Title" />
+    <TextView android:id="@+id/tracking_details" android:layout_width="match_parent"
+        android:layout_height="wrap_content" android:layout_marginTop="2dp" android:maxLines="1"
+        android:textAppearance="@android:style/TextAppearance.Material.Notification" />
+    <ImageView android:id="@+id/tracking_progress" android:layout_width="match_parent"
+        android:layout_height="4dp" android:layout_marginTop="4dp" android:scaleType="fitXY"
+        android:contentDescription="Факт относительно плана" />
+</LinearLayout>

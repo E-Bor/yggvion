@@ -437,7 +437,13 @@ void main() {
           );
         } else {
           expect(find.text('Первая заметка'), findsOneWidget);
-          expect(find.text('Вторая заметка'), findsOneWidget);
+          expect(
+            find.descendant(
+              of: find.byType(NoteLibrary),
+              matching: find.text('Вторая заметка'),
+            ),
+            findsOneWidget,
+          );
         }
         expect(tester.takeException(), isNull);
       },

@@ -131,7 +131,7 @@ void main() {
         expect(find.byType(NotesPage), findsOneWidget);
         expect(
           repo.snapshot.notes.singleWhere((n) => n.id == 'scratchpad').content,
-          'Сохранённая правка\n\n',
+          'Сохранённая правка\n',
         );
         expect(tester.takeException(), isNull);
       },

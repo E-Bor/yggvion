@@ -9,6 +9,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:uuid/uuid.dart';
 import 'package:timezone/timezone.dart' as tz;
 import '../domain/models.dart';
+import '../domain/markdown_blocks.dart';
 import '../domain/workday.dart';
 import '../domain/tracking_action.dart';
 import '../domain/note_links.dart';
@@ -754,7 +755,7 @@ class Repository extends ChangeNotifier {
         return _preserveNoteLinks([
           entity.change({
             'title': title.trim().isEmpty ? 'Новая заметка' : title.trim(),
-            'content': content,
+            'content': normalizeMarkdownEnding(content),
           }),
         ]);
       });
@@ -777,7 +778,7 @@ class Repository extends ChangeNotifier {
       final entity = await db.entity(id);
       if (entity == null || entity.deleted || entity.kind != 'note') return [];
       return _preserveNoteLinks([
-        entity.change({'content': content}),
+        entity.change({'content': normalizeMarkdownEnding(content)}),
       ]);
     },
   );
@@ -1098,6 +1099,8 @@ class Repository extends ChangeNotifier {
       '$id${RegExp(r'^\.[a-z0-9]{1,12}$').hasMatch(extension) ? extension : ''}',
     );
     await source.copy(target);
+    // Used once when publishing the encrypted attachment catalog.
+    await File(target).setLastModified(now());
     await db.customStatement(
       'INSERT INTO files(id,name,path) VALUES (?,?,?) ON CONFLICT(id) DO UPDATE SET path=excluded.path',
       [id, p.basename(sourcePath), target],

@@ -12,6 +12,7 @@ import '../domain/models.dart';
 import '../domain/server_metrics.dart';
 import '../domain/sync_rules.dart';
 import 'repository.dart';
+import 'attachments.dart';
 import 'encryption.dart';
 import 'file_download.dart';
 import 'package:collection/collection.dart';
@@ -542,14 +543,19 @@ class SyncService {
     _generation = next;
   }
 
+  Completer<void>? _syncDone;
+
   Future<void> sync() async {
     if (!connected || _busy || _disposed || _pairing) return;
     _busy = true;
+    final completion = Completer<void>();
+    _syncDone = completion;
     repo.syncStatus = 'Синхронизация';
     repo.syncError = null;
     repo.publish();
     try {
       await _checkGeneration();
+      await repo.ensureAttachmentCatalog();
       await _uploadEncryptedFiles();
       // Drain in dependency order; do not hold the local write queue over HTTP.
       while (!_disposed) {
@@ -596,6 +602,11 @@ class SyncService {
                     as Map<String, dynamic>,
               );
               if (result['status'] == 'conflict' &&
+                  !(local.kind == 'attachment' &&
+                      remote.kind == 'attachment' &&
+                      !local.deleted &&
+                      !remote.deleted &&
+                      local.data['file_id'] == remote.data['file_id']) &&
                   !concurrentTimerClosure(local, remote) &&
                   !(local.deleted == remote.deleted &&
                       const DeepCollectionEquality().equals(
@@ -659,6 +670,7 @@ class SyncService {
         more = body['has_more'] == true;
       }
       await _downloadEncryptedFiles();
+      await repo.purgeDeletedAttachments();
       await repo.db.customStatement(
         'DELETE FROM encrypted_outbox WHERE operation_id NOT IN (SELECT operation_id FROM outbox)',
       );
@@ -687,6 +699,8 @@ class SyncService {
       repo.syncError = '$e';
     } finally {
       _busy = false;
+      completion.complete();
+      if (identical(_syncDone, completion)) _syncDone = null;
       repo.publish();
     }
   }

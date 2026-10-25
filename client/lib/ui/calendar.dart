@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/gestures.dart';
@@ -274,6 +275,123 @@ class _CalendarPaneState extends ConsumerState<CalendarPane>
   tz.Location get _zone =>
       tz.getLocation(ref.read(appProvider).snapshot.settings.timezone);
   DateTime get _clock => _display(ref.read(appProvider).now());
+
+  final pageViewportKey = GlobalKey();
+  Timer? pageTimer;
+  int pageDirection = 0;
+  DateTime? interactionOriginFirst;
+
+  int horizontalEdge() {
+    if (widget.planningPreview ||
+        pointer == null ||
+        (drag == null && workdayDrag == null) ||
+        pageViewportKey.currentContext == null) {
+      return 0;
+    }
+    final box =
+        pageViewportKey.currentContext!.findRenderObject()! as RenderBox;
+    final view = View.of(context);
+    final windowBounds =
+        Offset.zero & (view.physicalSize / view.devicePixelRatio);
+    if (!windowBounds.contains(pointer!)) return 0;
+    final local = box.globalToLocal(pointer!);
+    // A held drag still belongs to the calendar over sibling widgets. Keep
+    // paging active across the sidebar, including items above the day grid.
+    final besideCalendar = local.dx < 0 || local.dx > box.size.width;
+    if (!besideCalendar && (local.dy < 0 || local.dy > box.size.height)) {
+      return 0;
+    }
+    // The time-label gutter is not a day: the left activation zone starts
+    // at the visible day grid, including the gutter when it is on screen.
+    final visibleGutter = math.max(
+      0.0,
+      gutter - (horizontal.hasClients ? horizontal.offset : 0.0),
+    );
+    final direction = local.dx < visibleGutter + 32
+        ? -1
+        : local.dx > box.size.width - 32
+        ? 1
+        : 0;
+    final boundary = workdayDrag;
+    if (boundary != null && direction != 0) {
+      if (boundary.start) return 0;
+      final earliest = boundary.window.start.add(const Duration(minutes: 5));
+      final latest = boundary.window.start.add(const Duration(hours: 25));
+      final nextFirst = _date(
+        interactionFirst.year,
+        interactionFirst.month,
+        interactionFirst.day + interactionCount * direction,
+      );
+      final nextEnd = _date(
+        nextFirst.year,
+        nextFirst.month,
+        nextFirst.day + interactionCount,
+      );
+      final canScroll =
+          horizontal.hasClients &&
+          (direction > 0
+              ? horizontal.offset < horizontal.position.maxScrollExtent - 1
+              : horizontal.offset > 1);
+      if (!canScroll &&
+          (!latest.isAfter(nextFirst) || !earliest.isBefore(nextEnd))) {
+        return 0;
+      }
+    }
+    return direction;
+  }
+
+  void updateEdgePage() {
+    final direction = horizontalEdge();
+    if (direction == pageDirection && pageTimer != null) return;
+    pageTimer?.cancel();
+    pageTimer = null;
+    pageDirection = direction;
+    if (direction == 0) return;
+    pageTimer = Timer(const Duration(milliseconds: 650), () {
+      pageTimer = null;
+      if (!mounted || horizontalEdge() != direction) return;
+      if (horizontal.hasClients &&
+          (direction > 0
+              ? horizontal.offset < horizontal.position.maxScrollExtent - 1
+              : horizontal.offset > 1)) {
+        horizontal.jumpTo(
+          (horizontal.offset + direction * interactionWidth).clamp(
+            horizontal.position.minScrollExtent,
+            horizontal.position.maxScrollExtent,
+          ),
+        );
+        updatePreview();
+        updateEdgePage();
+        return;
+      }
+      setState(() {
+        date = _date(
+          date.year,
+          date.month,
+          date.day + interactionCount * direction,
+        );
+        interactionFirst = _date(
+          interactionFirst.year,
+          interactionFirst.month,
+          interactionFirst.day + interactionCount * direction,
+        );
+      });
+      widget.onDateChanged?.call(date);
+      HapticFeedback.selectionClick();
+      expand();
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted || pointer == null) return;
+        if (horizontal.hasClients) {
+          horizontal.jumpTo(
+            direction > 0 ? 0 : horizontal.position.maxScrollExtent,
+          );
+        }
+        updatePreview();
+        updateEdgePage();
+      });
+    });
+  }
+
   DateTime _display(DateTime value) => tz.TZDateTime.from(value, _zone);
   DateTime _date(
     int year,
@@ -392,6 +510,7 @@ class _CalendarPaneState extends ConsumerState<CalendarPane>
 
   @override
   void dispose() {
+    pageTimer?.cancel();
     edgeTicker.dispose();
     scroll.dispose();
     horizontal.dispose();
@@ -429,6 +548,7 @@ class _CalendarPaneState extends ConsumerState<CalendarPane>
     interactionWidth = width;
     interactionCount = count;
     interactionFirst = first;
+    interactionOriginFirst = first;
   }
 
   void beginDrag(
@@ -461,10 +581,15 @@ class _CalendarPaneState extends ConsumerState<CalendarPane>
     pointer = global;
     updatePreview();
     updateEdgeScroll();
+    updateEdgePage();
   }
 
   void updatePreview() {
     final point = contentPosition(pointer!);
+    final pageDays = _dayIndex(
+      interactionFirst,
+      interactionOriginFirst ?? interactionFirst,
+    );
     final boundary = workdayDrag;
     if (boundary != null) {
       final minutes =
@@ -476,13 +601,10 @@ class _CalendarPaneState extends ConsumerState<CalendarPane>
       );
       final days = boundary.start
           ? 0
-          : column(point.dx) - column(boundary.origin.dx);
+          : pageDays + column(point.dx) - column(boundary.origin.dx);
       var minimum = boundary.start
           ? day
           : boundary.window.start.add(const Duration(minutes: 5));
-      if (!boundary.start && minimum.isBefore(interactionFirst)) {
-        minimum = interactionFirst;
-      }
       var maximum = boundary.start
           ? boundary.window.end.subtract(const Duration(minutes: 5))
           : boundary.window.start.add(const Duration(hours: 25));
@@ -494,12 +616,6 @@ class _CalendarPaneState extends ConsumerState<CalendarPane>
             ).subtract(const Duration(minutes: 5))
           : _date(day.year, day.month, day.day + 2);
       if (maximum.isAfter(dateLimit)) maximum = dateLimit;
-      final visibleEnd = _date(
-        interactionFirst.year,
-        interactionFirst.month,
-        interactionFirst.day + interactionCount,
-      );
-      if (maximum.isAfter(visibleEnd)) maximum = visibleEnd;
       var value = shift(boundary.original, days, minutes);
       if (value.isBefore(minimum)) value = minimum;
       if (value.isAfter(maximum)) value = maximum;
@@ -514,9 +630,7 @@ class _CalendarPaneState extends ConsumerState<CalendarPane>
       );
       final days = widget.planningPreview
           ? 0
-          : active.kind == CalendarDragKind.move
-          ? ((point.dx - active.origin.dx) / interactionWidth).round()
-          : column(point.dx) - column(active.origin.dx);
+          : pageDays + column(point.dx) - column(active.origin.dx);
       final minutes =
           ((point.dy - active.origin.dy) / hourHeight * 60 / 5).round() * 5;
       var start = active.block.start, end = active.block.end;
@@ -632,6 +746,10 @@ class _CalendarPaneState extends ConsumerState<CalendarPane>
   }
 
   void cancelInteraction() {
+    pageTimer?.cancel();
+    pageTimer = null;
+    pageDirection = 0;
+    interactionOriginFirst = null;
     edgeTicker.stop();
     lastScrollTick = null;
     setState(() {
@@ -842,6 +960,7 @@ class _CalendarPaneState extends ConsumerState<CalendarPane>
                           );
                           final fullWidth = gutter + count * width;
                           return Scrollbar(
+                            key: pageViewportKey,
                             controller: horizontal,
                             child: SingleChildScrollView(
                               controller: horizontal,
@@ -1047,6 +1166,31 @@ class _CalendarPaneState extends ConsumerState<CalendarPane>
                                                         first,
                                                         count,
                                                       ),
+                                                    if (drag != null &&
+                                                        interactionOriginFirst !=
+                                                            first)
+                                                      for (
+                                                        var i = 0;
+                                                        i < interactionCount;
+                                                        i++
+                                                      )
+                                                        ..._dayBlocks(
+                                                          repo,
+                                                          [drag!.block],
+                                                          _date(
+                                                            interactionOriginFirst!
+                                                                .year,
+                                                            interactionOriginFirst!
+                                                                .month,
+                                                            interactionOriginFirst!
+                                                                    .day +
+                                                                i,
+                                                          ),
+                                                          -10000,
+                                                          width,
+                                                          first,
+                                                          count,
+                                                        ),
                                                     if (!editingDrafts)
                                                       for (
                                                         var day = 0;
@@ -1189,8 +1333,12 @@ class _CalendarPaneState extends ConsumerState<CalendarPane>
     int count,
   ) sync* {
     final schedule = WorkdaySchedule(repo.snapshot);
-    for (var ownerIndex = -1; ownerIndex < count; ownerIndex++) {
-      final day = _date(first.year, first.month, first.day + ownerIndex);
+    final days = {
+      for (var i = -1; i < count; i++)
+        _date(first.year, first.month, first.day + i),
+      if (workdayDrag != null) workdayDrag!.window.date,
+    };
+    for (final day in days) {
       final window = schedule.forDate(day);
       if (window == null) continue;
       for (final start in [true, false]) {
@@ -1208,7 +1356,7 @@ class _CalendarPaneState extends ConsumerState<CalendarPane>
         final atMidnight =
             !start && value.hour == 0 && value.minute == 0 && index > 0;
         if (atMidnight) index--;
-        if (index < 0 || index >= count) continue;
+        if ((index < 0 || index >= count) && !moving) continue;
         final displayDay = _date(first.year, first.month, first.day + index);
         final y = atMidnight
             ? 24 * hourHeight

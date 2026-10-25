@@ -39,7 +39,7 @@ void main() {
       ]) {
         final note = await repo.createNote();
         await repo.saveNote(note.id, note.title, content);
-        kept[note.id] = content;
+        kept[note.id] = content == '  Текст\n  ' ? '  Текст\n' : content;
       }
       final task = await repo.createTask('Задача');
       await repo.discardEmptyNotes([

@@ -638,6 +638,7 @@ void _validateSnapshot(Map<String, dynamic> data) {
     'series',
     'snooze',
     'workday',
+    'attachment',
   };
   for (final raw in data['records'] as List) {
     final e = Entity.fromJson(Map<String, dynamic>.from(raw as Map));
@@ -720,6 +721,19 @@ void _validateEntity(Entity e) {
 
   try {
     switch (e.kind) {
+      case 'attachment':
+        check(_hashPattern.hasMatch(e.data['file_id'] as String));
+        check(e.id == "attachment-${e.data['file_id']}");
+        e.data['title'] as String;
+        if (e.data['added_at'] != null) {
+          check(DateTime.tryParse(e.data['added_at'] as String) != null);
+        }
+        check(
+          e.data['size'] is int &&
+              (e.data['size'] as int) >= 0 &&
+              (e.data['size'] as int) <= Repository.maxAttachmentBytes,
+        );
+        check(e.data['content'] == "attachment:${e.data['file_id']}");
       case 'note':
         final n = Note(e);
         n.title;

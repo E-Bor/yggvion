@@ -189,7 +189,7 @@ func (a *API) guard(next http.Handler) http.Handler {
 			return
 		}
 		duration := 2 * time.Minute
-		if strings.HasPrefix(r.URL.Path, "/api/v1/attachments/") {
+		if strings.HasPrefix(r.URL.Path, "/api/v1/attachments/") && (r.Method == http.MethodGet || r.Method == http.MethodPut) {
 			duration = 15 * time.Minute
 		}
 		if r.URL.Path == "/api/v1/backups/import" || strings.HasSuffix(r.URL.Path, "/download") {

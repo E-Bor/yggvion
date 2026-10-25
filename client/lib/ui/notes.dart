@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../domain/models.dart';
 import '../domain/note_links.dart';
 import 'markdown_editor.dart';
+import 'attachments.dart';
 import 'providers.dart';
 import 'theme.dart';
 
@@ -265,6 +266,11 @@ class _NotesPageState extends ConsumerState<NotesPage> {
                   'Заметки',
                   style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
                 ),
+              ),
+              IconButton(
+                tooltip: 'Вложения',
+                icon: const Icon(Icons.attach_file_rounded, size: 20),
+                onPressed: () => openAttachments(context),
               ),
               TextButton.icon(
                 icon: const Icon(Icons.folder_outlined, size: 18),
@@ -665,6 +671,23 @@ class _NoteLibraryState extends ConsumerState<NoteLibrary> {
         ),
         for (final note in snapshot.notes.where((n) => n.pinned.isNotEmpty))
           tile(note),
+        ListTile(
+          dense: true,
+          minTileHeight: 42,
+          minVerticalPadding: 0,
+          minLeadingWidth: 18,
+          horizontalTitleGap: 8,
+          contentPadding: const EdgeInsets.only(left: 8, right: 0),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(10),
+          ),
+          leading: const Icon(Icons.attach_file_rounded, size: 17),
+          title: const Text(
+            'Вложения',
+            style: TextStyle(fontSize: 13, height: 1.2),
+          ),
+          onTap: () => openAttachments(context),
+        ),
         const Divider(height: 24),
         group('', 'Без папки'),
         for (final folder in snapshot.noteFolders)

@@ -177,6 +177,9 @@ func ValidateSnapshot(v Snapshot) error {
 		if err != nil || envelope.KeyID != v.EncryptionKeyID {
 			return ErrInvalid
 		}
+		if r.Deleted {
+			continue
+		}
 		for _, id := range envelope.Files {
 			if !files[id] {
 				return ErrInvalid

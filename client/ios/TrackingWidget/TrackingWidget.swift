@@ -61,6 +61,58 @@ private struct TrackingControls: View {
   }
 }
 
+private struct TrackingProgress: View {
+  let state: TrackingAttributes.ContentState
+  // Same rose used by the calendar's tracked-time stripe in the dark theme.
+  private let overtime = Color(red: 223.0 / 255, green: 166.0 / 255, blue: 186.0 / 255)
+  private let steps = 64
+
+  private func interval(_ index: Int) -> ClosedRange<Date> {
+    let start = state.plannedSeconds / (1 - Double(index) / Double(steps))
+    let end = index + 1 == steps ? start + 10 * 365 * 86400
+      : state.plannedSeconds / (1 - Double(index + 1) / Double(steps))
+    return state.clockStart.addingTimeInterval(start)...state.clockStart.addingTimeInterval(end)
+  }
+
+  var body: some View {
+    Group {
+      if state.running && state.plannedSeconds > 0 {
+        ZStack {
+          ProgressView(timerInterval: state.clockStart...state.progressEnd, countsDown: false)
+            .labelsHidden().tint(state.color)
+          // ActivityKit can suspend our process. System-driven date progress
+          // views keep the reciprocal plan/elapsed curve moving without an app
+          // timer or push. Small contiguous intervals approximate it within one
+          // bar segment (1/64); paused state uses the exact ratio below.
+          HStack(spacing: 0) {
+            ForEach(0..<steps, id: \.self) { index in
+              overtime.mask(
+                ProgressView(timerInterval: interval(index), countsDown: false)
+                  .labelsHidden().tint(.white)
+                  .scaleEffect(x: 1, y: 3)
+                  .frame(height: 4).clipped()
+                  .background(.black).compositingGroup()
+                  .contrast(100).luminanceToAlpha()
+              )
+            }
+          }.environment(\.layoutDirection, .rightToLeft)
+        }
+      } else {
+        GeometryReader { geometry in
+          let elapsed = max(0, state.elapsedSeconds)
+          let plan = max(0, state.plannedSeconds)
+          let denominator = max(1, max(elapsed, plan))
+          HStack(spacing: 0) {
+            state.color.frame(width: geometry.size.width * min(elapsed, plan) / denominator)
+            overtime.frame(width: geometry.size.width * max(0, elapsed - plan) / denominator)
+            Spacer(minLength: 0)
+          }.background(.white.opacity(0.12))
+        }
+      }
+    }.frame(height: 4).clipShape(Capsule()).accessibilityLabel("Факт относительно плана")
+  }
+}
+
 private struct TrackingCard: View {
   let context: ActivityViewContext<TrackingAttributes>
   var body: some View {
@@ -80,13 +132,7 @@ private struct TrackingCard: View {
         TrackingControls(context: context)
       }
       VStack(spacing: 6) {
-        if state.running && state.plannedSeconds > 0 {
-          ProgressView(timerInterval: state.clockStart...state.progressEnd, countsDown: false)
-            .labelsHidden().progressViewStyle(.linear).frame(height: 4).tint(state.color)
-        } else {
-          ProgressView(value: min(1, state.elapsedSeconds / max(1, state.plannedSeconds)))
-            .progressViewStyle(.linear).frame(height: 4).tint(state.color)
-        }
+        TrackingProgress(state: state)
         HStack(spacing: 4) {
           TrackingClock(state: state).frame(width: 76, alignment: .leading)
             .foregroundStyle(.white.opacity(0.9))

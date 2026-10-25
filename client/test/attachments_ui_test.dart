@@ -1,0 +1,177 @@
+import 'dart:io';
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:intl/date_symbol_data_local.dart';
+import 'package:timezone/data/latest.dart' as tz;
+import 'package:yggvion/data/attachments.dart';
+import 'package:yggvion/ui/attachments.dart';
+import 'package:yggvion/ui/markdown_editor.dart';
+import 'interaction_test.dart' show workspace, settle, command, testInteraction;
+
+void main() {
+  setUpAll(() async {
+    tz.initializeTimeZones();
+    await initializeDateFormatting('ru');
+    await (FontLoader(
+      'Inter',
+    )..addFont(rootBundle.load('assets/fonts/Inter.ttf'))).load();
+    await (FontLoader(
+      'MaterialIcons',
+    )..addFont(rootBundle.load('fonts/MaterialIcons-Regular.otf'))).load();
+  });
+  for (final mobile in [false, true]) {
+    testInteraction(
+      'attachments open from notes, preview and clean only unused files mobile=$mobile',
+      (tester) async {
+        late Directory dir;
+        const channel = MethodChannel('plugins.flutter.io/path_provider');
+        final repo = await workspace(
+          tester,
+          mobile: mobile,
+          prepare: (repo) async {
+            dir = await Directory.systemTemp.createTemp(
+              'yggvion-attachments-ui-',
+            );
+            TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+                .setMockMethodCallHandler(channel, (_) async => dir.path);
+            final used = File('${dir.path}/config.yaml');
+            await used.writeAsString('config: saved');
+            final link = await repo.attachFile(used.path);
+            final note = await repo.createNote();
+            await repo.saveNote(note.id, 'Настройки', link);
+            final unused = File('${dir.path}/Черновик.txt');
+            await unused.writeAsString('Temporary data');
+            await repo.attachFile(unused.path);
+            final first = await rootBundle.load(
+              'assets/branding/logo-mask.png',
+            );
+            final second = await File(
+              'assets/branding/app-icon.png',
+            ).readAsBytes();
+            final firstLink = await repo.attachStream(
+              Stream.value(first.buffer.asUint8List()),
+              'Дерево.png',
+            );
+            final secondLink = await repo.attachStream(
+              Stream.value(second),
+              'Щит.png',
+            );
+            await repo.saveNote(
+              note.id,
+              'Настройки',
+              '$link\n\n$firstLink\n\n$secondLink',
+            );
+            final pictures = (await repo.attachmentInventory())
+                .where((file) => file.image)
+                .toList();
+            await repo.commit([
+              (await repo.db.entity(
+                'attachment-${pictures.first.id}',
+              ))!.change({'added_at': '2026-10-18T12:00:00Z'}),
+            ]);
+          },
+        );
+        addTearDown(() async {
+          await dir.delete(recursive: true);
+          TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+              .setMockMethodCallHandler(channel, null);
+        });
+        // Resolve file IO and decoding in the real async zone before the widget
+        // uses the cached thumbnails; golden tests must contain actual pixels.
+        await tester.runAsync(() async {
+          final files = await repo.attachmentInventory();
+          for (final file in files.where((entry) => entry.image)) {
+            if (!tester.element(find.byType(Scaffold).first).mounted) return;
+            await precacheImage(
+              ResizeImage(FileImage(File(file.path!)), width: 512, height: 512),
+              tester.element(find.byType(Scaffold).first),
+            );
+          }
+        });
+        await command(tester, LogicalKeyboardKey.digit4);
+        await tester.runAsync(() async {
+          await tester.tap(
+            mobile ? find.byTooltip('Вложения') : find.text('Вложения'),
+          );
+          await tester.pump();
+        });
+        await settle(tester);
+        expect(find.byType(AttachmentsPage), findsOneWidget);
+        expect(find.byType(SliverGrid), findsNWidgets(2));
+        expect(find.text('19 октября 2026'), findsOneWidget);
+        expect(find.text('18 октября 2026'), findsOneWidget);
+        expect(find.text('config.yaml'), findsNothing);
+        expect(find.text('Дерево.png'), findsOneWidget);
+        expect(
+          tester
+              .widgetList<RawImage>(find.byType(RawImage))
+              .where((image) => image.image != null)
+              .length,
+          greaterThanOrEqualTo(2),
+        );
+        await expectLater(
+          find.byType(Scaffold).last,
+          matchesGoldenFile(
+            'goldens/attachment_images_${mobile ? 390 : 1440}.png',
+          ),
+        );
+        await tester.tap(find.text('Дерево.png'));
+        await settle(tester);
+        expect(find.byType(AlertDialog), findsOneWidget);
+        await tester.tap(find.text('Закрыть'));
+        await settle(tester);
+        await tester.tap(find.text('Файлы'));
+        await settle(tester);
+        expect(find.text('config.yaml'), findsOneWidget);
+        expect(find.byTooltip('Удалить вложение'), findsOneWidget);
+        await expectLater(
+          find.byType(Scaffold).last,
+          matchesGoldenFile('goldens/attachments_${mobile ? 390 : 1440}.png'),
+        );
+        await tester.tap(find.text('config.yaml'));
+        await settle(tester);
+        expect(
+          find.descendant(
+            of: find.byType(AlertDialog),
+            matching: find.byType(MarkdownPreview),
+          ),
+          findsOneWidget,
+        );
+        await tester.tap(find.text('Закрыть'));
+        await settle(tester);
+        await tester.enterText(find.byType(TextField).last, 'несуществующий');
+        await settle(tester);
+        expect(find.text('Файлы не найдены'), findsOneWidget);
+        await tester.enterText(find.byType(TextField).last, '');
+        await settle(tester);
+        await tester.runAsync(
+          () => tester.tap(find.byTooltip('Действия с вложениями')),
+        );
+        await settle(tester);
+        await tester.runAsync(
+          () => tester.tap(find.text('Очистить неиспользуемые · 1')),
+        );
+        await settle(tester);
+        await tester.runAsync(() => tester.tap(find.text('Удалить').last));
+        await settle(tester);
+        expect(find.text('Удалено файлов: 1'), findsOneWidget);
+        final refreshed = tester
+            .widget<FutureBuilder<List<AttachmentEntry>>>(
+              find.byWidgetPredicate(
+                (w) => w is FutureBuilder<List<AttachmentEntry>>,
+              ),
+            )
+            .future!;
+        await tester.runAsync(() => refreshed);
+        await tester.pumpAndSettle();
+        expect(find.text('Черновик.txt'), findsNothing);
+        expect(find.text('config.yaml'), findsOneWidget);
+        final entries = await tester.runAsync(() => repo.attachmentInventory());
+        expect(entries!.length, 3);
+        expect(entries.every((file) => file.references == 1), isTrue);
+        expect(tester.takeException(), isNull);
+      },
+    );
+  }
+}

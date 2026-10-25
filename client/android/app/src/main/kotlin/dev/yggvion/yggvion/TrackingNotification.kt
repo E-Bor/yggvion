@@ -4,6 +4,12 @@ import android.app.*
 import android.content.*
 import android.content.pm.ServiceInfo
 import android.graphics.Color
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.Paint
+import android.graphics.Path
+import android.graphics.RectF
+import android.widget.RemoteViews
 import android.net.Uri
 import android.os.*
 import io.flutter.plugin.common.MethodChannel
@@ -145,15 +151,41 @@ object TrackingNotification {
         }
         val minutes = elapsed / 60000
         val planMinutes = planned / 60000
+        val accent = state.optLong("accent", Color.rgb(156, 185, 255).toLong()).toInt()
+        val denominator = maxOf(1.0, elapsed.toDouble(), planned.toDouble())
+        val blue = minOf(elapsed, planned).coerceAtLeast(0).toDouble() / denominator
+        val red = (elapsed - planned).coerceAtLeast(0).toDouble() / denominator
+        val bitmap = Bitmap.createBitmap(900, 12, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(bitmap)
+        canvas.clipPath(Path().apply { addRoundRect(RectF(0f, 0f, 900f, 12f), 6f, 6f, Path.Direction.CW) })
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+        paint.color = 0x226f7d90
+        canvas.drawRect(0f, 0f, 900f, 12f, paint)
+        paint.color = accent
+        canvas.drawRect(0f, 0f, (900 * blue).toFloat(), 12f, paint)
+        paint.color = 0xffdfa6ba.toInt()
+        canvas.drawRect((900 * blue).toFloat(), 0f, (900 * (blue + red)).toFloat(), 12f, paint)
+        val content = RemoteViews(context.packageName, R.layout.tracking_notification).apply {
+            setTextViewText(R.id.tracking_title, state.getString("title"))
+            setTextViewText(R.id.tracking_details, "${if (running) "В работе" else "Пауза"} · $minutes / $planMinutes мин")
+            setImageViewBitmap(R.id.tracking_progress, bitmap)
+        }
+        if (Build.VERSION.SDK_INT >= 24) {
+            val expanded = content.clone().apply { setInt(R.id.tracking_title, "setMaxLines", 2) }
+            builder.setStyle(Notification.DecoratedCustomViewStyle())
+                .setCustomContentView(content).setCustomBigContentView(expanded)
+        } else {
+            builder.setContent(content)
+        }
         return builder.setSmallIcon(R.drawable.ic_notification)
             .setContentTitle(state.getString("title"))
             .setContentText("${if (running) "В работе" else "Пауза"} · $minutes / $planMinutes мин")
-            .setColor(state.optLong("accent", Color.rgb(156, 185, 255).toLong()).toInt())
+            .setColor(accent)
             .setWhen(System.currentTimeMillis() - elapsed).setUsesChronometer(running)
             .setShowWhen(running).setOngoing(true).setOnlyAlertOnce(true)
             .setVisibility(Notification.VISIBILITY_PUBLIC).setCategory(Notification.CATEGORY_STOPWATCH)
             .setContentIntent(open)
-            .setProgress(1000, if (planned > 0) minOf(1000, elapsed * 1000 / planned).toInt() else 0, false)
+            .setProgress(0, 0, false)
             .addAction(action(if (running) "pause" else "resume", if (running) "Пауза" else "Продолжить",
                 if (running) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play))
             .addAction(action("stop", "Стоп", android.R.drawable.ic_menu_close_clear_cancel))

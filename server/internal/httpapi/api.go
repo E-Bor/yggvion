@@ -60,6 +60,8 @@ func (a *API) Handler() http.Handler {
 	mux.Handle("DELETE /api/v1/devices/{id}", a.auth(http.HandlerFunc(a.revoke)))
 	mux.Handle("PUT /api/v1/attachments/{id}", a.auth(a.current(http.HandlerFunc(a.upload))))
 	mux.Handle("GET /api/v1/attachments/{id}", a.auth(a.current(http.HandlerFunc(a.download))))
+	mux.Handle("POST /api/v1/attachments/present", a.auth(a.current(http.HandlerFunc(a.presentAttachments))))
+	mux.Handle("DELETE /api/v1/attachments/{id}", a.auth(http.HandlerFunc(a.deleteAttachment)))
 	mux.Handle("GET /api/v1/state", a.auth(http.HandlerFunc(a.state)))
 	mux.Handle("POST /api/v1/invitations", a.auth(http.HandlerFunc(a.invite)))
 	mux.Handle("GET /api/v1/metrics", a.auth(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

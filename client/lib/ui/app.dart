@@ -1078,7 +1078,7 @@ class _WorkspaceState extends ConsumerState<Workspace>
     final currentSelection = selected == null
         ? null
         : repo.snapshot.task(selected!.id);
-    final matching = repo.snapshot.tasks
+    final matching = repo.snapshot.tasks.reversed
         .where(
           (t) =>
               t.seriesId.isEmpty &&

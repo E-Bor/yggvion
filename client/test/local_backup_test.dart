@@ -8,6 +8,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:yggvion/data/local_credentials.dart';
 import 'package:timezone/data/latest.dart' as tz;
 import 'package:yggvion/data/database.dart';
+import 'package:yggvion/data/attachments.dart';
 import 'package:yggvion/data/encryption.dart';
 import 'package:yggvion/data/local_backup.dart';
 import 'package:yggvion/data/repository.dart';
@@ -75,6 +76,25 @@ void main() {
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(channel, null);
   });
+  test(
+    'local backup restores an unreferenced attachment and its encrypted catalog',
+    () async {
+      final file = File('${dir.path}/orphan.txt');
+      await file.writeAsString('Saved without a note');
+      await repo.attachFile(file.path);
+      final entry = (await repo.attachmentInventory()).single;
+      final saved = await backups.create();
+      final record = (await repo.db.entity('attachment-${entry.id}'))!;
+      await repo.commit([record.tombstone()]);
+      await repo.removeLocalUnusedAttachment(entry.id);
+      expect(await repo.attachmentInventory(), isEmpty);
+      await backups.restore(saved.path, password: password);
+      final restored = (await repo.attachmentInventory()).single;
+      expect(restored.name, 'orphan.txt');
+      expect(restored.unused, isTrue);
+      expect(await File(restored.path!).readAsString(), 'Saved without a note');
+    },
+  );
   test(
     'key-only and plaintext archives are rejected without changing data',
     () async {

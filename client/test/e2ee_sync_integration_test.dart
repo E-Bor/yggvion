@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:timezone/data/latest.dart' as tz;
 import 'package:yggvion/data/database.dart';
+import 'package:yggvion/data/attachments.dart';
 import 'package:yggvion/data/repository.dart';
 import 'package:yggvion/data/sync.dart';
 import 'package:yggvion/domain/models.dart';
@@ -452,6 +453,111 @@ void main() {
       await sb.sync();
       expect(b.syncError, isNull);
       expect(b.snapshot.task(proposed.id)!.isProposed, isFalse);
+
+      // Unreferenced attachments have encrypted metadata and reach all devices.
+      devicePath = '${dir.path}/a';
+      final orphan = File('${dir.path}/catalog-private.txt');
+      await orphan.writeAsString('CATALOG_PRIVATE_BYTES');
+      final orphanLink = await a.attachFile(orphan.path);
+      await sa.sync();
+      expect(a.syncError, isNull);
+      final entry = (await a.attachmentInventory()).singleWhere(
+        (f) => f.name == 'catalog-private.txt',
+      );
+      expect(entry.unused, isTrue);
+      expect(
+        jsonEncode(await sa.request('GET', '/api/v1/changes')),
+        isNot(contains('catalog-private.txt')),
+      );
+      devicePath = '${dir.path}/b';
+      await sb.sync();
+      final remoteFile = (await b.attachmentInventory()).singleWhere(
+        (f) => f.id == entry.id,
+      );
+      expect(
+        await File(remoteFile.path!).readAsString(),
+        'CATALOG_PRIVATE_BYTES',
+      );
+
+      // B creates a reference offline while A removes the unreferenced server file.
+      final offline = await b.createNote();
+      await b.saveNote(offline.id, 'Offline reuse', orphanLink);
+      devicePath = '${dir.path}/a';
+      expect(await sa.deleteUnusedAttachments({entry.id}), 1);
+      expect(await File(entry.path!).exists(), isFalse);
+      devicePath = '${dir.path}/b';
+      await sb.sync();
+      expect(b.syncError, isNull);
+      expect(await File(remoteFile.path!).exists(), isTrue);
+      devicePath = '${dir.path}/a';
+      await sa.sync();
+      expect(a.syncError, isNull);
+      final revived = (await a.attachmentInventory()).singleWhere(
+        (f) => f.id == entry.id,
+      );
+      expect(revived.references, 1);
+      expect(await File(revived.path!).readAsString(), 'CATALOG_PRIVATE_BYTES');
+      await sa.sync();
+      devicePath = '${dir.path}/b';
+      await sb.sync();
+      expect(b.syncError, isNull);
+      expect(await sb.deleteUnusedAttachments({entry.id}), 0);
+      await b.commit([b.snapshot.note(offline.id)!.entity.tombstone()]);
+      await sb.sync();
+      devicePath = '${dir.path}/a';
+      await sa.sync();
+      expect(await sa.deleteUnusedAttachments({entry.id}), 1);
+      devicePath = '${dir.path}/b';
+      await sb.sync();
+      expect(b.syncError, isNull);
+      expect(
+        (await b.attachmentInventory()).where((f) => f.id == entry.id),
+        isEmpty,
+      );
+      expect(await File(remoteFile.path!).exists(), isFalse);
+
+      // Losing the original acknowledgement does not pin a retry to the old
+      // ciphertext after another device deletes its file and record.
+      devicePath = '${dir.path}/a';
+      final retryLink = await a.attachFile(orphan.path);
+      final lostNote = await a.createNote();
+      await a.saveNote(lostNote.id, 'Unacknowledged reuse', retryLink);
+      var lostFileResponse = false;
+      final loseFileResponse = InterceptorsWrapper(
+        onResponse: (response, handler) {
+          if (!lostFileResponse &&
+              response.requestOptions.path.endsWith('/sync')) {
+            lostFileResponse = true;
+            handler.reject(
+              DioException(
+                requestOptions: response.requestOptions,
+                type: DioExceptionType.connectionError,
+              ),
+            );
+          } else {
+            handler.next(response);
+          }
+        },
+      );
+      sa.client.interceptors.add(loseFileResponse);
+      await sa.sync();
+      sa.client.interceptors.remove(loseFileResponse);
+      expect(a.syncError, isNotNull);
+      devicePath = '${dir.path}/b';
+      await sb.sync();
+      expect(b.snapshot.note(lostNote.id), isNotNull);
+      await b.commit([b.snapshot.note(lostNote.id)!.entity.tombstone()]);
+      await sb.sync();
+      expect(await sb.deleteUnusedAttachments({entry.id}), 1);
+      devicePath = '${dir.path}/a';
+      await sa.sync();
+      expect(a.syncError, isNull);
+      // A version conflict is surfaced, never an endlessly failing sync queue.
+      expect(a.conflictCount, greaterThan(0));
+      expect(
+        await File((await a.attachmentPath(entry.id))!).readAsString(),
+        'CATALOG_PRIVATE_BYTES',
+      );
 
       // A compromised relay cannot ask an already pinned client to downgrade.
       final downgrade = InterceptorsWrapper(

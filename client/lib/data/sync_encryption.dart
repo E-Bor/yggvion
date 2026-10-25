@@ -244,6 +244,7 @@ extension EncryptedSync on SyncService {
     Entity entity, {
     WorkspaceKey? key,
   }) async {
+    if (entity.deleted) return {};
     key ??= _cipher!;
     final result = <String, String>{};
     for (final match in RegExp(
@@ -262,6 +263,88 @@ extension EncryptedSync on SyncService {
       result[id] = row.read<String>('cipher_id');
     }
     return result;
+  }
+
+  Future<int> deleteUnusedAttachments(Set<String> ids) async {
+    await _syncDone?.future;
+    if (connected) {
+      await sync();
+      if (repo.syncError != null) throw StateError(repo.syncError!);
+    }
+    if (_busy || _pairing) {
+      throw StateError('Дождитесь завершения синхронизации');
+    }
+    _busy = true;
+    var removed = 0;
+    try {
+      for (final id in ids) {
+        if (!RegExp(r'^[a-f0-9]{64}$').hasMatch(id)) {
+          throw ArgumentError('Некорректное вложение');
+        }
+        if (connected) {
+          await repo.serial(() async {
+            if ((await repo.attachmentReferences())[id]?.isNotEmpty == true) {
+              return;
+            }
+            final catalog = await repo.db.entity('attachment-$id');
+            if (catalog == null || catalog.deleted) return;
+            final row = await repo.db
+                .customSelect(
+                  'SELECT cipher_id FROM encrypted_files WHERE key_id=? AND id=?',
+                  variables: [Variable(_cipher!.id), Variable(id)],
+                )
+                .getSingleOrNull();
+            if (row == null) {
+              throw StateError('Вложение ещё не синхронизировано');
+            }
+            final encrypted = await _cipher!.encrypt(catalog.tombstone(), {});
+            try {
+              final response = await client.delete<Map<String, dynamic>>(
+                '$_url/api/v1/attachments/${row.read<String>('cipher_id')}',
+                options: _auth,
+                data: {'record': encrypted.toJson()},
+              );
+              await repo.db.put(
+                await _decodeRecord(
+                  response.data!['record'] as Map<String, dynamic>,
+                ),
+              );
+              removed++;
+            } on DioException catch (error) {
+              final code = (error.response?.data is Map)
+                  ? (error.response!.data as Map)['error']
+                  : null;
+              if (code == 'attachment_in_use' || code == 'attachment_changed') {
+                return;
+              }
+              if (code == 'server_busy') {
+                throw StateError(
+                  'Сервер занят резервным копированием или загрузкой. Повторите очистку позже.',
+                );
+              }
+              rethrow;
+            }
+          });
+        } else {
+          await repo.commitComputed(() async {
+            if ((await repo.attachmentReferences())[id]?.isNotEmpty == true) {
+              return [];
+            }
+            final record = await repo.db.entity('attachment-$id');
+            if (record == null || record.deleted) return [];
+            removed++;
+            return [record.tombstone()];
+          });
+        }
+        final record = await repo.db.entity('attachment-$id');
+        if (record?.deleted == true) await repo.removeLocalUnusedAttachment(id);
+      }
+      await repo.reload();
+    } finally {
+      _busy = false;
+      if (connected) await sync();
+    }
+    return removed;
   }
 
   Future<Map<String, dynamic>> _encodeMutation(QueryRow row) async {
@@ -317,8 +400,74 @@ extension EncryptedSync on SyncService {
           variables: [Variable(cipher.id)],
         )
         .get();
+    final pending = await repo.db
+        .customSelect('SELECT operation_id,payload FROM outbox')
+        .get();
+    final referenced = pending
+        .expand(
+          (row) => attachmentReference
+              .allMatches(row.read<String>('payload'))
+              .map((match) => match[1]!),
+        )
+        .toSet();
+    final known = rows
+        .where(
+          (row) =>
+              referenced.contains(row.read<String>('id')) &&
+              row.readNullable<String>('cipher_id') != null &&
+              row.read<int>('uploaded') == 1,
+        )
+        .map((row) => row.read<String>('cipher_id'))
+        .toSet()
+        .toList();
+    final missing = <String>{};
+    for (var i = 0; i < known.length; i += 1000) {
+      final batch = known.skip(i).take(1000).toList();
+      try {
+        final response = await client.post<Map<String, dynamic>>(
+          '$_url/api/v1/attachments/present',
+          options: _auth,
+          data: {'ids': batch},
+        );
+        missing.addAll(
+          batch.toSet().difference(
+            (response.data!['ids'] as List).cast<String>().toSet(),
+          ),
+        );
+      } on DioException catch (error) {
+        if (error.response?.statusCode != 404) rethrow;
+      }
+    }
+    final missingPlain = rows
+        .where((row) => missing.contains(row.readNullable<String>('cipher_id')))
+        .map((row) => row.read<String>('id'))
+        .toSet();
+    // Only regenerate encrypted payloads of the affected queued operations.
+    // The authoritative outbox and every unrelated cached operation are kept.
+    for (final mutation in pending) {
+      if (attachmentReference
+          .allMatches(mutation.read<String>('payload'))
+          .any((match) => missingPlain.contains(match[1]))) {
+        await repo.serial(
+          () => repo.db.transaction(() async {
+            final operation = mutation.read<String>('operation_id');
+            // The previous ciphertext may already have been accepted before a
+            // lost response. A changed file envelope needs a new operation ID.
+            await repo.db.customStatement(
+              'UPDATE outbox SET operation_id=? WHERE operation_id=?',
+              [repo.newId(), operation],
+            );
+            await repo.db.customStatement(
+              'DELETE FROM encrypted_outbox WHERE operation_id=?',
+              [operation],
+            );
+          }),
+        );
+      }
+    }
     for (final row in rows) {
       if (row.readNullable<String>('cipher_id') != null &&
+          !missing.contains(row.readNullable<String>('cipher_id')) &&
           row.read<int>('uploaded') == 1) {
         continue;
       }
@@ -369,6 +518,10 @@ extension EncryptedSync on SyncService {
     final entities = records ?? await repo.db.entities();
     final names = <String, String>{};
     for (final entity in entities) {
+      if (entity.kind == 'attachment') {
+        names[entity.data['file_id'] as String] =
+            entity.data['title'] as String;
+      }
       for (final match in RegExp(
         r'\[([^\]]*)\]\(attachment:([a-f0-9]{64})\)',
       ).allMatches(entity.searchable)) {

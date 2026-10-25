@@ -350,7 +350,17 @@ void main() {
     );
     await tester.tap(find.text('Вступление', findRichText: true));
     await tester.pumpAndSettle();
-    await tester.enterText(find.byType(TextField), 'Новый текст\n\nЕщё абзац');
+    // The field edits the entire source, including the task below the caret.
+    await tester.enterText(
+      find.byType(TextField),
+      'Новый текст\n\nЕщё абзац\n\n- [ ] Подзадача',
+    );
+    final controller = tester
+        .widget<TextField>(find.byType(TextField))
+        .controller!;
+    controller.selection = TextSelection.collapsed(
+      offset: 'Новый текст\n\nЕщё абзац'.length,
+    );
     await tester.pumpAndSettle();
     await tester.tap(find.byType(Checkbox));
     await tester.pumpAndSettle();
