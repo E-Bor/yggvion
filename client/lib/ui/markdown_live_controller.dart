@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:markdown/markdown.dart' as md;
 import '../domain/markdown_blocks.dart';
 import 'theme.dart';
 
@@ -24,8 +25,17 @@ class MarkdownLiveController extends TextEditingController {
   static final _embed = RegExp(
     r'^\s*(?:!\[[^\]]*\]\([^\n]+\)|\[\[[^\]\n]+\]\]|\[[^\]]*\]\(note:[a-zA-Z0-9_-]+\))\s*$',
   );
+  static final _autolinkSyntax = md.AutolinkExtensionSyntax();
+  static final _autolinkDocument = md.Document(
+    encodeHtml: false,
+    extensionSet: md.ExtensionSet.gitHubFlavored,
+  );
+  static final _autolinkBoundary = RegExp(r'[\s*_~(>]');
   static final _inline = RegExp(
-    r'(`+)([^`\n]+)\1|\*\*(?=\S)(.+?\S|\S)\*\*|__(?=\S)(.+?\S|\S)__|~~(?=\S)(.+?\S|\S)~~|\*(?=\S)([^*\n]*\S)\*|_(?=\S)([^_\n]*\S)_|\[\[([^\]\n]+)\]\]|\[([^\]\n]+)\]\(([^)\n]+)\)',
+    r'(`+)([^`\n]+)\1|\*\*(?=\S)(.+?\S|\S)\*\*|__(?=\S)(.+?\S|\S)__|~~(?=\S)(.+?\S|\S)~~|\*(?=\S)([^*\n]*\S)\*|_(?=\S)([^_\n]*\S)_|\[\[([^\]\n]+)\]\]|\[([^\]\n]+)\]\(([^)\n]+)\)'
+    r'|(<https?://[^<>\s]+>)'
+    '|(${_autolinkSyntax.pattern.pattern})',
+    caseSensitive: false,
   );
   String? _parsedText;
   List<_LiveLine> _lines = [];
@@ -249,6 +259,7 @@ class MarkdownLiveController extends TextEditingController {
     int offset, [
     int depth = 0,
     TextStyle? inheritedStyle,
+    bool detectAutolinks = true,
   ]) {
     if (depth > 12) return [TextSpan(text: source)];
     final result = <InlineSpan>[];
@@ -264,11 +275,43 @@ class MarkdownLiveController extends TextEditingController {
       if (match.start > cursor) {
         result.add(TextSpan(text: source.substring(cursor, match.start)));
       }
-      final raw = match[0]!;
+      var raw = match[0]!;
       final editing = _editing(offset + match.start, offset + match.end);
       var prefix = 0, suffix = 0;
       TextStyle? format;
-      if (match[1] != null) {
+      final automatic = match[11] != null || match[12] != null;
+      String? href;
+      var trailing = '';
+      if (automatic) {
+        final invalidBoundary =
+            match[11] == null &&
+            match[14] == null &&
+            match.start > 0 &&
+            !_autolinkBoundary.hasMatch(source[match.start - 1]);
+        final node = detectAutolinks && !invalidBoundary
+            ? _autolinkDocument.parseInline(raw).firstOrNull
+            : null;
+        if (node is! md.Element ||
+            node.tag != 'a' ||
+            !{
+              'http',
+              'https',
+              'mailto',
+            }.contains(Uri.tryParse(node.attributes['href'] ?? '')?.scheme)) {
+          result.add(TextSpan(text: raw));
+          cursor = match.end;
+          continue;
+        }
+        href = node.attributes['href']!;
+        prefix = suffix = match[11] != null ? 1 : 0;
+        final length = prefix + node.textContent.length + suffix;
+        trailing = raw.substring(length);
+        raw = raw.substring(0, length);
+        format = TextStyle(
+          color: context.accentColor,
+          decoration: TextDecoration.underline,
+        );
+      } else if (match[1] != null) {
         prefix = suffix = match[1]!.length;
         format = TextStyle(
           fontFamily: 'monospace',
@@ -297,11 +340,12 @@ class MarkdownLiveController extends TextEditingController {
           decoration: TextDecoration.underline,
         );
       }
-      final href = match[8] != null
+      href ??= match[8] != null
           ? 'wiki:${Uri.encodeComponent(match[8]!.split('|').first.trim())}'
           : match[10];
       final inner = raw.substring(prefix, raw.length - suffix);
-      if (!editing && href != null && openLink != null) {
+      final destination = href;
+      if (!editing && destination != null && openLink != null) {
         // EditableText cannot expose recognizers in an editable TextSpan.
         // Links use the same embedded-widget approach as task checkboxes.
         final labelStart = offset + match.start + prefix;
@@ -314,7 +358,7 @@ class MarkdownLiveController extends TextEditingController {
               child: Semantics(
                 link: true,
                 child: GestureDetector(
-                  onTap: () => openLink?.call(href),
+                  onTap: () => openLink?.call(destination),
                   onLongPress: selectLink == null
                       ? null
                       : () => selectLink!(
@@ -325,13 +369,16 @@ class MarkdownLiveController extends TextEditingController {
                         ),
                   child: Text.rich(
                     TextSpan(
-                      children: _inlines(
-                        context,
-                        inner,
-                        labelStart,
-                        depth + 1,
-                        inheritedStyle?.merge(format),
-                      ),
+                      children: automatic
+                          ? [TextSpan(text: inner)]
+                          : _inlines(
+                              context,
+                              inner,
+                              labelStart,
+                              depth + 1,
+                              inheritedStyle?.merge(format),
+                              false,
+                            ),
                     ),
                     style:
                         (inheritedStyle ??
@@ -344,6 +391,7 @@ class MarkdownLiveController extends TextEditingController {
           ),
         );
         result.add(_hidden(raw.substring(1)));
+        if (trailing.isNotEmpty) result.add(TextSpan(text: trailing));
         cursor = match.end;
         continue;
       }
@@ -358,7 +406,7 @@ class MarkdownLiveController extends TextEditingController {
       result.add(
         TextSpan(
           style: format,
-          children: match[1] != null
+          children: match[1] != null || automatic
               ? [TextSpan(text: inner)]
               : _inlines(
                   context,
@@ -366,6 +414,7 @@ class MarkdownLiveController extends TextEditingController {
                   offset + match.start + prefix,
                   depth + 1,
                   inheritedStyle?.merge(format),
+                  detectAutolinks && href == null,
                 ),
         ),
       );
@@ -377,6 +426,7 @@ class MarkdownLiveController extends TextEditingController {
               )
             : _hidden(raw.substring(raw.length - suffix)),
       );
+      if (trailing.isNotEmpty) result.add(TextSpan(text: trailing));
       cursor = match.end;
     }
     if (cursor < source.length) {
