@@ -19,6 +19,31 @@ import 'providers.dart';
 import 'theme.dart';
 import 'wiki_autocomplete.dart';
 
+void _openMarkdownLink(BuildContext context, WidgetRef ref, String href) {
+  guard(context, () async {
+    final uri = Uri.parse(href);
+    if (uri.scheme == 'wiki') {
+      await _openWikiLink(context, ref, Uri.decodeComponent(uri.path));
+    } else if (uri.scheme == 'note' ||
+        (uri.scheme == 'yggvion' && uri.host == 'note')) {
+      await showNotePreview(context, uri.path.replaceFirst(RegExp(r'^/'), ''));
+    } else if (uri.scheme == 'attachment') {
+      final path = await ref.read(appProvider).attachmentPath(uri.path);
+      if (path == null) {
+        throw StateError('Вложение ещё не загружено на это устройство');
+      }
+      final result = await OpenFilex.open(path);
+      if (result.type != ResultType.done) throw StateError(result.message);
+    } else if (['https', 'http', 'mailto'].contains(uri.scheme)) {
+      if (!await launchUrl(uri, mode: LaunchMode.externalApplication)) {
+        throw StateError('Не удалось открыть ссылку');
+      }
+    } else {
+      throw StateError('Этот тип ссылки пока не поддерживается');
+    }
+  });
+}
+
 class MarkdownPreview extends ConsumerWidget {
   const MarkdownPreview({
     super.key,
@@ -159,34 +184,7 @@ class MarkdownPreview extends ConsumerWidget {
         ),
       ),
       onTapLink: (label, href, title) {
-        if (href == null) return;
-        guard(context, () async {
-          final uri = Uri.parse(href);
-          if (uri.scheme == 'wiki') {
-            await _openWikiLink(context, ref, Uri.decodeComponent(uri.path));
-          } else if (uri.scheme == 'note' ||
-              (uri.scheme == 'yggvion' && uri.host == 'note')) {
-            await showNotePreview(
-              context,
-              uri.path.replaceFirst(RegExp(r'^/'), ''),
-            );
-          } else if (uri.scheme == 'attachment') {
-            final path = await ref.read(appProvider).attachmentPath(uri.path);
-            if (path == null) {
-              throw StateError('Вложение ещё не загружено на это устройство');
-            }
-            final result = await OpenFilex.open(path);
-            if (result.type != ResultType.done) {
-              throw StateError(result.message);
-            }
-          } else if (['https', 'http', 'mailto'].contains(uri.scheme)) {
-            if (!await launchUrl(uri, mode: LaunchMode.externalApplication)) {
-              throw StateError('Не удалось открыть ссылку');
-            }
-          } else {
-            throw StateError('Этот тип ссылки пока не поддерживается');
-          }
-        });
+        if (href != null) _openMarkdownLink(context, ref, href);
       },
       imageBuilder: (uri, title, alt) {
         if (uri.scheme == 'attachment') {
@@ -277,7 +275,7 @@ class LiveMarkdownEditor extends ConsumerStatefulWidget {
     this.placeholder = 'Начните писать…',
     this.toolbar = true,
     this.toolbarLabel = 'Markdown',
-    this.editOnLongPress = false,
+    this.continuousInput = false,
     this.onEditingChanged,
     this.toolbarLeading,
     this.toolbarTrailing,
@@ -285,7 +283,7 @@ class LiveMarkdownEditor extends ConsumerStatefulWidget {
   });
   final String value, placeholder, toolbarLabel;
   final ValueChanged<String> onChanged;
-  final bool readOnly, toolbar, editOnLongPress;
+  final bool readOnly, toolbar, continuousInput;
   final ValueChanged<bool>? onEditingChanged;
   final Widget? toolbarLeading, toolbarTrailing;
   final String? noteId;
@@ -357,7 +355,11 @@ class LiveMarkdownEditorState extends ConsumerState<LiveMarkdownEditor>
   }
 
   void finishEditing() {
-    _focus.unfocus(disposition: UnfocusDisposition.previouslyFocusedChild);
+    _focus.unfocus(
+      disposition: widget.continuousInput
+          ? UnfocusDisposition.scope
+          : UnfocusDisposition.previouslyFocusedChild,
+    );
     _finish();
   }
 
@@ -382,6 +384,7 @@ class LiveMarkdownEditorState extends ConsumerState<LiveMarkdownEditor>
   @override
   void initState() {
     super.initState();
+    _controller.revealSource = !widget.continuousInput;
     _load(widget.value);
     _document.value = TextEditingValue(
       text: _last,
@@ -394,6 +397,7 @@ class LiveMarkdownEditorState extends ConsumerState<LiveMarkdownEditor>
   void _load(String value) {
     _last = value;
     _blocks = _split(value);
+    _controller.value = TextEditingValue(text: value);
   }
 
   static List<String> _split(String value) {
@@ -463,7 +467,12 @@ class LiveMarkdownEditorState extends ConsumerState<LiveMarkdownEditor>
   }
 
   void _focusChanged() {
+    _controller.revealSource = !widget.continuousInput || _focus.hasFocus;
     if (_focus.hasFocus) {
+      if (widget.continuousInput && !_isEditing) {
+        setState(() => _isEditing = true);
+        widget.onEditingChanged?.call(true);
+      }
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted || !_focus.hasFocus) return;
         // Native iOS undo must restore the document, not the active paragraph.
@@ -531,7 +540,7 @@ class LiveMarkdownEditorState extends ConsumerState<LiveMarkdownEditor>
   Future<void> _insertFrom(Future<ClipboardPaste?> Function() read) async {
     if (_pasting ||
         widget.readOnly ||
-        (widget.editOnLongPress && !_isEditing)) {
+        (widget.continuousInput && !_isEditing)) {
       return;
     }
     final before = _last;
@@ -543,7 +552,7 @@ class LiveMarkdownEditorState extends ConsumerState<LiveMarkdownEditor>
         if (!mounted ||
             widget.readOnly ||
             content == null ||
-            (widget.editOnLongPress && !_isEditing)) {
+            (widget.continuousInput && !_isEditing)) {
           return;
         }
         _insert(content, _last == before ? selection : _selection);
@@ -607,29 +616,48 @@ class LiveMarkdownEditorState extends ConsumerState<LiveMarkdownEditor>
     if (!wasEditing) widget.onEditingChanged?.call(true);
   }
 
+  void _selectLink(TextSelection selection) {
+    if (widget.readOnly || _pasting) return;
+    _controller.selection = selection;
+    _focus.requestFocus();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_focus.hasFocus) return;
+      final input = _focus.context
+          ?.findAncestorStateOfType<EditableTextState>();
+      input?.userUpdateTextEditingValue(
+        _controller.value,
+        SelectionChangedCause.longPress,
+      );
+      input?.showToolbar();
+    });
+  }
+
   Widget _contextMenu(BuildContext context, EditableTextState state) =>
-      AdaptiveTextSelectionToolbar.buttonItems(
-        anchors: state.contextMenuAnchors,
-        buttonItems: [
-          for (final item in state.contextMenuButtonItems)
-            if (item.type == ContextMenuButtonType.selectAll)
-              ContextMenuButtonItem(
-                type: ContextMenuButtonType.selectAll,
-                onPressed: () {
-                  state.hideToolbar();
-                  _selectAll();
-                },
-              )
-            else if (item.type != ContextMenuButtonType.paste)
-              item,
-          ContextMenuButtonItem(
-            type: ContextMenuButtonType.paste,
-            onPressed: () {
-              state.hideToolbar();
-              _paste();
-            },
-          ),
-        ],
+      TextFieldTapRegion(
+        groupId: _focus,
+        child: AdaptiveTextSelectionToolbar.buttonItems(
+          anchors: state.contextMenuAnchors,
+          buttonItems: [
+            for (final item in state.contextMenuButtonItems)
+              if (item.type == ContextMenuButtonType.selectAll)
+                ContextMenuButtonItem(
+                  type: ContextMenuButtonType.selectAll,
+                  onPressed: () {
+                    state.hideToolbar();
+                    _selectAll();
+                  },
+                )
+              else if (item.type != ContextMenuButtonType.paste)
+                item,
+            ContextMenuButtonItem(
+              type: ContextMenuButtonType.paste,
+              onPressed: () {
+                state.hideToolbar();
+                _paste();
+              },
+            ),
+          ],
+        ),
       );
 
   @override
@@ -704,13 +732,17 @@ class LiveMarkdownEditorState extends ConsumerState<LiveMarkdownEditor>
                   text: _last.isEmpty ? 'Пока пусто' : _last,
                 ),
               )
-            else if (_isEditing)
+            else if (_isEditing || widget.continuousInput)
               LayoutBuilder(
                 builder: (context, bounds) {
                   _controller.previewWidth = (bounds.maxWidth - 10).clamp(
                     1,
                     double.infinity,
                   );
+                  _controller.selectLink = _selectLink;
+                  _controller.openLink = widget.continuousInput
+                      ? (href) => _openMarkdownLink(context, ref, href)
+                      : null;
                   _controller.preview = (source) =>
                       MarkdownPreview(text: source, selectable: false);
                   _controller.toggleTask = _pasting
@@ -733,7 +765,7 @@ class LiveMarkdownEditorState extends ConsumerState<LiveMarkdownEditor>
                       controller: _controller,
                       focusNode: _focus,
                       groupId: _focus,
-                      onTapOutside: widget.editOnLongPress
+                      onTapOutside: widget.continuousInput
                           ? (_) => finishEditing()
                           : null,
                       readOnly: _pasting,
@@ -768,12 +800,7 @@ class LiveMarkdownEditorState extends ConsumerState<LiveMarkdownEditor>
                 _blocks.length,
                 (index) => GestureDetector(
                   behavior: HitTestBehavior.opaque,
-                  onTap: widget.editOnLongPress
-                      ? finishEditing
-                      : () => _edit(index),
-                  onLongPress: widget.editOnLongPress
-                      ? () => _edit(index)
-                      : null,
+                  onTap: () => _edit(index),
                   child: MouseRegion(
                     cursor: SystemMouseCursors.text,
                     child: Padding(
@@ -799,8 +826,7 @@ class LiveMarkdownEditorState extends ConsumerState<LiveMarkdownEditor>
             if (!widget.readOnly)
               GestureDetector(
                 behavior: HitTestBehavior.opaque,
-                onTap: widget.editOnLongPress ? finishEditing : _editEnd,
-                onLongPress: widget.editOnLongPress ? _editEnd : null,
+                onTap: _editEnd,
                 child: const SizedBox(height: 40),
               ),
           ],

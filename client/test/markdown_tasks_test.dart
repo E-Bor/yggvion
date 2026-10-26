@@ -232,7 +232,7 @@ void main() {
             return LiveMarkdownEditor(
               value: text,
               toolbar: false,
-              editOnLongPress: true,
+              continuousInput: true,
               onChanged: (value) => set(() => text = value),
             );
           },
@@ -241,7 +241,10 @@ void main() {
       await tester.tap(find.byType(Checkbox));
       await tester.pumpAndSettle();
       expect(text, 'Вступление\n\n- [x] Подзадача\n\nЗаключение');
-      expect(find.byType(TextField), findsNothing);
+      expect(
+        tester.widget<TextField>(find.byType(TextField)).focusNode!.hasFocus,
+        isFalse,
+      );
       expect(tester.testTextInput.isVisible, isFalse);
       await tester.tap(find.byType(Checkbox));
       await tester.pumpAndSettle();

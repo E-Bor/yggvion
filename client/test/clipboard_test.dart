@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -12,6 +13,7 @@ import 'package:yggvion/data/database.dart';
 import 'package:yggvion/data/repository.dart';
 import 'package:yggvion/ui/markdown_editor.dart';
 import 'package:yggvion/ui/providers.dart';
+import 'interaction_test.dart' show testInteraction;
 
 class TestProgress extends Fake implements ReadProgress {}
 
@@ -411,68 +413,83 @@ void main() {
     );
   }
 
-  testWidgets(
-    'context menu paste attaches a file, preserves the caret, and reports failures without changing text',
-    (tester) async {
-      final file = File('${directory.path}/notes.txt');
-      await tester.runAsync(() => file.writeAsString('attachment text'));
-      var value = 'Before after';
-      var fail = false;
-      final service = AttachmentClipboard(
-        repo,
-        reader: () async {
-          if (fail) throw StateError('Clipboard unavailable');
-          return ClipboardReader([
-            TestClipboardItem(values: {Formats.fileUri: file.uri}),
-          ]);
-        },
-      );
-      await tester.pumpWidget(
-        ProviderScope(
-          overrides: [
-            appProvider.overrideWith((ref) => repo),
-            clipboardProvider.overrideWithValue(service),
-          ],
-          child: MaterialApp(
-            home: Scaffold(
-              body: StatefulBuilder(
-                builder: (context, set) => LiveMarkdownEditor(
-                  value: value,
-                  onChanged: (next) => set(() => value = next),
+  for (final continuousInput in [false, true]) {
+    testInteraction(
+      'context menu paste attaches a file, preserves the caret, and reports failures (continuous: $continuousInput)',
+      (tester) async {
+        final previousPlatform = debugDefaultTargetPlatformOverride;
+        debugDefaultTargetPlatformOverride = continuousInput
+            ? TargetPlatform.iOS
+            : TargetPlatform.macOS;
+        addTearDown(
+          () => debugDefaultTargetPlatformOverride = previousPlatform,
+        );
+        final file = File('${directory.path}/notes.txt');
+        await tester.runAsync(() => file.writeAsString('attachment text'));
+        var value = 'Before after';
+        var fail = false;
+        final service = AttachmentClipboard(
+          repo,
+          reader: () async {
+            if (fail) throw StateError('Clipboard unavailable');
+            return ClipboardReader([
+              TestClipboardItem(values: {Formats.fileUri: file.uri}),
+            ]);
+          },
+        );
+        await tester.pumpWidget(
+          ProviderScope(
+            overrides: [
+              appProvider.overrideWith((ref) => repo),
+              clipboardProvider.overrideWithValue(service),
+            ],
+            child: MaterialApp(
+              home: Scaffold(
+                body: StatefulBuilder(
+                  builder: (context, set) => LiveMarkdownEditor(
+                    continuousInput: continuousInput,
+                    value: value,
+                    onChanged: (next) => set(() => value = next),
+                  ),
                 ),
               ),
             ),
           ),
-        ),
-      );
-      await tester.tap(find.text(value));
-      await tester.pumpAndSettle();
-      await tester.tap(find.byType(TextField));
-      tester.widget<TextField>(find.byType(TextField)).controller!.selection =
-          const TextSelection.collapsed(offset: 7);
-      await tester.pumpAndSettle();
-      final input = tester.state<EditableTextState>(find.byType(EditableText));
-      expect(input.showToolbar(), isTrue);
-      await tester.pumpAndSettle();
-      await tester.runAsync(() async {
+        );
+        await tester.tap(find.text(value));
+        await tester.pumpAndSettle();
+        await tester.tap(find.byType(TextField));
+        tester.widget<TextField>(find.byType(TextField)).controller!.selection =
+            const TextSelection.collapsed(offset: 7);
+        await tester.pumpAndSettle();
+        final input = tester.state<EditableTextState>(
+          find.byType(EditableText),
+        );
+        input.hideToolbar();
+        input.toggleToolbar();
+        await tester.pumpAndSettle();
+        await tester.runAsync(() async {
+          await tester.tap(find.text('Paste'));
+          await Future<void>.delayed(const Duration(milliseconds: 100));
+        });
+        await finishPaste(tester);
+        expect(value, startsWith('Before \n\n[notes.txt](attachment:'));
+        expect(value, endsWith('\n\nafter'));
+        final before = value;
+        fail = true;
+        tester
+            .state<EditableTextState>(find.byType(EditableText))
+            .showToolbar();
+        await tester.pumpAndSettle();
         await tester.tap(find.text('Paste'));
-        await Future<void>.delayed(const Duration(milliseconds: 100));
-      });
-      await finishPaste(tester);
-      expect(value, startsWith('Before \n\n[notes.txt](attachment:'));
-      expect(value, endsWith('\n\nafter'));
-      final before = value;
-      fail = true;
-      tester.state<EditableTextState>(find.byType(EditableText)).showToolbar();
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('Paste'));
-      await finishPaste(tester);
-      expect(value, before);
-      expect(find.textContaining('Clipboard unavailable'), findsOneWidget);
-      expect(tester.takeException(), isNull);
-      await tester.pumpWidget(const SizedBox.shrink());
-    },
-  );
+        await finishPaste(tester);
+        expect(value, before);
+        expect(find.textContaining('Clipboard unavailable'), findsOneWidget);
+        expect(tester.takeException(), isNull);
+        await tester.pumpWidget(const SizedBox.shrink());
+      },
+    );
+  }
 
   testWidgets(
     'reference note remains read-only and never reads the clipboard',

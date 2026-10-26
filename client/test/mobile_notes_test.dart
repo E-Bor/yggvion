@@ -6,8 +6,33 @@ import 'package:timezone/data/latest.dart' as tz;
 import 'package:yggvion/ui/app.dart';
 import 'package:yggvion/ui/calendar.dart';
 import 'package:yggvion/ui/notes.dart';
+import 'package:yggvion/ui/markdown_editor.dart';
 import 'package:yggvion/ui/task_editor.dart';
 import 'interaction_test.dart' show workspace, settle, command, testInteraction;
+
+Finder phoneNoteField(String id) => find.descendant(
+  of: find.byWidgetPredicate((w) => w is NotePanel && w.noteId == id),
+  matching: find.byWidgetPredicate((w) => w is TextField && w.maxLines == null),
+);
+
+EditableTextState phoneNoteInput(WidgetTester tester, String id) =>
+    tester.state<EditableTextState>(
+      find.descendant(
+        of: phoneNoteField(id),
+        matching: find.byType(EditableText),
+      ),
+    );
+
+Offset phoneNotePosition(WidgetTester tester, String id, int offset) {
+  final render = phoneNoteInput(tester, id).renderEditable;
+  final caret = render.getLocalRectForCaret(TextPosition(offset: offset));
+  return render.localToGlobal(caret.center + const Offset(1, 0));
+}
+
+void showPhoneKeyboard(WidgetTester tester) {
+  tester.view.viewInsets = const FakeViewPadding(bottom: 280);
+  addTearDown(tester.view.resetViewInsets);
+}
 
 void main() {
   setUpAll(() async {
@@ -83,12 +108,9 @@ void main() {
       final id = repo.snapshot.notes
           .singleWhere((note) => note.pinned.isEmpty)
           .id;
-      final field = find.byWidgetPredicate(
-        (w) => w is TextField && w.maxLines == null,
-      );
+      final field = phoneNoteField(id);
       expect(tester.widget<TextField>(field).focusNode!.hasFocus, isTrue);
-      tester.view.viewInsets = const FakeViewPadding(bottom: 280);
-      addTearDown(tester.view.resetViewInsets);
+      showPhoneKeyboard(tester);
       await tester.pumpAndSettle();
       expect(field.hitTestable(), findsOneWidget);
       await expectLater(
@@ -97,8 +119,9 @@ void main() {
       );
       await tester.enterText(field, '# Новая идея\n\nТекст');
       await settle(tester);
-      await tester.tap(find.byKey(ValueKey('finish-note-$id')));
+      await tester.tap(find.byKey(const ValueKey('notes-keyboard-done')));
       await settle(tester);
+      expect(tester.testTextInput.isVisible, isFalse);
       tester.view.resetViewInsets();
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const ValueKey('mobile-nav-today')));
@@ -106,149 +129,302 @@ void main() {
       await tester.tap(find.byKey(const ValueKey('mobile-nav-notes')));
       await settle(tester);
       expect(
-        find.byWidgetPredicate((w) => w is TextField && w.maxLines == null),
-        findsNothing,
+        tester.widget<TextField>(phoneNoteField(id)).focusNode!.hasFocus,
+        isFalse,
       );
       expect(tester.testTextInput.isVisible, isFalse);
-      expect(find.text('Новая идея', findRichText: true), findsOneWidget);
-      expect(
-        repo.snapshot.notes.singleWhere((note) => note.id == id).content,
-        '# Новая идея\n\nТекст',
-      );
+      expect(repo.snapshot.note(id)!.content, '# Новая идея\n\nТекст');
       expect(tester.takeException(), isNull);
     },
   );
 
   for (final kind in ['scratchpad', 'reference', 'regular']) {
     testInteraction(
-      'phone $kind note edits only on hold and saves before dismissal',
+      'phone $kind note places the caret on tap and saves on dismissal',
       (tester) async {
         late String id;
+        const source = 'Первый абзац\n\nВторой абзац';
         final repo = await workspace(
           tester,
           mobile: true,
           prepare: (repo) async {
             id = kind == 'regular' ? (await repo.createNote()).id : kind;
-            await repo.saveNote(
-              id,
-              'Тестовая заметка',
-              'Первый абзац\n\nВторой абзац',
-            );
+            await repo.saveNote(id, 'Тестовая заметка', source);
           },
         );
         await tester.tap(find.byKey(const ValueKey('mobile-nav-notes')));
         await settle(tester);
-        final second = find.text('Второй абзац', findRichText: true);
-        await tester.scrollUntilVisible(
-          second,
-          120,
-          scrollable: find
-              .descendant(
-                of: find.byKey(const ValueKey('mobile-notes-list')),
-                matching: find.byType(Scrollable),
-              )
-              .first,
-        );
-        await tester.tap(second);
-        await settle(tester);
-        expect(
-          find.byWidgetPredicate((w) => w is TextField && w.maxLines == null),
-          findsNothing,
-        );
+        final field = phoneNoteField(id);
+        await tester.ensureVisible(field);
+        expect(tester.widget<TextField>(field).focusNode!.hasFocus, isFalse);
         expect(tester.testTextInput.isVisible, isFalse);
-        expect(find.byTooltip('Вставить из буфера обмена'), findsNothing);
 
-        await tester.longPress(second);
+        final start = source.indexOf('Второй');
+        await tester.tapAt(phoneNotePosition(tester, id, start));
         await settle(tester);
-        var field = find.byWidgetPredicate(
-          (w) => w is TextField && w.maxLines == null,
-        );
-        expect(field, findsOneWidget);
-        expect(
-          tester.widget<TextField>(field).controller!.text,
-          'Первый абзац\n\nВторой абзац',
-        );
+        final controller = tester.widget<TextField>(field).controller!;
         expect(tester.widget<TextField>(field).focusNode!.hasFocus, isTrue);
         expect(tester.testTextInput.isVisible, isTrue);
-        // Tapping inside the active input must still position the cursor.
-        await tester.tap(field);
-        await settle(tester);
-        expect(tester.testTextInput.isVisible, isTrue);
-        await tester.enterText(field, 'Первый абзац\n\nВторой абзац с правкой');
-        await settle(tester);
+        expect(controller.selection.isCollapsed, isTrue);
         expect(
-          repo.snapshot.notes.singleWhere((n) => n.id == id).content,
-          'Первый абзац\n\nВторой абзац с правкой',
+          controller.selection.extentOffset,
+          inInclusiveRange(start, start + 6),
         );
 
-        // The whole document now belongs to one input. Leave editing via the
-        // surrounding note card, keeping taps within text for cursor movement.
-        await tester.tapAt(
-          tester.getTopLeft(
-                find.byWidgetPredicate(
-                  (widget) => widget is NotePanel && widget.noteId == id,
-                ),
-              ) +
-              const Offset(12, 8),
-        );
+        showPhoneKeyboard(tester);
+        await tester.pumpAndSettle();
+        await tester.enterText(field, '$source с правкой');
         await settle(tester);
-        expect(
-          find.byWidgetPredicate((w) => w is TextField && w.maxLines == null),
-          findsNothing,
-        );
+        expect(repo.snapshot.note(id)!.content, '$source с правкой');
+        await tester.tap(find.byKey(const ValueKey('notes-keyboard-done')));
+        await settle(tester);
+        expect(tester.widget<TextField>(field).focusNode!.hasFocus, isFalse);
         expect(tester.testTextInput.isVisible, isFalse);
 
-        await tester.longPress(
-          find.text('Второй абзац с правкой', findRichText: true),
+        tester.view.resetViewInsets();
+        await tester.pumpAndSettle();
+        await tester.ensureVisible(field);
+        // Tapping below the document resumes at the end without adding a line.
+        final editor = find.ancestor(
+          of: field,
+          matching: find.byType(LiveMarkdownEditor),
         );
+        final bounds = tester.getRect(editor);
+        await tester.tapAt(Offset(bounds.center.dx, bounds.bottom - 15));
         await settle(tester);
-        await tester.tapAt(
-          tester.getTopLeft(
-                find.byWidgetPredicate(
-                  (widget) => widget is NotePanel && widget.noteId == id,
-                ),
-              ) +
-              const Offset(12, 8),
-        );
-        await settle(tester);
-        expect(
-          find.byWidgetPredicate((w) => w is TextField && w.maxLines == null),
-          findsNothing,
-        );
-        expect(tester.testTextInput.isVisible, isFalse);
-
-        await tester.longPress(
-          find.text('Второй абзац с правкой', findRichText: true),
-        );
-        await settle(tester);
-        await tester.tap(find.byKey(ValueKey('finish-note-$id')));
-        await settle(tester);
-        expect(
-          find.byWidgetPredicate((w) => w is TextField && w.maxLines == null),
-          findsNothing,
-        );
-        expect(tester.testTextInput.isVisible, isFalse);
+        expect(controller.selection.extentOffset, controller.text.length);
+        expect(controller.text, '$source с правкой');
         await tester.runAsync(repo.reload);
-        expect(
-          repo.snapshot.notes.singleWhere((n) => n.id == id).content,
-          'Первый абзац\n\nВторой абзац с правкой',
-        );
+        expect(repo.snapshot.note(id)!.content, '$source с правкой');
         await command(tester, LogicalKeyboardKey.digit1);
         expect(find.byType(CalendarPane), findsOneWidget);
+        expect(tester.testTextInput.isVisible, isFalse);
         expect(tester.takeException(), isNull);
       },
     );
   }
 
+  testInteraction('phone hold selects a word; copying can span paragraphs', (
+    tester,
+  ) async {
+    const source = 'Первый абзац\n\nВторой абзац';
+    await workspace(
+      tester,
+      mobile: true,
+      prepare: (repo) => repo.saveNote('scratchpad', '', source),
+    );
+    await tester.tap(find.byKey(const ValueKey('mobile-nav-notes')));
+    await settle(tester);
+    await tester.longPressAt(
+      phoneNotePosition(tester, 'scratchpad', source.indexOf('Второй') + 2),
+    );
+    await settle(tester);
+    final input = phoneNoteInput(tester, 'scratchpad');
+    final controller = tester
+        .widget<TextField>(phoneNoteField('scratchpad'))
+        .controller!;
+    expect(controller.selection.isCollapsed, isFalse);
+    expect(controller.selection.textInside(controller.text).trim(), 'Второй');
+
+    await command(tester, LogicalKeyboardKey.keyA);
+    expect(controller.selection.textInside(controller.text), source);
+    String? copied;
+    final messenger =
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    messenger.setMockMethodCallHandler(SystemChannels.platform, (call) async {
+      if (call.method == 'Clipboard.setData') {
+        copied = (call.arguments as Map)['text'] as String;
+      }
+      return null;
+    });
+    addTearDown(
+      () => messenger.setMockMethodCallHandler(SystemChannels.platform, null),
+    );
+    input.copySelection(SelectionChangedCause.toolbar);
+    await settle(tester);
+    expect(copied, source);
+    expect(tester.takeException(), isNull);
+  });
+
   testInteraction(
-    'phone Markdown editing stays usable with the keyboard and closes on outside tap',
+    'phone links and checkboxes work without opening the keyboard',
     (tester) async {
+      const source = 'См. [[Документ|подробности]] здесь\n\n- [ ] Проверить';
       final repo = await workspace(
         tester,
         mobile: true,
         prepare: (repo) async {
-          await repo.saveNote('scratchpad', 'Быстрая заметка', 'Текст заметки');
+          final target = await repo.createNote();
+          await repo.saveNote(
+            target.id,
+            'Документ',
+            'Содержимое связанной заметки',
+          );
+          await repo.saveNote('scratchpad', '', source);
         },
+      );
+      await tester.tap(find.byKey(const ValueKey('mobile-nav-notes')));
+      await settle(tester);
+      final checkbox = find.descendant(
+        of: phoneNoteField('scratchpad'),
+        matching: find.byType(Checkbox),
+      );
+      await tester.tap(checkbox);
+      await settle(tester);
+      expect(
+        repo.snapshot.note('scratchpad')!.content,
+        contains('- [x] Проверить'),
+      );
+      expect(tester.testTextInput.isVisible, isFalse);
+      await tester.tap(find.text('подробности', findRichText: true));
+      await settle(tester);
+      expect(find.byType(AlertDialog), findsOneWidget);
+      expect(
+        find.descendant(
+          of: find.byType(AlertDialog),
+          matching: find.text(
+            'Содержимое связанной заметки',
+            findRichText: true,
+          ),
+        ),
+        findsOneWidget,
+      );
+      expect(tester.testTextInput.isVisible, isFalse);
+      await tester.tap(find.text('Закрыть'));
+      await settle(tester);
+      expect(
+        tester
+            .widget<TextField>(phoneNoteField('scratchpad'))
+            .focusNode!
+            .hasFocus,
+        isFalse,
+      );
+      await tester.longPress(find.text('подробности', findRichText: true));
+      await settle(tester);
+      final controller = tester
+          .widget<TextField>(phoneNoteField('scratchpad'))
+          .controller!;
+      expect(controller.selection.textInside(controller.text), 'подробности');
+      expect(tester.testTextInput.isVisible, isTrue);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testInteraction(
+    'phone Done remains above keyboard when a long note is scrolled',
+    (tester) async {
+      final source = List.generate(60, (i) => 'Строка $i').join('\n');
+      await workspace(
+        tester,
+        mobile: true,
+        prepare: (repo) => repo.saveNote('scratchpad', '', source),
+      );
+      await tester.tap(find.byKey(const ValueKey('mobile-nav-notes')));
+      await settle(tester);
+      await tester.tapAt(phoneNotePosition(tester, 'scratchpad', 0));
+      await settle(tester);
+      showPhoneKeyboard(tester);
+      await tester.pumpAndSettle();
+      final scroll = tester
+          .widget<ListView>(find.byKey(const ValueKey('mobile-notes-list')))
+          .controller!;
+      scroll.jumpTo(400);
+      await tester.pumpAndSettle();
+      final done = find.byKey(const ValueKey('notes-keyboard-done'));
+      expect(done.hitTestable(), findsOneWidget);
+      final bar = tester.getRect(
+        find.byKey(const ValueKey('notes-keyboard-bar')),
+      );
+      expect(bar.bottom, closeTo(844 - 280, 1));
+      expect(find.byKey(const ValueKey('create-note')), findsNothing);
+      expect(find.byKey(const ValueKey('create-event')), findsNothing);
+      await tester.tap(done);
+      await settle(tester);
+      expect(tester.testTextInput.isVisible, isFalse);
+      tester.view.resetViewInsets();
+      await tester.pumpAndSettle();
+      expect(scroll.offset, closeTo(400, 1));
+      expect(
+        tester.widget<TextField>(phoneNoteField('scratchpad')).controller!.text,
+        source,
+      );
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testInteraction(
+    'Done closes both title and body without refocusing the other input',
+    (tester) async {
+      await workspace(tester, mobile: true);
+      await tester.tap(find.byKey(const ValueKey('create-note')));
+      await settle(tester);
+      final panel = tester.widgetList<NotePanel>(find.byType(NotePanel)).first;
+      showPhoneKeyboard(tester);
+      await tester.pumpAndSettle();
+      final title = find.byKey(ValueKey('note-title-${panel.noteId}'));
+      final body = phoneNoteField(panel.noteId);
+      final done = find.byKey(const ValueKey('notes-keyboard-done'));
+      await tester.tap(title);
+      await settle(tester);
+      await tester.tap(body);
+      await settle(tester);
+      await tester.tap(done);
+      await settle(tester);
+      expect(tester.testTextInput.isVisible, isFalse);
+      expect(tester.widget<TextField>(title).focusNode!.hasFocus, isFalse);
+      expect(tester.widget<TextField>(body).focusNode!.hasFocus, isFalse);
+      await tester.tap(title);
+      await settle(tester);
+      await tester.enterText(title, 'Название');
+      await settle(tester);
+      await tester.tap(done);
+      await settle(tester);
+      expect(tester.testTextInput.isVisible, isFalse);
+      expect(tester.widget<TextField>(body).focusNode!.hasFocus, isFalse);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testInteraction(
+    'phone landscape keeps native note gestures and keyboard controls',
+    (tester) async {
+      await workspace(
+        tester,
+        mobile: true,
+        prepare: (repo) =>
+            repo.saveNote('scratchpad', '', 'Заметка в горизонтальном режиме'),
+      );
+      tester.view.physicalSize = const Size(844, 390);
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('mobile-nav-notes')));
+      await settle(tester);
+      expect(find.byKey(const ValueKey('mobile-notes-list')), findsOneWidget);
+      await tester.tap(phoneNoteField('scratchpad'));
+      await settle(tester);
+      tester.view.viewInsets = const FakeViewPadding(bottom: 162);
+      addTearDown(tester.view.resetViewInsets);
+      await tester.pumpAndSettle();
+      final done = find.byKey(const ValueKey('notes-keyboard-done'));
+      expect(done.hitTestable(), findsOneWidget);
+      expect(
+        tester.getRect(find.byKey(const ValueKey('notes-keyboard-bar'))).bottom,
+        closeTo(390 - 162, 1),
+      );
+      await tester.tap(done);
+      await settle(tester);
+      expect(tester.testTextInput.isVisible, isFalse);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testInteraction(
+    'phone Markdown keyboard bar is minimal and outside tap dismisses editing',
+    (tester) async {
+      final repo = await workspace(
+        tester,
+        mobile: true,
+        prepare: (repo) =>
+            repo.saveNote('scratchpad', 'Быстрая заметка', 'Текст заметки'),
       );
       await tester.tap(find.byKey(const ValueKey('mobile-nav-notes')));
       await settle(tester);
@@ -256,10 +432,9 @@ void main() {
         find.byType(YggvionApp),
         matchesGoldenFile('goldens/notes_reading_390.png'),
       );
-      await tester.longPress(find.text('Текст заметки', findRichText: true));
+      await tester.tap(phoneNoteField('scratchpad'));
       await settle(tester);
-      tester.view.viewInsets = const FakeViewPadding(bottom: 280);
-      addTearDown(tester.view.resetViewInsets);
+      showPhoneKeyboard(tester);
       await tester.pumpAndSettle();
       await expectLater(
         find.byType(YggvionApp),
@@ -269,13 +444,9 @@ void main() {
       expect(find.byTooltip('Ссылка на заметку'), findsNothing);
       expect(find.byTooltip('Прикрепить изображение или файл'), findsNothing);
       expect(find.byTooltip('Вставить из буфера обмена'), findsNothing);
-      expect(
-        find.byKey(const ValueKey('finish-note-scratchpad')),
-        findsOneWidget,
-      );
-      expect(tester.testTextInput.isVisible, isTrue);
+      expect(find.byKey(const ValueKey('notes-keyboard-done')), findsOneWidget);
       await tester.enterText(
-        find.byWidgetPredicate((w) => w is TextField && w.maxLines == null),
+        phoneNoteField('scratchpad'),
         '# Заголовок\n\nТекст',
       );
       await settle(tester);
@@ -284,15 +455,8 @@ void main() {
             const Offset(16, 16),
       );
       await settle(tester);
-      expect(
-        find.byWidgetPredicate((w) => w is TextField && w.maxLines == null),
-        findsNothing,
-      );
       expect(tester.testTextInput.isVisible, isFalse);
-      expect(
-        repo.snapshot.notes.singleWhere((n) => n.id == 'scratchpad').content,
-        '# Заголовок\n\nТекст',
-      );
+      expect(repo.snapshot.note('scratchpad')!.content, '# Заголовок\n\nТекст');
       expect(tester.takeException(), isNull);
     },
   );

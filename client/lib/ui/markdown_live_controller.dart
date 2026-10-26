@@ -8,12 +8,21 @@ class MarkdownLiveController extends TextEditingController {
   Widget Function(String source)? preview;
   void Function(int offset, bool checked)? toggleTask;
   double previewWidth = 300;
+  ValueChanged<String>? openLink;
+  bool _revealSource = true;
+  ValueChanged<TextSelection>? selectLink;
+
+  set revealSource(bool value) {
+    if (_revealSource == value) return;
+    _revealSource = value;
+    notifyListeners();
+  }
 
   static final _heading = RegExp(r'^ {0,3}(#{1,6})[ \t]+');
   static final _task = RegExp(r'^([ \t]*[-+*][ \t]+)\[([ xX])\][ \t]+');
   static final _quote = RegExp(r'^ {0,3}>[ \t]?');
   static final _embed = RegExp(
-    r'^\s*(?:!\[[^\]]*\]\([^\n]+\)|\[\[[^\]\n]+\]\])\s*$',
+    r'^\s*(?:!\[[^\]]*\]\([^\n]+\)|\[\[[^\]\n]+\]\]|\[[^\]]*\]\(note:[a-zA-Z0-9_-]+\))\s*$',
   );
   static final _inline = RegExp(
     r'(`+)([^`\n]+)\1|\*\*(?=\S)(.+?\S|\S)\*\*|__(?=\S)(.+?\S|\S)__|~~(?=\S)(.+?\S|\S)~~|\*(?=\S)([^*\n]*\S)\*|_(?=\S)([^_\n]*\S)_|\[\[([^\]\n]+)\]\]|\[([^\]\n]+)\]\(([^)\n]+)\)',
@@ -22,6 +31,7 @@ class MarkdownLiveController extends TextEditingController {
   List<_LiveLine> _lines = [];
 
   bool _editing(int start, int end) {
+    if (!_revealSource) return false;
     final range = value.composing;
     if (range.isValid &&
         !range.isCollapsed &&
@@ -173,6 +183,8 @@ class MarkdownLiveController extends TextEditingController {
               context,
               line.text.substring(start),
               line.start + start,
+              0,
+              base.merge(lineStyle),
             ),
           ),
         );
@@ -236,6 +248,7 @@ class MarkdownLiveController extends TextEditingController {
     String source,
     int offset, [
     int depth = 0,
+    TextStyle? inheritedStyle,
   ]) {
     if (depth > 12) return [TextSpan(text: source)];
     final result = <InlineSpan>[];
@@ -284,7 +297,56 @@ class MarkdownLiveController extends TextEditingController {
           decoration: TextDecoration.underline,
         );
       }
+      final href = match[8] != null
+          ? 'wiki:${Uri.encodeComponent(match[8]!.split('|').first.trim())}'
+          : match[10];
       final inner = raw.substring(prefix, raw.length - suffix);
+      if (!editing && href != null && openLink != null) {
+        // EditableText cannot expose recognizers in an editable TextSpan.
+        // Links use the same embedded-widget approach as task checkboxes.
+        final labelStart = offset + match.start + prefix;
+        result.add(
+          WidgetSpan(
+            alignment: PlaceholderAlignment.baseline,
+            baseline: TextBaseline.alphabetic,
+            child: ConstrainedBox(
+              constraints: BoxConstraints(maxWidth: previewWidth),
+              child: Semantics(
+                link: true,
+                child: GestureDetector(
+                  onTap: () => openLink?.call(href),
+                  onLongPress: selectLink == null
+                      ? null
+                      : () => selectLink!(
+                          TextSelection(
+                            baseOffset: labelStart,
+                            extentOffset: labelStart + inner.length,
+                          ),
+                        ),
+                  child: Text.rich(
+                    TextSpan(
+                      children: _inlines(
+                        context,
+                        inner,
+                        labelStart,
+                        depth + 1,
+                        inheritedStyle?.merge(format),
+                      ),
+                    ),
+                    style:
+                        (inheritedStyle ??
+                                const TextStyle(fontSize: 14, height: 1.65))
+                            .merge(format),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+        result.add(_hidden(raw.substring(1)));
+        cursor = match.end;
+        continue;
+      }
       result.add(
         editing
             ? TextSpan(
@@ -303,6 +365,7 @@ class MarkdownLiveController extends TextEditingController {
                   inner,
                   offset + match.start + prefix,
                   depth + 1,
+                  inheritedStyle?.merge(format),
                 ),
         ),
       );

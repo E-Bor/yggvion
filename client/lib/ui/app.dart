@@ -417,6 +417,11 @@ class _WorkspaceState extends ConsumerState<Workspace>
                                     key: ValueKey(selectedNote),
                                     initialId: selectedNote,
                                     editId: newNoteId,
+                                    keyboardVisible:
+                                        MediaQuery.viewInsetsOf(
+                                          context,
+                                        ).bottom >
+                                        0,
                                   ),
                           PageKind.settings => PopScope(
                             canPop: !birthdaysOpen,
@@ -461,7 +466,11 @@ class _WorkspaceState extends ConsumerState<Workspace>
                       ),
                   ],
                 ),
-          floatingActionButton: desktop || page == PageKind.settings
+          floatingActionButton:
+              desktop ||
+                  page == PageKind.settings ||
+                  (page == PageKind.notes &&
+                      MediaQuery.viewInsetsOf(context).bottom > 0)
               ? null
               : Column(
                   mainAxisSize: MainAxisSize.min,

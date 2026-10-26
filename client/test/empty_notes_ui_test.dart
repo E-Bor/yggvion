@@ -31,7 +31,10 @@ void main() {
         );
         expect(find.byType(NotePanel), findsNothing);
         expect(
-          find.byWidgetPredicate((w) => w is TextField && w.maxLines == null),
+          find.byWidgetPredicate(
+            (w) =>
+                w is TextField && w.maxLines == null && w.focusNode!.hasFocus,
+          ),
           findsNothing,
         );
       } finally {
@@ -43,7 +46,9 @@ void main() {
       expect(repo.snapshot.notes.where((n) => n.pinned.isEmpty), isEmpty);
       await command(tester, LogicalKeyboardKey.keyN, shift: true);
       await tester.enterText(
-        find.byWidgetPredicate((w) => w is TextField && w.maxLines == null),
+        find.byWidgetPredicate(
+          (w) => w is TextField && w.maxLines == null && w.focusNode!.hasFocus,
+        ),
         'Сохранить',
       );
       await tester.tap(find.byKey(const ValueKey('mobile-nav-today')));
@@ -86,7 +91,8 @@ void main() {
         ]) {
           await command(tester, LogicalKeyboardKey.keyN, shift: true);
           final field = find.byWidgetPredicate(
-            (w) => w is TextField && w.maxLines == null,
+            (w) =>
+                w is TextField && w.maxLines == null && w.focusNode!.hasFocus,
           );
           expect(field, findsOneWidget);
           final id = tester
@@ -125,13 +131,23 @@ void main() {
           matching: find.text('🌱', findRichText: true),
         );
         if (mobile) {
-          await tester.longPress(text);
+          final field = find.byWidgetPredicate(
+            (w) =>
+                w is TextField &&
+                w.maxLines == null &&
+                w.controller!.text.contains('🌱'),
+          );
+          await tester.ensureVisible(field);
+          await tester.tap(field);
         } else {
           await tester.tap(text);
         }
         await settle(tester);
         await tester.enterText(
-          find.byWidgetPredicate((w) => w is TextField && w.maxLines == null),
+          find.byWidgetPredicate(
+            (w) =>
+                w is TextField && w.maxLines == null && w.focusNode!.hasFocus,
+          ),
           '  \n\n ',
         );
         await leaveAndReturn();

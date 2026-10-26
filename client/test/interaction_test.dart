@@ -391,7 +391,8 @@ void main() {
           final field = find.descendant(
             of: find.byType(NotesPage),
             matching: find.byWidgetPredicate(
-              (w) => w is TextField && w.maxLines == null,
+              (w) =>
+                  w is TextField && w.maxLines == null && w.focusNode!.hasFocus,
             ),
           );
           final input = tester.widget<EditableText>(
@@ -412,8 +413,13 @@ void main() {
         await create();
         await write('# Первая заметка\n\nПервый текст');
         if (mobile) {
-          await tester.tap(find.text('Готово'));
+          tester.view.viewInsets = const FakeViewPadding(bottom: 280);
+          addTearDown(tester.view.resetViewInsets);
+          await tester.pumpAndSettle();
+          await tester.tap(find.byKey(const ValueKey('notes-keyboard-done')));
           await settle(tester);
+          tester.view.resetViewInsets();
+          await tester.pumpAndSettle();
         }
         await create();
         await write('# Вторая заметка\n\nВторой текст');
@@ -427,14 +433,23 @@ void main() {
           ]),
         );
         if (mobile) {
-          await tester.tap(find.text('Готово'));
+          tester.view.viewInsets = const FakeViewPadding(bottom: 280);
+          await tester.pumpAndSettle();
+          await tester.tap(find.byKey(const ValueKey('notes-keyboard-done')));
           await settle(tester);
-          await tester.tap(find.text('Вторая заметка', findRichText: true));
-          await settle(tester);
-          expect(
-            find.byWidgetPredicate((w) => w is TextField && w.maxLines == null),
-            findsNothing,
+          tester.view.resetViewInsets();
+          await tester.pumpAndSettle();
+          expect(tester.testTextInput.isVisible, isFalse);
+          final body = find.byWidgetPredicate(
+            (w) =>
+                w is TextField &&
+                w.maxLines == null &&
+                w.controller!.text.startsWith('# Вторая заметка'),
           );
+          await tester.tap(body);
+          await settle(tester);
+          expect(tester.widget<TextField>(body).focusNode!.hasFocus, isTrue);
+          expect(tester.testTextInput.isVisible, isTrue);
         } else {
           expect(find.text('Первая заметка'), findsOneWidget);
           expect(

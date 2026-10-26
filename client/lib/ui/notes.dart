@@ -73,14 +73,14 @@ class _NotePanelState extends ConsumerState<NotePanel> {
     if (!titleFocus.hasFocus && titleController.text != note.explicitTitle) {
       titleController.text = note.explicitTitle;
     }
-    final mobile = MediaQuery.sizeOf(context).width < 800;
+    final mobile = MediaQuery.sizeOf(context).width < 1000;
     final readOnly = !mobile && note.pinned == 'reference' && !editing;
     final editor = LiveMarkdownEditor(
       key: editorKey,
       value: note.content,
       noteId: note.id,
       readOnly: readOnly,
-      editOnLongPress: mobile,
+      continuousInput: mobile,
       onEditingChanged: mobile
           ? (value) {
               if (mounted && editing != value) {
@@ -104,13 +104,7 @@ class _NotePanelState extends ConsumerState<NotePanel> {
                 size: 19,
               ),
             ),
-      toolbarTrailing: mobile && editing
-          ? TextButton(
-              key: ValueKey('finish-note-${note.id}'),
-              onPressed: () => editorKey.currentState?.finishEditing(),
-              child: const Text('Готово'),
-            )
-          : !mobile && note.pinned == 'reference'
+      toolbarTrailing: !mobile && note.pinned == 'reference'
           ? TextButton(
               onPressed: () {
                 if (editing) editorKey.currentState?.finishEditing();
@@ -119,9 +113,7 @@ class _NotePanelState extends ConsumerState<NotePanel> {
               child: Text(editing ? 'Готово' : 'Изменить'),
             )
           : null,
-      placeholder: mobile && !editing
-          ? 'Удерживайте, чтобы начать писать…'
-          : note.pinned == 'scratchpad'
+      placeholder: note.pinned == 'scratchpad'
           ? 'Черновики, конфиги, файлы — просто начните писать…'
           : 'Идеи, ссылки и всё, что важно сохранить…',
       onChanged: (v) => save(note, v),
@@ -185,7 +177,13 @@ class _NotePanelState extends ConsumerState<NotePanel> {
 }
 
 class NotesPage extends ConsumerStatefulWidget {
-  const NotesPage({super.key, this.initialId, this.editId});
+  const NotesPage({
+    super.key,
+    this.initialId,
+    this.editId,
+    this.keyboardVisible = false,
+  });
+  final bool keyboardVisible;
   final String? initialId, editId;
   @override
   ConsumerState<NotesPage> createState() => _NotesPageState();
@@ -231,10 +229,10 @@ class _NotesPageState extends ConsumerState<NotesPage> {
       for (final folder in repo.snapshot.noteFolders)
         ...repo.snapshot.notesInFolder(folder.id),
     ];
-    final mobile = MediaQuery.sizeOf(context).width < 800;
+    final mobile = MediaQuery.sizeOf(context).width < 1000;
     if (mobile) {
       final opened = regular.where((note) => note.id == selected).firstOrNull;
-      return ListView(
+      final notes = ListView(
         key: const ValueKey('mobile-notes-list'),
         controller: mobileScroll,
         padding: const EdgeInsets.all(16),
@@ -248,13 +246,6 @@ class _NotesPageState extends ConsumerState<NotesPage> {
             ),
             const SizedBox(height: 14),
           ],
-          Padding(
-            padding: EdgeInsets.only(bottom: 16),
-            child: Text(
-              'Удерживайте текст заметки, чтобы редактировать',
-              style: TextStyle(color: context.palette.muted, fontSize: 12),
-            ),
-          ),
           const NotePanel(noteId: 'scratchpad'),
           const SizedBox(height: 14),
           const NotePanel(noteId: 'reference'),
@@ -305,6 +296,33 @@ class _NotesPageState extends ConsumerState<NotesPage> {
             NotePanel(key: ValueKey(note.id), noteId: note.id),
             const SizedBox(height: 12),
           ],
+        ],
+      );
+      return Column(
+        children: [
+          Expanded(child: notes),
+          if (widget.keyboardVisible)
+            Container(
+              key: const ValueKey('notes-keyboard-bar'),
+              height: 48,
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              decoration: BoxDecoration(
+                color: context.palette.surface,
+                border: Border(
+                  top: BorderSide(color: context.palette.border, width: .5),
+                ),
+              ),
+              child: Align(
+                alignment: Alignment.centerRight,
+                child: TextButton(
+                  key: const ValueKey('notes-keyboard-done'),
+                  style: TextButton.styleFrom(minimumSize: const Size(76, 44)),
+                  onPressed: () =>
+                      FocusManager.instance.primaryFocus?.unfocus(),
+                  child: const Text('Готово'),
+                ),
+              ),
+            ),
         ],
       );
     }
