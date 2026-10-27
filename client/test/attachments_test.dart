@@ -36,6 +36,53 @@ void main() {
         .setMockMethodCallHandler(channel, null);
   });
 
+  test('attachments survive an iOS data-container relocation', () async {
+    final source = File('${dir.path}/photo.png');
+    await source.writeAsString('local photo bytes');
+    final link = await repo.attachFile(source.path);
+    final note = await repo.createNote();
+    await repo.saveNote(note.id, 'Photo', link);
+    final old = (await repo.attachmentInventory()).single;
+    final queued = await repo.db.customSelect('SELECT * FROM outbox').get();
+    final next = await Directory('${dir.path}/new-container').create();
+    await Directory(
+      '${dir.path}/attachments',
+    ).rename('${next.path}/attachments');
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (_) async => next.path);
+    expect(await repo.attachmentPath(old.id), isNull);
+
+    await repo.initialize();
+    final restored = (await repo.attachmentInventory()).single;
+    expect(restored.path, '${next.path}/attachments/${old.id}.png');
+    expect(await repo.attachmentPath(old.id), restored.path);
+    expect(await File(restored.path!).readAsString(), 'local photo bytes');
+    expect(repo.snapshot.note(note.id)!.content, link);
+    expect(restored.addedAt, old.addedAt);
+    expect(
+      await repo.db
+          .customSelect('SELECT * FROM outbox')
+          .get()
+          .then((rows) => rows.map((row) => row.data).toList()),
+      queued.map((row) => row.data).toList(),
+    );
+  });
+
+  test(
+    'a missing local file is unavailable and can be downloaded again',
+    () async {
+      final source = File('${dir.path}/lost.png');
+      await source.writeAsString('photo');
+      await repo.attachFile(source.path);
+      final old = (await repo.attachmentInventory()).single;
+      await File(old.path!).delete();
+
+      expect(await repo.attachmentPath(old.id), isNull);
+      expect((await repo.attachmentInventory()).single.path, isNull);
+      expect(await repo.db.entity('attachment-${old.id}'), isNotNull);
+    },
+  );
+
   test(
     'catalog counts note and event references and only removes unused files',
     () async {

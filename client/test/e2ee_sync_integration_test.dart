@@ -201,6 +201,15 @@ void main() {
         await sb.credentials.read(key: 'password_${sb.encryptionKeyId}'),
         password,
       );
+      // A database entry alone is not proof that the local bytes are present.
+      final missingId = files.single.read<String>('id');
+      await File(files.single.read<String>('path')).delete();
+      await b.db.customStatement('UPDATE files SET path=? WHERE id=?', [
+        '${dir.path}/old-container/$missingId.bin',
+        missingId,
+      ]);
+      expect(await b.attachmentPath(missingId), isNull);
+      devicePath = '${dir.path}/b';
       await expectLater(sb.pairInvitation(invite, 'replay'), throwsStateError);
       // Lose one successful mutation response. The retry must reuse the exact
       // ciphertext so the server's operation fingerprint remains idempotent.
@@ -227,6 +236,10 @@ void main() {
       sb.client.interceptors.remove(interceptor);
       await sb.sync();
       expect(b.syncError, isNull);
+      expect(
+        await File((await b.attachmentPath(missingId))!).readAsString(),
+        'PRIVATE_FILE_CONTENT',
+      );
       await sa.sync();
       expect(a.syncError, isNull);
       expect(a.snapshot.note(note.id)!.content, 'OFFLINE_EDIT\n$link');

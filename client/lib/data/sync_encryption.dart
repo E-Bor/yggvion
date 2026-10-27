@@ -577,7 +577,7 @@ extension EncryptedSync on SyncService {
         }
         await plain.rename(target.path);
         await repo.db.customStatement(
-          'INSERT INTO files(id,name,path,uploaded) VALUES(?,?,?,1) ON CONFLICT(id) DO NOTHING',
+          'INSERT INTO files(id,name,path,uploaded) VALUES(?,?,?,1) ON CONFLICT(id) DO UPDATE SET path=excluded.path,uploaded=1',
           [id, name, target.path],
         );
       } finally {

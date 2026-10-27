@@ -56,6 +56,7 @@ class Repository extends ChangeNotifier {
   }
 
   Future<void> initialize({String timezone = 'UTC'}) async {
+    await _relocateAttachments();
     deviceId = await db.meta('device_id') ?? newId();
     await db.setMeta('device_id', deviceId);
     final view = await db.meta('calendar_view');
@@ -1110,14 +1111,56 @@ class Repository extends ChangeNotifier {
     return '${RegExp(r'\.(png|jpe?g|gif|webp)$', caseSensitive: false).hasMatch(sourcePath) ? '!' : ''}[$label](attachment:$id)';
   });
 
-  Future<String?> attachmentPath(String id) async =>
-      (await db
-              .customSelect(
-                'SELECT path FROM files WHERE id=?',
-                variables: [Variable(id)],
-              )
-              .getSingleOrNull())
-          ?.read<String>('path');
+  Future<void> _relocateAttachments() async {
+    final rows = await db.customSelect('SELECT id,path FROM files').get();
+    if (rows.isEmpty) return;
+    final directory = p.join(
+      (await getApplicationSupportDirectory()).path,
+      'attachments',
+    );
+    final updates = <(String, String, String)>[];
+    for (final row in rows) {
+      final id = row.read<String>('id');
+      final old = row.read<String>('path');
+      final basename = p.basename(old);
+      // iOS can move the data container when updating the app. Recover only
+      // our content-addressed files, never an arbitrary stored relative path.
+      if (!RegExp(r'^[a-f0-9]{64}$').hasMatch(id) ||
+          !(basename == id ||
+              (basename.startsWith('$id.') &&
+                  RegExp(
+                    r'^\.[a-z0-9]{1,12}$',
+                  ).hasMatch(basename.substring(64))))) {
+        continue;
+      }
+      final target = p.join(directory, basename);
+      if (p.normalize(old) != p.normalize(target) &&
+          await File(target).exists()) {
+        updates.add((id, old, target));
+      }
+    }
+    if (updates.isEmpty) return;
+    await db.transaction(() async {
+      for (final (id, old, target) in updates) {
+        await db.customStatement(
+          'UPDATE files SET path=? WHERE id=? AND path=?',
+          [target, id, old],
+        );
+      }
+    });
+  }
+
+  Future<String?> attachmentPath(String id) async {
+    final row = await db
+        .customSelect(
+          'SELECT path FROM files WHERE id=?',
+          variables: [Variable(id)],
+        )
+        .getSingleOrNull();
+    final path = row?.read<String>('path');
+    return path != null && await File(path).exists() ? path : null;
+  }
+
   Future<List<Map<String, dynamic>>> conflicts() async =>
       (await db.customSelect('SELECT * FROM conflicts').get())
           .map(

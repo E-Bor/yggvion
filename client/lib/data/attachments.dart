@@ -108,6 +108,8 @@ extension RepositoryAttachments on Repository {
       if (record.kind != 'attachment') continue;
       final id = record.data['file_id'] as String;
       final file = files[id];
+      final path = file?.read<String>('path');
+      final available = path != null && await File(path).exists();
       entries.add(
         AttachmentEntry(
           id: id,
@@ -116,7 +118,7 @@ extension RepositoryAttachments on Repository {
           addedAt: DateTime.tryParse(record.data['added_at'] as String? ?? ''),
           references: references[id]?.length ?? 0,
           uploaded: file?.read<int>('uploaded') == 1,
-          path: file?.read<String>('path'),
+          path: available ? path : null,
         ),
       );
     }

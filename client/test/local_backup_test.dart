@@ -77,6 +77,89 @@ void main() {
         .setMockMethodCallHandler(channel, null);
   });
   test(
+    'a fresh offline profile restores only from an exported archive and password',
+    () async {
+      await repo.saveNoteFolder('Recovery');
+      final folder = repo.snapshot.noteFolders.single;
+      final note = await repo.createNote(folderId: folder.id);
+      final source = File('${dir.path}/recovery.bin');
+      final contents = List.generate(4096, (i) => i % 251);
+      await source.writeAsBytes(contents);
+      final link = await repo.attachFile(source.path);
+      await repo.saveNote(note.id, 'Recover everything', '# Heading\n\n$link');
+      final task = await repo.createTask(
+        'Recovery event',
+        description: '[[Recover everything]]',
+      );
+      await repo.schedule(task, now, now.add(const Duration(minutes: 30)));
+      await repo.db.setMeta('credential_device_token', 'TEST_DEVICE_TOKEN');
+      final originalId = repo.deviceId;
+      final saved = await backups.create();
+      final exported = await File(
+        saved.path,
+      ).copy('${dir.path}/exported.ygglocal');
+
+      // Lose the database, cached attachments, credentials and in-app copies.
+      backups.dispose();
+      await repo.close();
+      await Directory('${dir.path}/attachments').delete(recursive: true);
+      await Directory('${dir.path}/backups').delete(recursive: true);
+      repo = Repository(
+        LocalDatabase(NativeDatabase.memory()),
+        clock: () => now,
+      );
+      await repo.initialize();
+      backups = LocalBackupService(
+        repo,
+        directory: Directory('${dir.path}/backups'),
+      );
+      expect(repo.deviceId, isNot(originalId));
+      expect(repo.snapshot.tasks, isEmpty);
+      await expectLater(
+        backups.restore(exported.path),
+        throwsA(isA<PasswordRequired>()),
+      );
+      await expectLater(
+        backups.restore(exported.path, password: 'Wrong recovery password'),
+        throwsFormatException,
+      );
+      expect(repo.snapshot.tasks, isEmpty);
+
+      await backups.restore(exported.path, password: password);
+      expect(repo.snapshot.note(note.id)!.title, 'Recover everything');
+      expect(repo.snapshot.note(note.id)!.content, '# Heading\n\n$link');
+      expect(repo.snapshot.note(note.id)!.folderId, folder.id);
+      expect(repo.snapshot.noteFolders.single.title, 'Recovery');
+      expect(
+        repo.snapshot.task(task.id)!.description,
+        '[[Recover everything]]',
+      );
+      expect(repo.snapshot.blocks.single.start, now);
+      expect(
+        repo.snapshot.blocks.single.end,
+        now.add(const Duration(minutes: 30)),
+      );
+      final files = await repo.db.customSelect('SELECT * FROM files').get();
+      expect(
+        await File(files.single.read<String>('path')).readAsBytes(),
+        contents,
+      );
+      expect(await repo.db.meta('server_url'), isNull);
+      expect(await repo.db.meta('credential_device_token'), isNull);
+      expect(await repo.db.meta('workspace_key_id'), workspace.id);
+      expect(
+        await backups.list(),
+        hasLength(1),
+      ); // Safety copy of the empty profile.
+      final next = await backups.create();
+      expect(
+        (await PasswordConfig.readArchive(File(next.path))).config.keyId,
+        workspace.id,
+      );
+    },
+  );
+
+  test(
     'local backup restores an unreferenced attachment and its encrypted catalog',
     () async {
       final file = File('${dir.path}/orphan.txt');

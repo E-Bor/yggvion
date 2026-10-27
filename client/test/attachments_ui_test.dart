@@ -70,6 +70,18 @@ void main() {
                 'attachment-${pictures.first.id}',
               ))!.change({'added_at': '2026-10-18T12:00:00Z'}),
             ]);
+            if (mobile) {
+              // Reinstallation may keep data but replace the iOS container UUID.
+              final next = await Directory(
+                '${dir.path}/new-container',
+              ).create();
+              await Directory(
+                '${dir.path}/attachments',
+              ).rename('${next.path}/attachments');
+              TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+                  .setMockMethodCallHandler(channel, (_) async => next.path);
+              await repo.initialize();
+            }
           },
         );
         addTearDown(() async {
