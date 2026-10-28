@@ -104,7 +104,9 @@ void main() {
         await command(tester, LogicalKeyboardKey.digit4);
         await tester.runAsync(() async {
           await tester.tap(
-            mobile ? find.byTooltip('Вложения') : find.text('Вложения'),
+            mobile
+                ? find.byKey(const ValueKey('mobile-notes-attachments'))
+                : find.text('Вложения'),
           );
           await tester.pump();
         });

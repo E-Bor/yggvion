@@ -8,6 +8,49 @@ import 'attachments.dart';
 import 'providers.dart';
 import 'theme.dart';
 
+Future<void> _confirmNoteRemoval(
+  BuildContext context,
+  WidgetRef ref,
+  Note note,
+) => guard(context, () async {
+  final repo = ref.read(appProvider);
+  final clearOnly = note.pinned.isNotEmpty;
+  FocusManager.instance.primaryFocus?.unfocus();
+  final confirmed = await showDialog<bool>(
+    context: context,
+    builder: (dialog) => AlertDialog(
+      title: Text(clearOnly ? 'Очистить заметку?' : 'Удалить заметку?'),
+      content: Text(
+        clearOnly
+            ? 'Удалится только содержимое. Заметка останется на месте.'
+            : note.displayLabel,
+        maxLines: 4,
+        overflow: TextOverflow.ellipsis,
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(dialog, false),
+          child: const Text('Отмена'),
+        ),
+        FilledButton(
+          style: FilledButton.styleFrom(
+            backgroundColor: Theme.of(dialog).colorScheme.error,
+            foregroundColor: Theme.of(dialog).colorScheme.onError,
+          ),
+          onPressed: () => Navigator.pop(dialog, true),
+          child: Text(clearOnly ? 'Очистить' : 'Удалить'),
+        ),
+      ],
+    ),
+  );
+  if (confirmed != true || !context.mounted) return;
+  if (clearOnly) {
+    await repo.saveNoteContent(note.id, '');
+  } else {
+    await repo.deleteEntity(note.entity);
+  }
+});
+
 class NotePanel extends ConsumerStatefulWidget {
   const NotePanel({
     super.key,
@@ -61,6 +104,47 @@ class _NotePanelState extends ConsumerState<NotePanel> {
     }
   }
 
+  Widget noteMenu(Note note) => SizedBox.square(
+    dimension: 44,
+    child: PopupMenuButton<String>(
+      key: ValueKey('note-actions-${note.id}'),
+      tooltip: 'Действия с заметкой',
+      padding: EdgeInsets.zero,
+      icon: Icon(
+        Icons.more_horiz_rounded,
+        size: 21,
+        color: context.palette.muted,
+      ),
+      onOpened: () => FocusManager.instance.primaryFocus?.unfocus(),
+      onSelected: (_) => _confirmNoteRemoval(context, ref, note),
+      itemBuilder: (context) => [
+        PopupMenuItem(
+          value: note.pinned.isEmpty ? 'delete' : 'clear',
+          child: Row(
+            children: [
+              Icon(
+                note.pinned.isEmpty
+                    ? Icons.delete_outline_rounded
+                    : Icons.cleaning_services_outlined,
+                size: 20,
+                color: Theme.of(context).colorScheme.error,
+              ),
+              const SizedBox(width: 10),
+              Flexible(
+                child: Text(
+                  note.pinned.isEmpty
+                      ? 'Удалить заметку'
+                      : 'Очистить содержимое',
+                  style: TextStyle(color: Theme.of(context).colorScheme.error),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    ),
+  );
+
   @override
   Widget build(BuildContext context) {
     final note = ref
@@ -104,7 +188,9 @@ class _NotePanelState extends ConsumerState<NotePanel> {
                 size: 19,
               ),
             ),
-      toolbarTrailing: !mobile && note.pinned == 'reference'
+      toolbarTrailing: mobile && note.pinned.isNotEmpty
+          ? noteMenu(note)
+          : !mobile && note.pinned == 'reference'
           ? TextButton(
               onPressed: () {
                 if (editing) editorKey.currentState?.finishEditing();
@@ -141,8 +227,13 @@ class _NotePanelState extends ConsumerState<NotePanel> {
                   fontWeight: FontWeight.w600,
                   height: 1.3,
                 ),
-                decoration: const InputDecoration(
-                  hintText: 'Название · необязательно',
+                decoration: InputDecoration(
+                  hintText: mobile ? 'Название' : 'Название · необязательно',
+                  suffixIcon: mobile ? noteMenu(note) : null,
+                  suffixIconConstraints: const BoxConstraints(
+                    minWidth: 44,
+                    minHeight: 44,
+                  ),
                   counterText: '',
                   filled: false,
                   border: InputBorder.none,
@@ -221,6 +312,79 @@ class _NotesPageState extends ConsumerState<NotesPage> {
     if (mobileScroll.hasClients) mobileScroll.jumpTo(0);
   }
 
+  void openLibrary() {
+    FocusManager.instance.primaryFocus?.unfocus();
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      builder: (sheet) => SizedBox(
+        height: MediaQuery.sizeOf(sheet).height * .75,
+        child: SafeArea(
+          child: NoteLibrary(
+            selected: selected,
+            onSelect: (id) {
+              Navigator.pop(sheet);
+              openNote(id);
+            },
+            onCreate: (id) {
+              Navigator.pop(sheet);
+              openNote(id, edit: true);
+            },
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget mobileToolbar() {
+    final style = TextButton.styleFrom(
+      foregroundColor: context.palette.text,
+      backgroundColor: context.palette.surface,
+      minimumSize: const Size(0, 44),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      textStyle: Theme.of(context).textTheme.labelLarge?.copyWith(
+        fontSize: 13,
+        fontWeight: FontWeight.w600,
+      ),
+    );
+    return Padding(
+      key: const ValueKey('mobile-notes-toolbar'),
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 4),
+      child: Row(
+        children: [
+          Expanded(
+            child: TextButton.icon(
+              key: const ValueKey('mobile-notes-attachments'),
+              style: style.copyWith(
+                foregroundColor: WidgetStatePropertyAll(context.accentColor),
+                backgroundColor: WidgetStatePropertyAll(
+                  context.accentColor.withValues(alpha: .1),
+                ),
+              ),
+              onPressed: () {
+                FocusManager.instance.primaryFocus?.unfocus();
+                openAttachments(context);
+              },
+              icon: const Icon(Icons.attach_file_rounded, size: 19),
+              label: const Text('Вложения'),
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: TextButton.icon(
+              key: const ValueKey('mobile-notes-folders'),
+              style: style,
+              onPressed: openLibrary,
+              icon: const Icon(Icons.folder_outlined, size: 19),
+              label: const Text('Папки'),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final repo = ref.watch(appProvider);
@@ -249,47 +413,14 @@ class _NotesPageState extends ConsumerState<NotesPage> {
           const NotePanel(noteId: 'scratchpad'),
           const SizedBox(height: 14),
           const NotePanel(noteId: 'reference'),
-          const SizedBox(height: 18),
-          Row(
-            children: [
-              const Expanded(
-                child: Text(
-                  'Заметки',
-                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
-                ),
-              ),
-              IconButton(
-                tooltip: 'Вложения',
-                icon: const Icon(Icons.attach_file_rounded, size: 20),
-                onPressed: () => openAttachments(context),
-              ),
-              TextButton.icon(
-                icon: const Icon(Icons.folder_outlined, size: 18),
-                label: const Text('Папки и порядок'),
-                onPressed: () => showModalBottomSheet<void>(
-                  context: context,
-                  isScrollControlled: true,
-                  builder: (sheet) => SizedBox(
-                    height: MediaQuery.sizeOf(sheet).height * .75,
-                    child: SafeArea(
-                      child: NoteLibrary(
-                        selected: selected,
-                        onSelect: (id) {
-                          Navigator.pop(sheet);
-                          openNote(id);
-                        },
-                        onCreate: (id) {
-                          Navigator.pop(sheet);
-                          openNote(id, edit: true);
-                        },
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
+          if (regular.any((note) => note.id != opened?.id)) ...[
+            const SizedBox(height: 18),
+            const Text(
+              'Заметки',
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
+            ),
+            const SizedBox(height: 12),
+          ],
           for (final note in regular.where(
             (note) => note.id != opened?.id,
           )) ...[
@@ -300,6 +431,7 @@ class _NotesPageState extends ConsumerState<NotesPage> {
       );
       return Column(
         children: [
+          mobileToolbar(),
           Expanded(child: notes),
           if (widget.keyboardVisible)
             Container(
@@ -417,35 +549,19 @@ class _NoteLibraryState extends ConsumerState<NoteLibrary> {
     }
   }
 
-  Future<void> noteAction(String action, Note note) => guard(context, () async {
-    final repo = ref.read(appProvider);
-    if (action.startsWith('folder:')) {
-      await repo.moveNote(note.id, action.substring(7));
-    } else if (action == 'copy') {
-      await Clipboard.setData(
-        ClipboardData(text: WikiNoteIndex(repo.snapshot).linkFor(note)),
-      );
-    } else if (action == 'delete') {
-      final yes = await showDialog<bool>(
-        context: context,
-        builder: (dialog) => AlertDialog(
-          title: const Text('Удалить заметку?'),
-          content: Text(note.displayLabel),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(dialog, false),
-              child: const Text('Отмена'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.pop(dialog, true),
-              child: const Text('Удалить'),
-            ),
-          ],
-        ),
-      );
-      if (yes == true) await repo.deleteEntity(note.entity);
-    }
-  });
+  Future<void> noteAction(String action, Note note) {
+    if (action == 'delete') return _confirmNoteRemoval(context, ref, note);
+    return guard(context, () async {
+      final repo = ref.read(appProvider);
+      if (action.startsWith('folder:')) {
+        await repo.moveNote(note.id, action.substring(7));
+      } else if (action == 'copy') {
+        await Clipboard.setData(
+          ClipboardData(text: WikiNoteIndex(repo.snapshot).linkFor(note)),
+        );
+      }
+    });
+  }
 
   Widget tile(Note note, {int? index}) => ListTile(
     key: ValueKey('note-list-${note.id}'),

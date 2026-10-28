@@ -121,7 +121,7 @@ void main() {
         final folderId = repo.snapshot.noteFolders.single.id;
         await command(tester, LogicalKeyboardKey.digit4);
         if (mobile) {
-          final folders = find.text('Папки и порядок');
+          final folders = find.byKey(const ValueKey('mobile-notes-folders'));
           await tester.ensureVisible(folders);
           await tester.tap(folders);
           await settle(tester);
