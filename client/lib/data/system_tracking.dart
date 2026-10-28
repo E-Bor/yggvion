@@ -1,3 +1,4 @@
+import '../l10n/strings.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
@@ -51,6 +52,7 @@ class SystemTrackingService extends ChangeNotifier with WidgetsBindingObserver {
       task.entity.encoded,
       repo.snapshot.estimate(task.id).inMilliseconds,
       repo.snapshot.settings.accentColor,
+      repo.language,
       for (final session in repo.snapshot.sessions)
         if (session.taskId == task.id) session.entity.encoded,
     ]);
@@ -100,6 +102,18 @@ class SystemTrackingService extends ChangeNotifier with WidgetsBindingObserver {
                     'running': sessions.isNotEmpty,
                     'sessionIds': sessions.map((s) => s.id).toList(),
                     'accent': repo.snapshot.settings.accentColor,
+                    'labels': {
+                      'running': tr('В работе'),
+                      'pause': tr('Пауза'),
+                      'resume': tr('Продолжить'),
+                      'stop': tr('Остановить'),
+                      'planned': tr('План'),
+                      'actual': tr('Факт'),
+                      'hour': tr('ч'),
+                      'minute': tr('мин'),
+                      'channel': tr('Текущая задача'),
+                      'progress': tr('Факт относительно плана'),
+                    },
                   },
           });
           // An OS action arrived between reading and publishing. Never replace
@@ -115,7 +129,7 @@ class SystemTrackingService extends ChangeNotifier with WidgetsBindingObserver {
           notifyListeners();
         }
       } catch (exception) {
-        error = 'Не удалось обновить таймер на экране блокировки.';
+        error = tr("Не удалось обновить таймер на экране блокировки.");
         debugPrint('System tracking update failed: $exception');
         notifyListeners();
         break; // Preserve the queue; retry on resume or the next data change.

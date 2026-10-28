@@ -1,3 +1,4 @@
+import '../l10n/strings.dart';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
@@ -5,7 +6,7 @@ import 'package:timezone/timezone.dart' as tz;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../data/attachments.dart';
 import '../data/sync.dart';
-import 'markdown_editor.dart';
+import 'attachment_viewer.dart';
 import 'providers.dart';
 import 'theme.dart';
 
@@ -21,6 +22,7 @@ class AttachmentsPage extends ConsumerStatefulWidget {
 
 class _AttachmentsPageState extends ConsumerState<AttachmentsPage> {
   late Future<List<AttachmentEntry>> entries;
+  final pages = PageController();
   String query = '';
   bool images = true;
   bool busy = false;
@@ -28,6 +30,66 @@ class _AttachmentsPageState extends ConsumerState<AttachmentsPage> {
   void initState() {
     super.initState();
     entries = ref.read(appProvider).attachmentInventory();
+  }
+
+  @override
+  void dispose() {
+    pages.dispose();
+    super.dispose();
+  }
+
+  Widget attachmentList(List<AttachmentEntry> all, bool showImages) {
+    final shown = all
+        .where(
+          (file) =>
+              file.image == showImages &&
+              file.name.toLowerCase().contains(query.toLowerCase()),
+        )
+        .toList();
+    if (shown.isEmpty) {
+      return Center(
+        child: Text(
+          query.isNotEmpty
+              ? (showImages
+                    ? tr("Картинки не найдены")
+                    : tr("Файлы не найдены"))
+              : (showImages ? tr("Пока нет картинок") : tr("Пока нет файлов")),
+          style: TextStyle(color: context.palette.muted),
+        ),
+      );
+    }
+    if (showImages) return imageGrid(shown);
+    return ListView.separated(
+      key: const PageStorageKey('attachment-files'),
+      padding: const EdgeInsets.fromLTRB(12, 0, 12, 24),
+      itemCount: shown.length,
+      separatorBuilder: (_, index) => const Divider(height: 1),
+      itemBuilder: (_, index) {
+        final file = shown[index];
+        return ListTile(
+          key: ValueKey('attachment-${file.id}'),
+          leading: Icon(
+            Icons.insert_drive_file_outlined,
+            color: context.accentColor,
+          ),
+          title: Text(file.name, maxLines: 1, overflow: TextOverflow.ellipsis),
+          subtitle: Text(
+            '${size(file.size)} · ${file.unused ? tr("Без ссылок") : tr("Ссылок: {0}", [file.references])}',
+          ),
+          onTap: () => preview(file),
+          trailing: file.unused
+              ? IconButton(
+                  tooltip: tr("Удалить вложение"),
+                  onPressed: busy ? null : () => clean([file]),
+                  icon: Icon(
+                    Icons.delete_outline_rounded,
+                    color: context.palette.muted,
+                  ),
+                )
+              : null,
+        );
+      },
+    );
   }
 
   void reload() {
@@ -41,18 +103,21 @@ class _AttachmentsPageState extends ConsumerState<AttachmentsPage> {
     final accepted = await showDialog<bool>(
       context: context,
       builder: (dialog) => AlertDialog(
-        title: const Text('Удалить неиспользуемые вложения?'),
+        title: Text(tr("Удалить неиспользуемые вложения?")),
         content: Text(
-          'Файлов: ${unused.length}. Перед удалением ещё раз проверим ссылки в заметках, событиях и несохранённых конфликтах. Удаление синхронизируется между устройствами.',
+          tr(
+            "Файлов: {0}. Перед удалением ещё раз проверим ссылки в заметках, событиях и несохранённых конфликтах. Удаление синхронизируется между устройствами.",
+            [unused.length],
+          ),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(dialog, false),
-            child: const Text('Отмена'),
+            child: Text(tr("Отмена")),
           ),
           FilledButton(
             onPressed: () => Navigator.pop(dialog, true),
-            child: const Text('Удалить'),
+            child: Text(tr("Удалить")),
           ),
         ],
       ),
@@ -69,8 +134,11 @@ class _AttachmentsPageState extends ConsumerState<AttachmentsPage> {
             SnackBar(
               content: Text(
                 count == unused.length
-                    ? 'Удалено файлов: $count'
-                    : 'Удалено: $count. Остальные файлы используются или были изменены.',
+                    ? tr("Удалено файлов: {0}", [count])
+                    : tr(
+                        "Удалено: {0}. Остальные файлы используются или были изменены.",
+                        [count],
+                      ),
               ),
             ),
           );
@@ -85,32 +153,13 @@ class _AttachmentsPageState extends ConsumerState<AttachmentsPage> {
   }
 
   String size(int bytes) => bytes >= 1024 * 1024
-      ? '${(bytes / (1024 * 1024)).toStringAsFixed(1)} МБ'
+      ? tr("{0} МБ", [(bytes / (1024 * 1024)).toStringAsFixed(1)])
       : bytes >= 1024
-      ? '${(bytes / 1024).toStringAsFixed(0)} КБ'
-      : '$bytes Б';
+      ? tr("{0} КБ", [(bytes / 1024).toStringAsFixed(0)])
+      : tr("{0} Б", [bytes]);
 
-  Future<void> preview(AttachmentEntry file) => showDialog<void>(
-    context: context,
-    builder: (dialog) => AlertDialog(
-      title: Text(file.name, maxLines: 2, overflow: TextOverflow.ellipsis),
-      content: SizedBox(
-        width: 640,
-        child: SingleChildScrollView(
-          child: MarkdownPreview(
-            text:
-                '${file.image ? '!' : ''}[${file.name.replaceAll(RegExp(r'[\[\]\n\r]'), '')}](attachment:${file.id})',
-          ),
-        ),
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(dialog),
-          child: const Text('Закрыть'),
-        ),
-      ],
-    ),
-  );
+  Future<void> preview(AttachmentEntry file) =>
+      openAttachment(context, file.id);
 
   Widget imageGrid(List<AttachmentEntry> files) {
     final zone = tz.getLocation(
@@ -139,8 +188,11 @@ class _AttachmentsPageState extends ConsumerState<AttachmentsPage> {
                 sliver: SliverToBoxAdapter(
                   child: Text(
                     group.key == null
-                        ? 'Ранее'
-                        : DateFormat('d MMMM yyyy', 'ru').format(group.key!),
+                        ? tr("Ранее")
+                        : DateFormat(
+                            'd MMMM yyyy',
+                            AppLocale.language,
+                          ).format(group.key!),
                     style: TextStyle(
                       fontSize: 13,
                       fontWeight: FontWeight.w600,
@@ -196,18 +248,19 @@ class _AttachmentsPageState extends ConsumerState<AttachmentsPage> {
                     frameBuilder: (_, child, frame, loaded) =>
                         loaded || frame != null
                         ? child
-                        : imagePlaceholder('Загрузка изображения'),
-                    errorBuilder: (_, error, stack) =>
-                        imagePlaceholder('Не удалось прочитать изображение'),
+                        : imagePlaceholder(tr("Загрузка изображения")),
+                    errorBuilder: (_, error, stack) => imagePlaceholder(
+                      tr("Не удалось прочитать изображение"),
+                    ),
                   )
                 else
-                  imagePlaceholder('Ожидает синхронизации'),
+                  imagePlaceholder(tr("Ожидает синхронизации")),
                 if (file.unused)
                   Positioned(
                     right: 4,
                     top: 4,
                     child: IconButton.filledTonal(
-                      tooltip: 'Удалить вложение',
+                      tooltip: tr("Удалить вложение"),
                       style: IconButton.styleFrom(
                         backgroundColor: context.palette.surface.withValues(
                           alpha: .9,
@@ -258,10 +311,10 @@ class _AttachmentsPageState extends ConsumerState<AttachmentsPage> {
   @override
   Widget build(BuildContext context) => Scaffold(
     appBar: AppBar(
-      title: const Text('Вложения'),
+      title: Text(tr("Вложения")),
       actions: [
         IconButton(
-          tooltip: 'Обновить',
+          tooltip: tr("Обновить"),
           onPressed: busy ? null : reload,
           icon: const Icon(Icons.refresh_rounded),
         ),
@@ -274,16 +327,12 @@ class _AttachmentsPageState extends ConsumerState<AttachmentsPage> {
           future: entries,
           builder: (context, snapshot) {
             if (snapshot.hasError) {
-              return Padding(
-                padding: const EdgeInsets.all(24),
+              return Center(
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Text('Не удалось загрузить вложения: ${snapshot.error}'),
-                    TextButton(
-                      onPressed: reload,
-                      child: const Text('Повторить'),
-                    ),
+                    Text(tr("Не удалось загрузить вложения")),
+                    TextButton(onPressed: reload, child: Text(tr("Повторить"))),
                   ],
                 ),
               );
@@ -292,13 +341,6 @@ class _AttachmentsPageState extends ConsumerState<AttachmentsPage> {
               return const Center(child: CircularProgressIndicator());
             }
             final all = snapshot.data!;
-            final shown = all
-                .where(
-                  (file) =>
-                      file.image == images &&
-                      file.name.toLowerCase().contains(query.toLowerCase()),
-                )
-                .toList();
             final unused = all.where((file) => file.unused).toList();
             return Column(
               children: [
@@ -308,21 +350,24 @@ class _AttachmentsPageState extends ConsumerState<AttachmentsPage> {
                     width: double.infinity,
                     child: SegmentedButton<bool>(
                       showSelectedIcon: false,
-                      segments: const [
+                      segments: [
                         ButtonSegment(
                           value: true,
-                          label: Text('Картинки'),
+                          label: Text(tr("Картинки")),
                           icon: Icon(Icons.image_outlined),
                         ),
                         ButtonSegment(
                           value: false,
-                          label: Text('Файлы'),
+                          label: Text(tr("Файлы")),
                           icon: Icon(Icons.insert_drive_file_outlined),
                         ),
                       ],
                       selected: {images},
-                      onSelectionChanged: (value) =>
-                          setState(() => images = value.single),
+                      onSelectionChanged: (value) => pages.animateToPage(
+                        value.single ? 0 : 1,
+                        duration: const Duration(milliseconds: 220),
+                        curve: Curves.easeOutCubic,
+                      ),
                     ),
                   ),
                 ),
@@ -334,7 +379,9 @@ class _AttachmentsPageState extends ConsumerState<AttachmentsPage> {
                         child: TextField(
                           onChanged: (value) => setState(() => query = value),
                           decoration: InputDecoration(
-                            hintText: images ? 'Найти картинку' : 'Найти файл',
+                            hintText: images
+                                ? tr("Найти картинку")
+                                : tr("Найти файл"),
                             prefixIcon: const Icon(Icons.search_rounded),
                             isDense: true,
                           ),
@@ -342,7 +389,7 @@ class _AttachmentsPageState extends ConsumerState<AttachmentsPage> {
                       ),
                       const SizedBox(width: 8),
                       PopupMenuButton<String>(
-                        tooltip: 'Действия с вложениями',
+                        tooltip: tr("Действия с вложениями"),
                         enabled: !busy,
                         onSelected: (_) => clean(unused),
                         itemBuilder: (_) => [
@@ -350,7 +397,9 @@ class _AttachmentsPageState extends ConsumerState<AttachmentsPage> {
                             value: 'clean',
                             enabled: unused.isNotEmpty,
                             child: Text(
-                              'Очистить неиспользуемые · ${unused.length}',
+                              tr("Очистить неиспользуемые · {0}", [
+                                unused.length,
+                              ]),
                             ),
                           ),
                         ],
@@ -361,60 +410,14 @@ class _AttachmentsPageState extends ConsumerState<AttachmentsPage> {
                 ),
                 if (busy) const LinearProgressIndicator(minHeight: 2),
                 Expanded(
-                  child: shown.isEmpty
-                      ? Center(
-                          child: Text(
-                            query.isNotEmpty
-                                ? (images
-                                      ? 'Картинки не найдены'
-                                      : 'Файлы не найдены')
-                                : (images
-                                      ? 'Пока нет картинок'
-                                      : 'Пока нет файлов'),
-                            style: TextStyle(color: context.palette.muted),
-                          ),
-                        )
-                      : images
-                      ? imageGrid(shown)
-                      : ListView.separated(
-                          padding: const EdgeInsets.fromLTRB(12, 0, 12, 24),
-                          itemCount: shown.length,
-                          separatorBuilder: (_, index) =>
-                              const Divider(height: 1),
-                          itemBuilder: (_, index) {
-                            final file = shown[index];
-                            return ListTile(
-                              key: ValueKey('attachment-${file.id}'),
-                              leading: Icon(
-                                file.image
-                                    ? Icons.image_outlined
-                                    : Icons.insert_drive_file_outlined,
-                                color: context.accentColor,
-                              ),
-                              title: Text(
-                                file.name,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                              subtitle: Text(
-                                '${size(file.size)} · ${file.unused ? 'Без ссылок' : 'Ссылок: ${file.references}'}',
-                              ),
-                              onTap: () => preview(file),
-                              trailing: file.unused
-                                  ? IconButton(
-                                      tooltip: 'Удалить вложение',
-                                      onPressed: busy
-                                          ? null
-                                          : () => clean([file]),
-                                      icon: Icon(
-                                        Icons.delete_outline_rounded,
-                                        color: context.palette.muted,
-                                      ),
-                                    )
-                                  : null,
-                            );
-                          },
-                        ),
+                  child: PageView.builder(
+                    key: const ValueKey('attachment-tabs'),
+                    controller: pages,
+                    itemCount: 2,
+                    onPageChanged: (index) =>
+                        setState(() => images = index == 0),
+                    itemBuilder: (_, index) => attachmentList(all, index == 0),
+                  ),
                 ),
               ],
             );

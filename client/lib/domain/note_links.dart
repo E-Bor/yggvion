@@ -1,3 +1,4 @@
+import '../l10n/strings.dart';
 import 'models.dart';
 
 String _normalized(String text) =>
@@ -148,8 +149,8 @@ class WikiNoteIndex {
   final byTarget = <String, List<Note>>{};
 
   String folderLabel(Note note) => note.pinned.isNotEmpty
-      ? 'Закреплённые'
-      : folders[note.folderId] ?? 'Без папки';
+      ? tr("Закреплённые")
+      : folders[note.folderId] ?? tr("Без папки");
 
   List<Note> matches(String target) {
     if (target.startsWith('note:')) {

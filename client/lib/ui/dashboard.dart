@@ -1,3 +1,4 @@
+import '../l10n/strings.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'calendar.dart';
@@ -57,7 +58,7 @@ class _DashboardState extends ConsumerState<Dashboard> {
           PanelDivider(
             key: const ValueKey('calendar-notes-divider'),
             axis: Axis.horizontal,
-            label: 'Размер календаря и заметок',
+            label: tr("Размер календаря и заметок"),
             onDelta: (delta) => setState(
               () => calendar = (calendar + delta / available).clamp(
                 minCalendar,
@@ -84,7 +85,7 @@ class _DashboardState extends ConsumerState<Dashboard> {
                     PanelDivider(
                       key: const ValueKey('scratchpad-reference-divider'),
                       axis: Axis.vertical,
-                      label: 'Размер черновика и справочной заметки',
+                      label: tr("Размер черновика и справочной заметки"),
                       onDelta: (delta) => setState(
                         () => scratchpad = (scratchpad + delta / width).clamp(
                           .25,
@@ -144,7 +145,7 @@ class _PanelDividerState extends State<PanelDivider> {
         widget.onEnd();
       },
       child: Tooltip(
-        message: '${widget.label} · потяните, двойной клик — сброс',
+        message: tr("{0} · потяните, двойной клик — сброс", [widget.label]),
         child: MouseRegion(
           cursor: horizontal
               ? SystemMouseCursors.resizeUpDown

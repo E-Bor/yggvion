@@ -1,3 +1,4 @@
+import '../l10n/strings.dart';
 import 'dart:async';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
@@ -43,7 +44,7 @@ class ApplicationActivity extends ChangeNotifier with WidgetsBindingObserver {
           if (!_disposed) notifyListeners();
         }
       } catch (e, stack) {
-        error = 'Не удалось сохранить активность на этом устройстве.';
+        error = tr("Не удалось сохранить активность на этом устройстве.");
         debugPrint('Activity storage failed: $e\n$stack');
         if (!_disposed) notifyListeners();
       }

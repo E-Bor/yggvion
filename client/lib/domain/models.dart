@@ -1,15 +1,17 @@
+import '../l10n/strings.dart';
 import 'dart:convert';
 import 'package:timezone/timezone.dart' as tz;
 import 'markdown_blocks.dart';
 
 enum TaskStatus {
-  todo('To Do'),
-  inProgress('In Progress'),
-  waiting('Waiting'),
-  done('Done');
+  todo('К выполнению'),
+  inProgress('В работе'),
+  waiting('Ожидание'),
+  done('Выполнено');
 
-  const TaskStatus(this.label);
-  final String label;
+  const TaskStatus(this._label);
+  final String _label;
+  String get label => tr(_label);
   String get wire => this == inProgress ? 'in_progress' : name;
   static TaskStatus parse(String value) =>
       values.firstWhere((s) => s.wire == value);
@@ -19,10 +21,10 @@ enum CalendarView { day, threeDays, week, month }
 
 extension CalendarViewLabel on CalendarView {
   String get label => switch (this) {
-    CalendarView.day => 'День',
-    CalendarView.threeDays => '3 дня',
-    CalendarView.week => 'Неделя',
-    CalendarView.month => 'Месяц',
+    CalendarView.day => tr("День"),
+    CalendarView.threeDays => tr("3 дня"),
+    CalendarView.week => tr("Неделя"),
+    CalendarView.month => tr("Месяц"),
   };
   int get days => switch (this) {
     CalendarView.day => 1,
@@ -55,8 +57,11 @@ String dayKey(DateTime d) =>
     '${d.year.toString().padLeft(4, '0')}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
 String formatDuration(Duration duration) {
   final minutes = duration.inMinutes;
-  if (minutes < 60) return '$minutes мин';
-  return '${minutes ~/ 60} ч${minutes % 60 == 0 ? '' : ' ${minutes % 60} мин'}';
+  if (minutes < 60) return tr("{0} мин", [minutes]);
+  return tr("{0} ч{1}", [
+    minutes ~/ 60,
+    minutes % 60 == 0 ? '' : tr(" {0} мин", [minutes % 60]),
+  ]);
 }
 
 class Entity {
@@ -133,7 +138,20 @@ class Task {
   String? get proposedTimezone => proposal?['timezone'] as String?;
   final Entity entity;
   String get id => entity.id;
-  String get title => entity.data['title'] as String;
+  String get title {
+    final raw = entity.data['title'] as String;
+    if (!isBirthday) return raw;
+    const separator = ' — день рождения · ';
+    final split = raw.lastIndexOf(separator);
+    final date = DateTime.tryParse(entity.data['birthday_date'] as String);
+    final year = entity.data['birthday_year'];
+    if (split < 0 || date == null || year is! int) return raw;
+    return tr('{0} — день рождения · {1}', [
+      raw.substring(0, split),
+      formatAge(year - date.year),
+    ]);
+  }
+
   String get description => entity.data['description'] as String? ?? '';
   String get projectId => entity.data['project_id'] as String? ?? '';
   String get seriesId => entity.data['series_id'] as String? ?? '';
@@ -252,7 +270,9 @@ class Note {
   String get folderId => entity.data['folder_id'] as String? ?? '';
   int get sortOrder => entity.data['sort_order'] as int? ?? 0;
   String get displayLabel {
-    if (pinned.isNotEmpty) return title;
+    if (pinned.isNotEmpty) {
+      return tr(pinned == "scratchpad" ? "Быстрая заметка" : "Под рукой");
+    }
     if (explicitTitle.isNotEmpty) return explicitTitle;
     MarkdownFence? fence;
     String? previous;
@@ -284,7 +304,7 @@ class Note {
         .where((line) => line.isNotEmpty)
         .firstOrNull;
     if (firstLine == null) {
-      return 'Пустая заметка';
+      return tr("Пустая заметка");
     }
     return firstLine.replaceFirst(RegExp(r'^#{1,6}\s+'), '');
   }

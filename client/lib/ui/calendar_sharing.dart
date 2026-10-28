@@ -1,3 +1,4 @@
+import '../l10n/strings.dart';
 import 'dart:async';
 
 import 'package:dio/dio.dart';
@@ -62,8 +63,9 @@ class _CalendarShareDialogState extends ConsumerState<CalendarShareDialog> {
       } on Object {
         if (mounted) {
           setState(
-            () => error =
-                'Ссылка создана, но не удалось скопировать её. Выделите ссылку и скопируйте вручную.',
+            () => error = tr(
+              "Ссылка создана, но не удалось скопировать её. Выделите ссылку и скопируйте вручную.",
+            ),
           );
         }
       }
@@ -71,10 +73,14 @@ class _CalendarShareDialogState extends ConsumerState<CalendarShareDialog> {
       if (mounted) {
         setState(
           () => error = e.response?.statusCode == 404
-              ? 'Обновите сервер, чтобы делиться календарём.'
+              ? tr("Обновите сервер, чтобы делиться календарём.")
               : e.response?.statusCode == 503
-              ? 'Не удалось подготовить публичный HTTPS. Проверьте доступность портов публичной страницы на VPS и повторите попытку.'
-              : 'Не удалось создать ссылку. Проверьте соединение и повторите попытку.',
+              ? tr(
+                  "Не удалось подготовить публичный HTTPS. Проверьте доступность портов публичной страницы на VPS и повторите попытку.",
+                )
+              : tr(
+                  "Не удалось создать ссылку. Проверьте соединение и повторите попытку.",
+                ),
         );
       }
     } on Object catch (e) {
@@ -92,7 +98,7 @@ class _CalendarShareDialogState extends ConsumerState<CalendarShareDialog> {
     final remaining = expires?.difference(DateTime.now());
     final expired = remaining != null && remaining <= Duration.zero;
     return AlertDialog(
-      title: const Text('Поделиться календарём'),
+      title: Text(tr("Поделиться календарём")),
       content: SizedBox(
         width: 440,
         child: SingleChildScrollView(
@@ -115,9 +121,11 @@ class _CalendarShareDialogState extends ConsumerState<CalendarShareDialog> {
                       size: 22,
                     ),
                     const SizedBox(width: 12),
-                    const Expanded(
+                    Expanded(
                       child: Text(
-                        'Гость увидит только занятые интервалы. Названия, описания и проекты скрыты. Предложения попадут в ваш планировщик.',
+                        tr(
+                          "Гость увидит только занятые интервалы. Названия, описания и проекты скрыты. Предложения попадут в ваш планировщик.",
+                        ),
                         style: TextStyle(fontSize: 13, height: 1.5),
                       ),
                     ),
@@ -126,7 +134,7 @@ class _CalendarShareDialogState extends ConsumerState<CalendarShareDialog> {
               ),
               const SizedBox(height: 20),
               if (link == null) ...[
-                const Text('Показать занятость на ближайшие'),
+                Text(tr("Показать занятость на ближайшие")),
                 const SizedBox(height: 12),
                 SegmentedButton<int>(
                   showSelectedIcon: false,
@@ -134,10 +142,10 @@ class _CalendarShareDialogState extends ConsumerState<CalendarShareDialog> {
                     textStyle: const TextStyle(fontSize: 12),
                     padding: const EdgeInsets.symmetric(horizontal: 10),
                   ),
-                  segments: const [
-                    ButtonSegment(value: 7, label: Text('7 дней')),
-                    ButtonSegment(value: 14, label: Text('14 дней')),
-                    ButtonSegment(value: 30, label: Text('30 дней')),
+                  segments: [
+                    ButtonSegment(value: 7, label: Text(tr("7 дней"))),
+                    ButtonSegment(value: 14, label: Text(tr("14 дней"))),
+                    ButtonSegment(value: 30, label: Text(tr("30 дней"))),
                   ],
                   selected: {days},
                   onSelectionChanged: busy
@@ -146,7 +154,9 @@ class _CalendarShareDialogState extends ConsumerState<CalendarShareDialog> {
                 ),
                 const SizedBox(height: 14),
                 Text(
-                  'Ссылка действует 1 час. Любой получивший её сможет предложить встречу. Доступ можно отозвать раньше.',
+                  tr(
+                    "Ссылка действует 1 час. Любой получивший её сможет предложить встречу. Доступ можно отозвать раньше.",
+                  ),
                   style: TextStyle(
                     color: context.palette.muted,
                     fontSize: 12,
@@ -165,8 +175,10 @@ class _CalendarShareDialogState extends ConsumerState<CalendarShareDialog> {
                     Expanded(
                       child: Text(
                         expired
-                            ? 'Срок ссылки закончился'
-                            : 'Доступ ещё ${remaining!.inMinutes + 1} мин.',
+                            ? tr("Срок ссылки закончился")
+                            : tr("Доступ ещё {0} мин.", [
+                                remaining!.inMinutes + 1,
+                              ]),
                         style: const TextStyle(fontWeight: FontWeight.w600),
                       ),
                     ),
@@ -197,9 +209,9 @@ class _CalendarShareDialogState extends ConsumerState<CalendarShareDialog> {
                           color: context.accentColor,
                         ),
                         const SizedBox(width: 8),
-                        const Flexible(
+                        Flexible(
                           child: Text(
-                            'Ссылка скопирована',
+                            tr("Ссылка скопирована"),
                             style: TextStyle(fontSize: 13),
                           ),
                         ),
@@ -230,7 +242,7 @@ class _CalendarShareDialogState extends ConsumerState<CalendarShareDialog> {
                             if (mounted) setState(() => busy = false);
                           }
                         }),
-                  child: const Text('Отозвать доступ'),
+                  child: Text(tr("Отозвать доступ")),
                 ),
               ],
               if (busy)
@@ -242,7 +254,9 @@ class _CalendarShareDialogState extends ConsumerState<CalendarShareDialog> {
                 Padding(
                   padding: const EdgeInsets.only(top: 10),
                   child: Text(
-                    'При первом запуске подготовка защищённой страницы может занять пару минут.',
+                    tr(
+                      "При первом запуске подготовка защищённой страницы может занять пару минут.",
+                    ),
                     style: TextStyle(
                       fontSize: 12,
                       color: context.palette.muted,
@@ -267,12 +281,12 @@ class _CalendarShareDialogState extends ConsumerState<CalendarShareDialog> {
       actions: [
         TextButton(
           onPressed: () => Navigator.pop(context),
-          child: const Text('Закрыть'),
+          child: Text(tr("Закрыть")),
         ),
         if (link == null || expired)
           FilledButton(
             onPressed: busy ? null : create,
-            child: const Text('Создать ссылку'),
+            child: Text(tr("Создать ссылку")),
           ),
       ],
     );
@@ -299,7 +313,7 @@ class ProposedTaskCard extends ConsumerWidget {
     final start = tz.TZDateTime.from(task.proposedStart!, zone);
     final end = tz.TZDateTime.from(task.proposedEnd!, zone);
     final label =
-        '${DateFormat('d MMM · HH:mm', 'ru').format(start)} — ${DateFormat(dayKey(start) == dayKey(end) ? 'HH:mm' : 'd MMM · HH:mm', 'ru').format(end)}';
+        '${DateFormat('d MMM · HH:mm', AppLocale.language).format(start)} — ${DateFormat(dayKey(start) == dayKey(end) ? 'HH:mm' : 'd MMM · HH:mm', AppLocale.language).format(end)}';
     return AnimatedContainer(
       key: ValueKey('proposal-${task.id}'),
       duration: const Duration(milliseconds: 120),
@@ -331,7 +345,7 @@ class ProposedTaskCard extends ConsumerWidget {
                   ),
                   const SizedBox(width: 7),
                   Text(
-                    'ПРЕДЛОЖЕНО',
+                    tr("ПРЕДЛОЖЕНО"),
                     style: TextStyle(
                       fontSize: 9,
                       letterSpacing: 1.4,
@@ -341,7 +355,7 @@ class ProposedTaskCard extends ConsumerWidget {
                   ),
                   const Spacer(),
                   PopupMenuButton<String>(
-                    tooltip: 'Действия с предложением',
+                    tooltip: tr("Действия с предложением"),
                     padding: EdgeInsets.zero,
                     constraints: const BoxConstraints(minWidth: 180),
                     icon: const Icon(Icons.more_horiz_rounded, size: 18),
@@ -354,12 +368,15 @@ class ProposedTaskCard extends ConsumerWidget {
                         });
                       }
                     },
-                    itemBuilder: (_) => const [
+                    itemBuilder: (_) => [
                       PopupMenuItem(
                         value: 'edit',
-                        child: Text('Открыть предложение'),
+                        child: Text(tr("Открыть предложение")),
                       ),
-                      PopupMenuItem(value: 'decline', child: Text('Отклонить')),
+                      PopupMenuItem(
+                        value: 'decline',
+                        child: Text(tr("Отклонить")),
+                      ),
                     ],
                   ),
                 ],
@@ -400,7 +417,7 @@ class ProposedTaskCard extends ConsumerWidget {
                       await repo.acceptProposal(task);
                       if (context.mounted) onResolved?.call();
                     }),
-                    child: const Text('Принять'),
+                    child: Text(tr("Принять")),
                   ),
                 ],
               ),

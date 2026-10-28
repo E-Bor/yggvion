@@ -14,6 +14,44 @@ void main() {
     tz.initializeTimeZones();
     await initializeDateFormatting('ru');
   });
+  testInteraction(
+    'desktop calendar never pages while a drag stays inside its bounds',
+    (tester) async {
+      final repo = await workspace(
+        tester,
+        prepare: (repo) async {
+          await repo.setView(CalendarView.week);
+          await repo.createTask(
+            'Левая граница',
+            start: repo.now(),
+            end: repo.now().add(const Duration(hours: 1)),
+          );
+        },
+      );
+      final block = repo.snapshot.blocks.single;
+      final card = find.byKey(ValueKey('calendar-block-${block.id}'));
+      final origin = tester.getTopLeft(card) + const Offset(5, 25);
+      final bounds = tester.getRect(find.byType(CalendarPane));
+      final gesture = await tester.startGesture(
+        origin,
+        kind: PointerDeviceKind.mouse,
+      );
+      await gesture.moveBy(const Offset(0, 10));
+      for (final x in [bounds.left + 2, bounds.left + 51, bounds.right - 2]) {
+        await gesture.moveTo(Offset(x, origin.dy));
+        await tester.pump(const Duration(milliseconds: 900));
+        expect(
+          tester.widget<CalendarToolbar>(find.byType(CalendarToolbar)).date.day,
+          19,
+        );
+      }
+      await gesture.cancel();
+      await settle(tester);
+      expect(repo.snapshot.blocks.single.start, block.start);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
   for (final direction in [-1, 1]) {
     testInteraction(
       'holding a dragged event at edge pages a week ($direction)',
@@ -34,8 +72,8 @@ void main() {
         final origin = tester.getTopLeft(card) + const Offset(20, 25);
         final bounds = tester.getRect(find.byType(CalendarPane));
         final edge = Offset(
-          // The left edge of the day grid is AFTER the time-label gutter.
-          direction > 0 ? bounds.right - 8 : bounds.left + 48 + 8,
+          // Desktop paging starts only beyond the whole calendar.
+          direction > 0 ? bounds.right + 8 : bounds.left - 8,
           origin.dy,
         );
         final gesture = await tester.startGesture(
@@ -316,7 +354,7 @@ void main() {
       origin,
       kind: PointerDeviceKind.mouse,
     );
-    await gesture.moveTo(Offset(bounds.right - 8, origin.dy - 20));
+    await gesture.moveTo(Offset(bounds.right + 8, origin.dy - 20));
     await tester.pump(const Duration(milliseconds: 700));
     await tester.pump();
     expect(

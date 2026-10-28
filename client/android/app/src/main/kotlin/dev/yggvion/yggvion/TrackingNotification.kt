@@ -126,10 +126,12 @@ object TrackingNotification {
     fun notification(context: Context): Notification? {
         val envelope = read(context)
         val state = envelope.optJSONObject("state") ?: return null
+        val labels = state.optJSONObject("labels")
+        fun label(key: String, fallback: String) = labels?.optString(key, fallback) ?: fallback
         if (Build.VERSION.SDK_INT >= 26) {
             manager(context).createNotificationChannel(NotificationChannel(CHANNEL,
-                "Текущая задача", NotificationManager.IMPORTANCE_LOW).apply {
-                description = "Таймер и управление задачей на экране блокировки"
+                label("channel", "Текущая задача"), NotificationManager.IMPORTANCE_LOW).apply {
+                description = label("progress", "Факт относительно плана")
                 setSound(null, null)
             })
         }
@@ -151,6 +153,7 @@ object TrackingNotification {
         }
         val minutes = elapsed / 60000
         val planMinutes = planned / 60000
+        val details = "${if (running) label("running", "В работе") else label("pause", "Пауза")} · $minutes / $planMinutes ${label("minute", "мин") }"
         val accent = state.optLong("accent", Color.rgb(156, 185, 255).toLong()).toInt()
         val denominator = maxOf(1.0, elapsed.toDouble(), planned.toDouble())
         val blue = minOf(elapsed, planned).coerceAtLeast(0).toDouble() / denominator
@@ -167,7 +170,7 @@ object TrackingNotification {
         canvas.drawRect((900 * blue).toFloat(), 0f, (900 * (blue + red)).toFloat(), 12f, paint)
         val content = RemoteViews(context.packageName, R.layout.tracking_notification).apply {
             setTextViewText(R.id.tracking_title, state.getString("title"))
-            setTextViewText(R.id.tracking_details, "${if (running) "В работе" else "Пауза"} · $minutes / $planMinutes мин")
+            setTextViewText(R.id.tracking_details, details)
             setImageViewBitmap(R.id.tracking_progress, bitmap)
         }
         if (Build.VERSION.SDK_INT >= 24) {
@@ -179,16 +182,16 @@ object TrackingNotification {
         }
         return builder.setSmallIcon(R.drawable.ic_notification)
             .setContentTitle(state.getString("title"))
-            .setContentText("${if (running) "В работе" else "Пауза"} · $minutes / $planMinutes мин")
+            .setContentText(details)
             .setColor(accent)
             .setWhen(System.currentTimeMillis() - elapsed).setUsesChronometer(running)
             .setShowWhen(running).setOngoing(true).setOnlyAlertOnce(true)
             .setVisibility(Notification.VISIBILITY_PUBLIC).setCategory(Notification.CATEGORY_STOPWATCH)
             .setContentIntent(open)
             .setProgress(0, 0, false)
-            .addAction(action(if (running) "pause" else "resume", if (running) "Пауза" else "Продолжить",
+            .addAction(action(if (running) "pause" else "resume", if (running) label("pause", "Пауза") else label("resume", "Продолжить"),
                 if (running) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play))
-            .addAction(action("stop", "Стоп", android.R.drawable.ic_menu_close_clear_cancel))
+            .addAction(action("stop", label("stop", "Остановить"), android.R.drawable.ic_menu_close_clear_cancel))
             .build()
     }
 

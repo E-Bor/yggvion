@@ -1,3 +1,4 @@
+import '../l10n/strings.dart';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart' show defaultTargetPlatform;
@@ -5,7 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:markdown/markdown.dart' as md;
-import 'package:open_filex/open_filex.dart';
+import 'attachment_viewer.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../data/clipboard.dart';
 import '../domain/models.dart';
@@ -28,18 +29,13 @@ void _openMarkdownLink(BuildContext context, WidgetRef ref, String href) {
         (uri.scheme == 'yggvion' && uri.host == 'note')) {
       await showNotePreview(context, uri.path.replaceFirst(RegExp(r'^/'), ''));
     } else if (uri.scheme == 'attachment') {
-      final path = await ref.read(appProvider).attachmentPath(uri.path);
-      if (path == null) {
-        throw StateError('Вложение ещё не загружено на это устройство');
-      }
-      final result = await OpenFilex.open(path);
-      if (result.type != ResultType.done) throw StateError(result.message);
+      await openAttachment(context, uri.path);
     } else if (['https', 'http', 'mailto'].contains(uri.scheme)) {
       if (!await launchUrl(uri, mode: LaunchMode.externalApplication)) {
-        throw StateError('Не удалось открыть ссылку');
+        throw StateError(tr("Не удалось открыть ссылку"));
       }
     } else {
-      throw StateError('Этот тип ссылки пока не поддерживается');
+      throw StateError(tr("Этот тип ссылки пока не поддерживается"));
     }
   });
 }
@@ -102,7 +98,7 @@ class MarkdownPreview extends ConsumerWidget {
                       const SizedBox(height: 4),
                       Text(
                         note == null
-                            ? 'Заметка недоступна'
+                            ? tr("Заметка недоступна")
                             : note.content.replaceAll('\n', ' '),
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
@@ -146,7 +142,7 @@ class MarkdownPreview extends ConsumerWidget {
             activeColor: context.accentColor,
             materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
             visualDensity: VisualDensity.compact,
-            semanticLabel: 'Подзадача',
+            semanticLabel: tr("Подзадача"),
             onChanged: onChanged == null
                 ? null
                 : (value) {
@@ -198,23 +194,26 @@ class MarkdownPreview extends ConsumerWidget {
                     color: context.palette.raised,
                     borderRadius: BorderRadius.circular(10),
                   ),
-                  child: Text(alt ?? 'Изображение ожидает синхронизации'),
+                  child: Text(alt ?? tr("Изображение ожидает синхронизации")),
                 );
               }
-              return ClipRRect(
-                borderRadius: BorderRadius.circular(10),
-                child: Image.file(
-                  File(snapshot.data!),
-                  fit: BoxFit.contain,
-                  errorBuilder: (_, error, stack) =>
-                      const Text('Не удалось прочитать изображение'),
+              return GestureDetector(
+                onTap: () => openAttachment(context, uri.path),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(10),
+                  child: Image.file(
+                    File(snapshot.data!),
+                    fit: BoxFit.contain,
+                    errorBuilder: (_, error, stack) =>
+                        Text(tr("Не удалось прочитать изображение")),
+                  ),
                 ),
               );
             },
           );
         }
-        return const Text(
-          'Внешнее изображение: откройте ссылку или добавьте файл',
+        return Text(
+          tr("Внешнее изображение: откройте ссылку или добавьте файл"),
         );
       },
     );
@@ -249,14 +248,17 @@ Future<void> _openWikiLink(
     await showDialog<void>(
       context: context,
       builder: (dialog) => AlertDialog(
-        title: const Text('Заметка не найдена'),
+        title: Text(tr("Заметка не найдена")),
         content: Text(
-          '«$target» удалена, переименована на другом устройстве или ещё не синхронизирована.',
+          tr(
+            "«{0}» удалена, переименована на другом устройстве или ещё не синхронизирована.",
+            [target],
+          ),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(dialog),
-            child: const Text('Закрыть'),
+            child: Text(tr("Закрыть")),
           ),
         ],
       ),
@@ -565,7 +567,7 @@ class LiveMarkdownEditorState extends ConsumerState<LiveMarkdownEditor>
   Future<void> _paste() => _insertFrom(() async {
     final content = await ref.read(clipboardProvider).read();
     if (content == null) {
-      throw StateError('В буфере обмена нет текста или файлов');
+      throw StateError(tr("В буфере обмена нет текста или файлов"));
     }
     return content;
   });
@@ -729,7 +731,7 @@ class LiveMarkdownEditorState extends ConsumerState<LiveMarkdownEditor>
               Padding(
                 padding: const EdgeInsets.symmetric(vertical: 8),
                 child: MarkdownPreview(
-                  text: _last.isEmpty ? 'Пока пусто' : _last,
+                  text: _last.isEmpty ? tr("Пока пусто") : _last,
                 ),
               )
             else if (_isEditing || widget.continuousInput)
@@ -905,7 +907,7 @@ class _NotePickerState extends ConsumerState<_NotePicker> {
       excludeId: widget.excludeId,
     );
     return AlertDialog(
-      title: const Text('Ссылка на заметку'),
+      title: Text(tr("Ссылка на заметку")),
       content: SizedBox(
         width: 480,
         height: 380,
@@ -913,8 +915,8 @@ class _NotePickerState extends ConsumerState<_NotePicker> {
           children: [
             TextField(
               autofocus: true,
-              decoration: const InputDecoration(
-                hintText: 'Найти заметку',
+              decoration: InputDecoration(
+                hintText: tr("Найти заметку"),
                 prefixIcon: Icon(Icons.search_rounded),
               ),
               onChanged: (v) => setState(() => query = v),
@@ -922,7 +924,7 @@ class _NotePickerState extends ConsumerState<_NotePicker> {
             const SizedBox(height: 12),
             Expanded(
               child: notes.isEmpty
-                  ? const Center(child: Text('Заметок не найдено'))
+                  ? Center(child: Text(tr("Заметок не найдено")))
                   : ListView.builder(
                       itemCount: notes.length,
                       itemBuilder: (_, i) {
@@ -950,65 +952,65 @@ class _NotePickerState extends ConsumerState<_NotePicker> {
       actions: [
         TextButton(
           onPressed: () => Navigator.pop(context),
-          child: const Text('Отмена'),
+          child: Text(tr("Отмена")),
         ),
       ],
     );
   }
 }
 
-Future<void> showNotePreview(
-  BuildContext context,
-  String id,
-) => showDialog<void>(
-  context: context,
-  builder: (_) => Consumer(
-    builder: (context, ref, _) {
-      final note = ref.watch(appProvider).snapshot.note(id);
-      return AlertDialog(
-        title: Row(
-          children: [
-            const Icon(Icons.description_outlined, size: 22),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Text(
-                note?.displayLabel ?? 'Заметка недоступна',
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
+Future<void> showNotePreview(BuildContext context, String id) =>
+    showDialog<void>(
+      context: context,
+      builder: (_) => Consumer(
+        builder: (context, ref, _) {
+          final note = ref.watch(appProvider).snapshot.note(id);
+          return AlertDialog(
+            title: Row(
+              children: [
+                const Icon(Icons.description_outlined, size: 22),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    note?.displayLabel ?? tr("Заметка недоступна"),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
+            ),
+            content: SizedBox(
+              width: 560,
+              child: ConstrainedBox(
+                constraints: BoxConstraints(
+                  maxHeight: MediaQuery.sizeOf(context).height * .55,
+                ),
+                child: SingleChildScrollView(
+                  child: note == null
+                      ? Text(tr("Заметка удалена или ещё не синхронизирована."))
+                      : MarkdownPreview(
+                          text: note.content.isEmpty
+                              ? tr("Пока пусто")
+                              : note.content,
+                        ),
+                ),
               ),
             ),
-          ],
-        ),
-        content: SizedBox(
-          width: 560,
-          child: ConstrainedBox(
-            constraints: BoxConstraints(
-              maxHeight: MediaQuery.sizeOf(context).height * .55,
-            ),
-            child: SingleChildScrollView(
-              child: note == null
-                  ? const Text('Заметка удалена или ещё не синхронизирована.')
-                  : MarkdownPreview(
-                      text: note.content.isEmpty ? 'Пока пусто' : note.content,
-                    ),
-            ),
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Закрыть'),
-          ),
-          if (note != null)
-            FilledButton(
-              onPressed: () {
-                Navigator.pop(context);
-                ref.read(openNoteProvider.notifier).state = id;
-              },
-              child: const Text('Открыть заметку'),
-            ),
-        ],
-      );
-    },
-  ),
-);
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: Text(tr("Закрыть")),
+              ),
+              if (note != null)
+                FilledButton(
+                  onPressed: () {
+                    Navigator.pop(context);
+                    ref.read(openNoteProvider.notifier).state = id;
+                  },
+                  child: Text(tr("Открыть заметку")),
+                ),
+            ],
+          );
+        },
+      ),
+    );

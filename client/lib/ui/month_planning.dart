@@ -1,3 +1,4 @@
+import '../l10n/strings.dart';
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -108,7 +109,10 @@ class _MonthPlanningEditorState extends ConsumerState<MonthPlanningEditor> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      DateFormat('d MMMM · EEEE', 'ru').format(widget.day),
+                      DateFormat(
+                        'd MMMM · EEEE',
+                        AppLocale.language,
+                      ).format(widget.day),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
@@ -130,7 +134,7 @@ class _MonthPlanningEditorState extends ConsumerState<MonthPlanningEditor> {
                 ),
               ),
               IconButton(
-                tooltip: 'Закрыть выбор времени',
+                tooltip: tr("Закрыть выбор времени"),
                 onPressed: () => Navigator.pop(context),
                 icon: const Icon(Icons.close_rounded, size: 20),
               ),
@@ -148,7 +152,7 @@ class _MonthPlanningEditorState extends ConsumerState<MonthPlanningEditor> {
               Expanded(
                 child: Text(
                   start == null
-                      ? 'Выберите время'
+                      ? tr("Выберите время")
                       : '${DateFormat('HH:mm').format(start)} — ${DateFormat('HH:mm').format(end!)}',
                   key: const ValueKey('month-plan-time'),
                   style: TextStyle(
@@ -161,7 +165,7 @@ class _MonthPlanningEditorState extends ConsumerState<MonthPlanningEditor> {
                 ),
               ),
               Tooltip(
-                message: 'Часовой пояс из настроек',
+                message: tr("Часовой пояс из настроек"),
                 child: Text(
                   tz.TZDateTime.from(scrollFocus, zone).timeZoneName,
                   style: TextStyle(color: context.palette.muted, fontSize: 11),
@@ -171,7 +175,9 @@ class _MonthPlanningEditorState extends ConsumerState<MonthPlanningEditor> {
           ),
           if (!sameDay)
             Text(
-              'Окончание ${DateFormat('d MMMM', 'ru').format(end)}',
+              tr("Окончание {0}", [
+                DateFormat('d MMMM', AppLocale.language).format(end),
+              ]),
               key: const ValueKey('month-plan-end-date'),
               style: TextStyle(fontSize: 12, color: context.palette.muted),
             ),
@@ -201,10 +207,16 @@ class _MonthPlanningEditorState extends ConsumerState<MonthPlanningEditor> {
           const SizedBox(height: 10),
           Text(
             conflicts.isNotEmpty
-                ? 'Пересекается: ${conflicts.map((t) => t.title).toSet().join(', ')}'
+                ? tr("Пересекается: {0}", [
+                    conflicts.map((t) => t.title).toSet().join(', '),
+                  ])
                 : mobile
-                ? 'Коснитесь времени или удерживайте и тяните. Края блока меняют длительность.'
-                : 'Нажмите на время или выделите интервал. Блок можно перемещать и растягивать.',
+                ? tr(
+                    "Коснитесь времени или удерживайте и тяните. Края блока меняют длительность.",
+                  )
+                : tr(
+                    "Нажмите на время или выделите интервал. Блок можно перемещать и растягивать.",
+                  ),
             key: const ValueKey('month-plan-hint'),
             maxLines: 2,
             overflow: TextOverflow.ellipsis,
@@ -219,7 +231,7 @@ class _MonthPlanningEditorState extends ConsumerState<MonthPlanningEditor> {
             children: [
               TextButton(
                 onPressed: () => Navigator.pop(context),
-                child: const Text('Отмена'),
+                child: Text(tr("Отмена")),
               ),
               const Spacer(),
               FilledButton.icon(
@@ -231,7 +243,7 @@ class _MonthPlanningEditorState extends ConsumerState<MonthPlanningEditor> {
                         TimeRange(block.start, block.end),
                       ),
                 icon: const Icon(Icons.check_rounded, size: 18),
-                label: const Text('Запланировать'),
+                label: Text(tr("Запланировать")),
               ),
             ],
           ),

@@ -1,20 +1,12 @@
+import '../l10n/strings.dart';
 import 'dart:math' as math;
 import 'package:timezone/timezone.dart' as tz;
 import 'package:uuid/uuid.dart';
 import '../data/repository.dart';
 import 'models.dart';
 
-String ageLabel(int years) {
-  final tail = years % 100;
-  final unit = tail >= 11 && tail <= 14
-      ? 'лет'
-      : switch (years % 10) {
-          1 => 'год',
-          2 || 3 || 4 => 'года',
-          _ => 'лет',
-        };
-  return '$years $unit';
-}
+String ageLabel(int years, {String? language}) =>
+    formatAge(years, language: language);
 
 DateTime birthdayInYear(DateTime birth, int year, tz.Location zone) =>
     tz.TZDateTime(
@@ -42,10 +34,10 @@ class BirthdayService {
     final zone = tz.getLocation(repo.snapshot.settings.timezone);
     final today = tz.TZDateTime.from(repo.now(), zone);
     if (name.trim().isEmpty || name.trim().length > 1000) {
-      throw ArgumentError('Введите имя');
+      throw ArgumentError(tr("Введите имя"));
     }
     if (birth.year < 1800 || dayKey(birth).compareTo(dayKey(today)) > 0) {
-      throw ArgumentError('Проверьте дату рождения');
+      throw ArgumentError(tr("Проверьте дату рождения"));
     }
     await repo.commitComputed(() async {
       final records = {
@@ -53,7 +45,7 @@ class BirthdayService {
       };
       final previous = birthday == null ? null : records[birthday.id];
       if (birthday != null && (previous == null || previous.deleted)) {
-        throw StateError('День рождения уже удалён');
+        throw StateError(tr("День рождения уже удалён"));
       }
       final series =
           (previous ?? Entity(id: repo.newId(), kind: 'series', data: const {}))
@@ -148,8 +140,9 @@ class BirthdayService {
       final end = tz.TZDateTime(zone, start.year, start.month, start.day + 1);
       final at = [tz.TZDateTime(zone, start.year, start.month, start.day, 9)];
       final task = (current ?? Task.create(id, birthday.name)).change({
+        // Generated records must be identical on devices with different languages.
         'title':
-            '${birthday.name} — день рождения · ${ageLabel(year - birth.year)}',
+            '${birthday.name} — день рождения · ${ageLabel(year - birth.year, language: 'ru')}',
         'series_id': series.id,
         'occurrence': wireTime(start),
         'birthday_date': dayKey(birth),

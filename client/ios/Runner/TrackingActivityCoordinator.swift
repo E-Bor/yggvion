@@ -60,7 +60,7 @@ final class TrackingActivityCoordinator {
       title: state.title, plannedSeconds: Double(max(0, state.plannedMs)) / 1000,
       elapsedSeconds: Double(max(0, state.elapsedMs)) / 1000,
       updatedAt: Date(timeIntervalSince1970: Double(state.updatedAtMs) / 1000),
-      running: state.running, accent: state.accent, revision: current.revision),
+      running: state.running, accent: state.accent, revision: current.revision, labels: state.labels),
       staleDate: nil)
     if let activity = Activity<TrackingAttributes>.activities.first(where: {
       $0.attributes.taskId == state.taskId &&

@@ -1,3 +1,4 @@
+import '../l10n/strings.dart';
 import 'dart:async';
 import 'dart:io';
 import 'package:super_clipboard/super_clipboard.dart';
@@ -22,7 +23,7 @@ class AttachmentClipboard {
   static Future<ClipboardReader> _systemReader() async {
     final clipboard = SystemClipboard.instance;
     if (clipboard == null) {
-      throw UnsupportedError('Буфер обмена недоступен на этом устройстве');
+      throw UnsupportedError(tr("Буфер обмена недоступен на этом устройстве"));
     }
     return clipboard.read();
   }
@@ -98,7 +99,7 @@ class AttachmentClipboard {
       if (virtual != null) {
         final attached = await _file(item, null, await item.getSuggestedName());
         if (attached == null) {
-          throw StateError('Не удалось прочитать файл из буфера обмена');
+          throw StateError(tr("Не удалось прочитать файл из буфера обмена"));
         }
         parts.add(attached);
         attachments = true;
@@ -184,7 +185,7 @@ class AttachmentClipboard {
           var filename =
               file.fileName ??
               name ??
-              'Вложение.${_extensions[format] ?? 'bin'}';
+              tr("Вложение.{0}", [_extensions[format] ?? 'bin']);
           // A synthesized PNG must not retain a TIFF extension from the source.
           if (format == Formats.png &&
               !filename.toLowerCase().endsWith('.png')) {

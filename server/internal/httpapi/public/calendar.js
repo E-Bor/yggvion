@@ -1,5 +1,365 @@
 "use strict";
 (() => {
+  // Guest language follows the browser. All text is local; no translation requests.
+  const languages = ["ru", "en", "es", "de", "zh", "hi"];
+  const language = (navigator.languages || [navigator.language])
+    .map((value) => value.toLowerCase().split("-")[0])
+    .find((value) => languages.includes(value)) || "en";
+  const messages = {
+  "Согласуем время": [
+    "Let’s find a time",
+    "Acordemos una hora",
+    "Finden wir einen Termin",
+    "一起约个时间",
+    "समय तय करें"
+  ],
+  "Приватное приглашение": [
+    "Private invitation",
+    "Invitación privada",
+    "Private Einladung",
+    "私人邀请",
+    "निजी आमंत्रण"
+  ],
+  "Выберите свободный интервал и предложите встречу.": [
+    "Choose a free slot and suggest a meeting.",
+    "Elige un intervalo libre y propón una reunión.",
+    "Wähle einen freien Zeitraum und schlage ein Treffen vor.",
+    "选择空闲时段并提出会面建议。",
+    "खाली समय चुनें और मुलाकात का प्रस्ताव दें।"
+  ],
+  "Открываем календарь…": [
+    "Opening calendar…",
+    "Abriendo calendario…",
+    "Kalender wird geöffnet…",
+    "正在打开日历…",
+    "कैलेंडर खोल रहे हैं…"
+  ],
+  "Занятость календаря": [
+    "Calendar availability",
+    "Disponibilidad del calendario",
+    "Kalenderverfügbarkeit",
+    "日历空闲时间",
+    "कैलेंडर की उपलब्धता"
+  ],
+  "Предыдущие дни": [
+    "Previous days",
+    "Días anteriores",
+    "Vorherige Tage",
+    "前几天",
+    "पिछले दिन"
+  ],
+  "Следующие дни": [
+    "Next days",
+    "Días siguientes",
+    "Nächste Tage",
+    "后几天",
+    "अगले दिन"
+  ],
+  "Сегодня": [
+    "Today",
+    "Hoy",
+    "Heute",
+    "今天",
+    "आज"
+  ],
+  "Занято": [
+    "Busy",
+    "Ocupado",
+    "Belegt",
+    "忙碌",
+    "व्यस्त"
+  ],
+  "Предложено": [
+    "Proposed",
+    "Propuesto",
+    "Vorgeschlagen",
+    "已提议",
+    "प्रस्तावित"
+  ],
+  "Подтверждено": [
+    "Confirmed",
+    "Confirmado",
+    "Bestätigt",
+    "已确认",
+    "पुष्टि की गई"
+  ],
+  "Отклонено": [
+    "Declined",
+    "Rechazado",
+    "Abgelehnt",
+    "已拒绝",
+    "अस्वीकृत"
+  ],
+  "Перенесено владельцем": [
+    "Rescheduled by owner",
+    "Reprogramado por el propietario",
+    "Vom Eigentümer verschoben",
+    "所有者已改期",
+    "स्वामी ने समय बदला"
+  ],
+  "Нажмите или протяните интервал. На телефоне — удерживайте для выделения.": [
+    "Click or drag a time slot. On a phone, hold to select.",
+    "Pulsa o arrastra un intervalo. En el teléfono, mantén pulsado para seleccionar.",
+    "Klicke oder ziehe einen Zeitraum. Auf dem Handy zum Auswählen gedrückt halten.",
+    "点击或拖动以选择时段。在手机上长按选择。",
+    "समय चुनने के लिए क्लिक करें या खींचें। फ़ोन पर दबाकर रखें।"
+  ],
+  "ВАШЕ ПРЕДЛОЖЕНИЕ": [
+    "YOUR PROPOSAL",
+    "TU PROPUESTA",
+    "DEIN VORSCHLAG",
+    "你的提议",
+    "आपका प्रस्ताव"
+  ],
+  "Начните с времени": [
+    "Start with a time",
+    "Empieza por la hora",
+    "Wähle zuerst eine Zeit",
+    "先选时间",
+    "पहले समय चुनें"
+  ],
+  "Свободные промежутки открыты для ваших планов.": [
+    "Free slots are open for your plans.",
+    "Los intervalos libres están disponibles para tus planes.",
+    "Freie Zeiträume stehen für deine Pläne bereit.",
+    "你可以在空闲时段安排计划。",
+    "खाली समय में अपनी योजना बना सकते हैं।"
+  ],
+  "Начало": [
+    "Start",
+    "Inicio",
+    "Beginn",
+    "开始",
+    "शुरू"
+  ],
+  "Окончание": [
+    "End",
+    "Fin",
+    "Ende",
+    "结束",
+    "समाप्ति"
+  ],
+  "Название встречи": [
+    "Meeting title",
+    "Título de la reunión",
+    "Titel des Treffens",
+    "会面标题",
+    "मुलाकात का शीर्षक"
+  ],
+  "Например, обсудить проект": [
+    "For example, discuss a project",
+    "Por ejemplo, comentar un proyecto",
+    "Zum Beispiel: Projekt besprechen",
+    "例如，讨论项目",
+    "जैसे, परियोजना पर चर्चा"
+  ],
+  "Описание": [
+    "Description",
+    "Descripción",
+    "Beschreibung",
+    "描述",
+    "विवरण"
+  ],
+  "· необязательно": [
+    "· optional",
+    "· opcional",
+    "· optional",
+    "· 可选",
+    "· वैकल्पिक"
+  ],
+  "Что стоит знать перед встречей? Только текст, без вложений.": [
+    "What should we know before the meeting? Text only, no attachments.",
+    "¿Qué conviene saber antes de la reunión? Solo texto, sin adjuntos.",
+    "Was sollte man vor dem Treffen wissen? Nur Text, keine Anhänge.",
+    "会面前需要了解什么？仅限文字，不含附件。",
+    "मुलाकात से पहले क्या जानना चाहिए? केवल टेक्स्ट, कोई अटैचमेंट नहीं।"
+  ],
+  "Предложить встречу": [
+    "Suggest a meeting",
+    "Proponer reunión",
+    "Treffen vorschlagen",
+    "提议会面",
+    "मुलाकात प्रस्तावित करें"
+  ],
+  "Это предложение. Встреча появится в календаре после подтверждения владельцем.": [
+    "This is a proposal. The meeting will appear in the calendar once the owner confirms it.",
+    "Esto es una propuesta. La reunión aparecerá en el calendario cuando el propietario la confirme.",
+    "Dies ist ein Vorschlag. Das Treffen erscheint nach Bestätigung durch den Eigentümer im Kalender.",
+    "这是一项提议。所有者确认后，会面才会出现在日历中。",
+    "यह एक प्रस्ताव है। स्वामी की पुष्टि के बाद मुलाकात कैलेंडर में दिखाई देगी।"
+  ],
+  "Предложение отправлено": [
+    "Proposal sent",
+    "Propuesta enviada",
+    "Vorschlag gesendet",
+    "提议已发送",
+    "प्रस्ताव भेज दिया गया"
+  ],
+  "Время отмечено в календаре. Статус обновится после ответа владельца.": [
+    "The slot is marked in the calendar. Its status will update when the owner responds.",
+    "El intervalo está marcado en el calendario. El estado se actualizará cuando responda el propietario.",
+    "Der Zeitraum ist im Kalender markiert. Der Status ändert sich nach der Antwort des Eigentümers.",
+    "该时段已标记在日历中。所有者回复后状态会更新。",
+    "समय कैलेंडर में चिह्नित है। स्वामी के जवाब देने पर स्थिति अपडेट होगी।"
+  ],
+  "Предложить ещё": [
+    "Suggest another",
+    "Proponer otra",
+    "Weiteren Vorschlag machen",
+    "再提议一个",
+    "एक और प्रस्ताव दें"
+  ],
+  "Ваши предложения": [
+    "Your proposals",
+    "Tus propuestas",
+    "Deine Vorschläge",
+    "你的提议",
+    "आपके प्रस्ताव"
+  ],
+  "Ссылка действует один час": [
+    "This link is valid for one hour",
+    "El enlace es válido durante una hora",
+    "Der Link ist eine Stunde gültig",
+    "链接有效期为一小时",
+    "यह लिंक एक घंटे के लिए मान्य है"
+  ],
+  "Срок приглашения закончился. Попросите владельца прислать новую ссылку.": [
+    "The invitation has expired. Ask the owner for a new link.",
+    "La invitación ha caducado. Pide un nuevo enlace al propietario.",
+    "Die Einladung ist abgelaufen. Bitte den Eigentümer um einen neuen Link.",
+    "邀请已过期。请向所有者索取新链接。",
+    "आमंत्रण की समय-सीमा समाप्त हो गई है। स्वामी से नया लिंक माँगें।"
+  ],
+  "Приглашение недоступно": [
+    "Invitation unavailable",
+    "Invitación no disponible",
+    "Einladung nicht verfügbar",
+    "邀请不可用",
+    "आमंत्रण उपलब्ध नहीं है"
+  ],
+  "Ссылка недоступна": [
+    "Link unavailable",
+    "Enlace no disponible",
+    "Link nicht verfügbar",
+    "链接不可用",
+    "लिंक उपलब्ध नहीं है"
+  ],
+  "Слишком много запросов или предложений. Попробуйте позже.": [
+    "Too many requests or proposals. Try again later.",
+    "Demasiadas solicitudes o propuestas. Inténtalo más tarde.",
+    "Zu viele Anfragen oder Vorschläge. Versuche es später erneut.",
+    "请求或提议过多，请稍后重试。",
+    "बहुत अधिक अनुरोध या प्रस्ताव हैं। बाद में फिर कोशिश करें।"
+  ],
+  "Это время уже занято. Выберите другой интервал.": [
+    "This time is already taken. Choose another slot.",
+    "Este horario ya está ocupado. Elige otro intervalo.",
+    "Diese Zeit ist bereits belegt. Wähle einen anderen Zeitraum.",
+    "该时段已被占用，请选择其他时间。",
+    "यह समय पहले से व्यस्त है। कोई दूसरा समय चुनें।"
+  ],
+  "Не удалось отправить запрос. Проверьте время и попробуйте ещё раз.": [
+    "Could not send the request. Check the time and try again.",
+    "No se pudo enviar la solicitud. Comprueba la hora e inténtalo de nuevo.",
+    "Die Anfrage konnte nicht gesendet werden. Prüfe die Zeit und versuche es erneut.",
+    "无法发送请求。请检查时间后重试。",
+    "अनुरोध नहीं भेजा जा सका। समय जाँचें और फिर कोशिश करें।"
+  ],
+  "Выберите свободное время в будущем в пределах приглашения.": [
+    "Choose a future free slot within the invitation’s range.",
+    "Elige un horario libre futuro dentro del período de la invitación.",
+    "Wähle einen freien zukünftigen Zeitraum innerhalb der Einladung.",
+    "请选择邀请范围内未来的空闲时段。",
+    "आमंत्रण की अवधि में आगे का कोई खाली समय चुनें।"
+  ],
+  "Этот интервал уже прошёл или занят. Выберите другое время.": [
+    "This slot is in the past or taken. Choose another time.",
+    "Este intervalo ya ha pasado o está ocupado. Elige otra hora.",
+    "Dieser Zeitraum liegt in der Vergangenheit oder ist belegt. Wähle eine andere Zeit.",
+    "该时段已过去或已被占用。请选择其他时间。",
+    "यह समय बीत चुका है या व्यस्त है। कोई दूसरा समय चुनें।"
+  ],
+  "В гостевом предложении нельзя прикреплять файлы. Уберите ссылку на вложение.": [
+    "Guest proposals cannot include attachments. Remove the attachment link.",
+    "Las propuestas de invitados no admiten archivos adjuntos. Elimina el enlace al adjunto.",
+    "Gastvorschläge dürfen keine Anhänge enthalten. Entferne den Anhang-Link.",
+    "访客提议不能包含附件。请移除附件链接。",
+    "अतिथि प्रस्तावों में फ़ाइलें नहीं जोड़ सकते। अटैचमेंट लिंक हटाएँ।"
+  ],
+  "Готово": [
+    "Done",
+    "Listo",
+    "Fertig",
+    "完成",
+    "हो गया"
+  ],
+  "Выберите ещё один интервал": [
+    "Choose another slot",
+    "Elige otro intervalo",
+    "Wähle einen weiteren Zeitraum",
+    "选择另一个时段",
+    "एक और समय चुनें"
+  ],
+  "Откройте полную ссылку, которую прислал владелец календаря.": [
+    "Open the full link sent by the calendar owner.",
+    "Abre el enlace completo enviado por el propietario del calendario.",
+    "Öffne den vollständigen Link des Kalendereigentümers.",
+    "请打开日历所有者发送的完整链接。",
+    "कैलेंडर के स्वामी द्वारा भेजा गया पूरा लिंक खोलें।"
+  ],
+  "Не удалось открыть календарь. Проверьте соединение и обновите страницу.": [
+    "Could not open the calendar. Check your connection and reload the page.",
+    "No se pudo abrir el calendario. Comprueba la conexión y recarga la página.",
+    "Der Kalender konnte nicht geöffnet werden. Prüfe die Verbindung und lade die Seite neu.",
+    "无法打开日历。请检查网络并刷新页面。",
+    "कैलेंडर नहीं खोला जा सका। कनेक्शन जाँचें और पेज रीफ़्रेश करें।"
+  ],
+  "{0}. Enter — предложить время, стрелки — изменить начало.": [
+    "{0}. Enter to propose a time, arrow keys to change the start.",
+    "{0}. Intro para proponer una hora, flechas para cambiar el inicio.",
+    "{0}. Eingabe zum Vorschlagen, Pfeiltasten zum Ändern des Beginns.",
+    "{0}。按回车提议时间，方向键调整开始时间。",
+    "{0}। समय प्रस्तावित करने के लिए Enter, शुरुआत बदलने के लिए तीर कुंजियाँ।"
+  ],
+  "Ваш часовой пояс · {0}": [
+    "Your time zone · {0}",
+    "Tu zona horaria · {0}",
+    "Deine Zeitzone · {0}",
+    "你的时区 · {0}",
+    "आपका समय क्षेत्र · {0}"
+  ],
+  "Доступ ещё {0}": [
+    "Available for {0}",
+    "Disponible durante {0}",
+    "Noch {0} verfügbar",
+    "剩余 {0}",
+    "{0} तक उपलब्ध"
+  ]
+};
+  const t = (message, ...values) => {
+    const index = languages.indexOf(language) - 1;
+    const translated = index < 0 || !Object.hasOwn(messages, message)
+      ? message : messages[message][index];
+    return translated.replace(/\{(\d+)\}/g, (match, i) =>
+      Number(i) < values.length ? String(values[i]) : match);
+  };
+  document.documentElement.lang = language;
+  document.title = t("Согласуем время") + " · Yggvion";
+  // Translate only the initial, server-owned markup, before any guest content arrives.
+  const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+  while (walker.nextNode()) {
+    const node = walker.currentNode;
+    const source = node.textContent.trim().replace(/\s+/g, " ");
+    if (Object.hasOwn(messages, source)) {
+      node.textContent = node.textContent.replace(/\S[\s\S]*\S|\S/, t(source));
+    }
+  }
+  for (const element of document.querySelectorAll("[aria-label], [placeholder]")) {
+    for (const attribute of ["aria-label", "placeholder"]) {
+      const value = element.getAttribute(attribute);
+      if (value && Object.hasOwn(messages, value)) element.setAttribute(attribute, t(value));
+    }
+  }
   const $ = (id) => document.getElementById(id);
   const token = location.hash.slice(1);
   let data,
@@ -12,10 +372,10 @@
     dragging = false,
     revision = 0;
   const statuses = {
-    pending: "Предложено",
-    accepted: "Подтверждено",
-    declined: "Отклонено",
-    rescheduled: "Перенесено владельцем",
+    pending: t("Предложено"),
+    accepted: t("Подтверждено"),
+    declined: t("Отклонено"),
+    rescheduled: t("Перенесено владельцем"),
   };
   let columns = matchMedia("(max-width:760px)").matches ? 1 : 7;
   const minuteHeight = 56 / 60;
@@ -35,12 +395,12 @@
     return date;
   };
   const time = (value) =>
-    new Date(value).toLocaleTimeString("ru-RU", {
+    new Date(value).toLocaleTimeString(language, {
       hour: "2-digit",
       minute: "2-digit",
     });
   const dateLabel = (value) =>
-    new Date(value).toLocaleDateString("ru-RU", {
+    new Date(value).toLocaleDateString(language, {
       day: "numeric",
       month: "long",
     });
@@ -54,14 +414,14 @@
   };
   const serverNow = () => new Date(Date.now() + (data?.clockOffset || 0));
   function unavailable(
-    message = "Срок приглашения закончился. Попросите владельца прислать новую ссылку.",
+    message = t("Срок приглашения закончился. Попросите владельца прислать новую ссылку."),
   ) {
     expired = true;
     $("notice").textContent = message;
     $("workspace").hidden = true;
     $("timeline").replaceChildren();
     $("proposal-list").replaceChildren();
-    $("expiry").textContent = "Приглашение недоступно";
+    $("expiry").textContent = t("Приглашение недоступно");
   }
   async function request(path, body) {
     const response = await fetch(path, {
@@ -77,15 +437,15 @@
     });
     if (response.status === 404) {
       unavailable();
-      throw Error("Ссылка недоступна");
+      throw Error(t("Ссылка недоступна"));
     }
     if (response.status === 429)
-      throw Error("Слишком много запросов или предложений. Попробуйте позже.");
+      throw Error(t("Слишком много запросов или предложений. Попробуйте позже."));
     if (response.status === 409)
-      throw Error("Это время уже занято. Выберите другой интервал.");
+      throw Error(t("Это время уже занято. Выберите другой интервал."));
     if (!response.ok)
       throw Error(
-        "Не удалось отправить запрос. Проверьте время и попробуйте ещё раз.",
+        t("Не удалось отправить запрос. Проверьте время и попробуйте ещё раз."),
       );
     return response.json();
   }
@@ -106,7 +466,7 @@
     if (sending || expired) return;
     selection = { start, end };
     nonce = crypto.randomUUID();
-    $("selection-title").textContent = "Предложить встречу";
+    $("selection-title").textContent = t("Предложить встречу");
     $("selection-help").hidden = true;
     $("success").hidden = true;
     $("form").hidden = false;
@@ -116,7 +476,7 @@
     $("end-time").value = inputTime(end);
     $("form-error").textContent = valid(selection)
       ? ""
-      : "Выберите свободное время в будущем в пределах приглашения.";
+      : t("Выберите свободное время в будущем в пределах приглашения.");
     $("submit").disabled = !valid(selection) || sending || expired;
     drawSelection();
   }
@@ -178,7 +538,7 @@
         head = node(
           "div",
           "day-head" + (+day === +dayStart(new Date()) ? " current" : ""),
-          day.toLocaleDateString("ru-RU", { weekday: "short" }),
+          day.toLocaleDateString(language, { weekday: "short" }),
         );
       head.append(node("b", "", day.getDate()));
       heads.append(head);
@@ -187,7 +547,7 @@
       column.tabIndex = 0;
       column.setAttribute(
         "aria-label",
-        `${dateLabel(day)}. Enter — предложить время, стрелки — изменить начало.`,
+        t("{0}. Enter — предложить время, стрелки — изменить начало.", dateLabel(day)),
       );
       for (const busy of data.busy)
         paintBlock(
@@ -195,7 +555,7 @@
           new Date(busy.start),
           new Date(busy.end),
           "busy-block",
-          "Занято",
+          t("Занято"),
         );
       for (const proposal of data.proposals || []) {
         if (proposal.status !== "pending" && proposal.status !== "accepted")
@@ -333,7 +693,7 @@
       if (initial) {
         first = dayStart(data.start);
         $("zone").textContent =
-          `Ваш часовой пояс · ${Intl.DateTimeFormat().resolvedOptions().timeZone}`;
+          t("Ваш часовой пояс · {0}", Intl.DateTimeFormat().resolvedOptions().timeZone);
         $("workspace").hidden = false;
         $("notice").textContent = "";
       }
@@ -342,7 +702,7 @@
       if (selection) {
         $("submit").disabled = sending || !valid(selection);
         if (!valid(selection))
-          $("form-error").textContent = "Это время уже занято. Выберите другой интервал.";
+          $("form-error").textContent = t("Это время уже занято. Выберите другой интервал.");
       }
       if (initial) $("viewport").scrollTop = 8 * 56;
     } finally {
@@ -382,7 +742,7 @@
     if (sending || expired) return;
     if (!valid(selection)) {
       $("form-error").textContent =
-        "Этот интервал уже прошёл или занят. Выберите другое время.";
+        t("Этот интервал уже прошёл или занят. Выберите другое время.");
       return;
     }
     const title = $("title").value.trim();
@@ -392,7 +752,7 @@
     }
     if (/attachment:/i.test(title + "\n" + $("description").value)) {
       $("form-error").textContent =
-        "В гостевом предложении нельзя прикреплять файлы. Уберите ссылку на вложение.";
+        t("В гостевом предложении нельзя прикреплять файлы. Уберите ссылку на вложение.");
       return;
     }
     sending = true;
@@ -422,7 +782,7 @@
       data.busy.push({ start: proposal.start, end: proposal.end });
       $("form").hidden = true;
       $("success").hidden = false;
-      $("selection-title").textContent = "Готово";
+      $("selection-title").textContent = t("Готово");
       selection = null;
       render();
       await load().catch((error) => {
@@ -435,7 +795,7 @@
         if (data?.proposals?.some((p) => p.nonce === proposal.nonce)) {
           $("form").hidden = true;
           $("success").hidden = false;
-          $("selection-title").textContent = "Готово";
+          $("selection-title").textContent = t("Готово");
           $("form-error").textContent = "";
           selection = null;
           drawSelection();
@@ -450,7 +810,7 @@
   });
   $("another").onclick = () => {
     $("success").hidden = true;
-    $("selection-title").textContent = "Выберите ещё один интервал";
+    $("selection-title").textContent = t("Выберите ещё один интервал");
     $("selection-help").hidden = false;
     $("form").reset();
   };
@@ -469,7 +829,7 @@
       return;
     }
     $("expiry").textContent =
-      `Доступ ещё ${Math.floor(remaining / 60)}:${String(remaining % 60).padStart(2, "0")}`;
+      t("Доступ ещё {0}", `${Math.floor(remaining / 60)}:${String(remaining % 60).padStart(2, "0")}`);
   }, 1000);
   setInterval(() => {
     if (data && !expired && !document.hidden && !sending && !dragging)
@@ -484,11 +844,11 @@
       });
   });
   if (!/^[a-f0-9]{64}$/.test(token))
-    unavailable("Откройте полную ссылку, которую прислал владелец календаря.");
+    unavailable(t("Откройте полную ссылку, которую прислал владелец календаря."));
   else
     load(true).catch((error) => {
       if (!expired)
         $("notice").textContent =
-          "Не удалось открыть календарь. Проверьте соединение и обновите страницу.";
+          t("Не удалось открыть календарь. Проверьте соединение и обновите страницу.");
     });
 })();

@@ -1,3 +1,4 @@
+import '../l10n/strings.dart';
 import 'dart:io';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
@@ -56,7 +57,9 @@ class _LocalBackupsPanelState extends ConsumerState<LocalBackupsPanel> {
       }
     } catch (e) {
       if (mounted) {
-        setState(() => error = 'Не удалось открыть локальные копии: $e');
+        setState(
+          () => error = tr("Не удалось открыть локальные копии: {0}", [e]),
+        );
       }
     }
   }
@@ -70,7 +73,7 @@ class _LocalBackupsPanelState extends ConsumerState<LocalBackupsPanel> {
     try {
       await work();
       await refresh();
-      if (mounted) setState(() => status = 'Готово');
+      if (mounted) setState(() => status = tr("Готово"));
     } catch (e) {
       if (mounted) {
         setState(() {
@@ -96,7 +99,7 @@ class _LocalBackupsPanelState extends ConsumerState<LocalBackupsPanel> {
       );
     } else {
       final destination = await FilePicker.platform.saveFile(
-        dialogTitle: 'Сохранить локальную копию',
+        dialogTitle: tr("Сохранить локальную копию"),
         fileName: p.basename(entry.path),
       );
       if (destination != null &&
@@ -111,24 +114,33 @@ class _LocalBackupsPanelState extends ConsumerState<LocalBackupsPanel> {
     final yes = await showDialog<bool>(
       context: context,
       builder: (dialog) => AlertDialog(
-        title: const Text('Восстановить локальную копию?'),
+        title: Text(tr("Восстановить локальную копию?")),
         content: Text(
-          'Заметки, события и настройки на этом устройстве будут заменены. Сначала сохраним текущие данные в отдельную копию.${connected ? '\n\nСинхронизация с VPS отключится. Сервер и остальные устройства останутся без изменений.' : ''}',
+          tr(
+            "Заметки, события и настройки на этом устройстве будут заменены. Сначала сохраним текущие данные в отдельную копию.{0}",
+            [
+              connected
+                  ? tr(
+                      "\n\nСинхронизация с VPS отключится. Сервер и остальные устройства останутся без изменений.",
+                    )
+                  : '',
+            ],
+          ),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(dialog, false),
-            child: const Text('Отмена'),
+            child: Text(tr("Отмена")),
           ),
           FilledButton(
             onPressed: () => Navigator.pop(dialog, true),
-            child: const Text('Восстановить'),
+            child: Text(tr("Восстановить")),
           ),
         ],
       ),
     );
     if (yes == true && mounted) {
-      await action('Проверяем архив и восстанавливаем данные…', () async {
+      await action(tr("Проверяем архив и восстанавливаем данные…"), () async {
         try {
           await service.restore(path);
         } on PasswordRequired {
@@ -151,12 +163,16 @@ class _LocalBackupsPanelState extends ConsumerState<LocalBackupsPanel> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Text(
-            'Работает без VPS и интернета. В копию входят заметки, папки, события, настройки и вложения на этом устройстве.',
+            tr(
+              "Работает без VPS и интернета. В копию входят заметки, папки, события, настройки и вложения на этом устройстве.",
+            ),
             style: TextStyle(color: context.palette.muted, height: 1.5),
           ),
           const SizedBox(height: 8),
           Text(
-            'Архив защищён вашим паролем шифрования. Его можно восстановить без VPS и старого устройства.',
+            tr(
+              "Архив защищён вашим паролем шифрования. Его можно восстановить без VPS и старого устройства.",
+            ),
             style: TextStyle(color: context.palette.muted, fontSize: 12),
           ),
           const SizedBox(height: 16),
@@ -172,10 +188,8 @@ class _LocalBackupsPanelState extends ConsumerState<LocalBackupsPanel> {
                 SwitchListTile.adaptive(
                   key: const ValueKey('local-backup-schedule'),
                   contentPadding: EdgeInsets.zero,
-                  title: const Text('Автоматические копии'),
-                  subtitle: const Text(
-                    'Текущая и предыдущая — всегда под рукой',
-                  ),
+                  title: Text(tr("Автоматические копии")),
+                  subtitle: Text(tr("Текущая и предыдущая — всегда под рукой")),
                   value: service.scheduleEnabled,
                   onChanged: locked
                       ? null
@@ -194,7 +208,7 @@ class _LocalBackupsPanelState extends ConsumerState<LocalBackupsPanel> {
                   const SizedBox(height: 12),
                   Row(
                     children: [
-                      const Text('Каждые', style: TextStyle(fontSize: 13)),
+                      Text(tr("Каждые"), style: TextStyle(fontSize: 13)),
                       const SizedBox(width: 12),
                       SizedBox(
                         width: 76,
@@ -234,16 +248,21 @@ class _LocalBackupsPanelState extends ConsumerState<LocalBackupsPanel> {
                         ),
                       ),
                       const SizedBox(width: 12),
-                      const Expanded(
-                        child: Text('дней', style: TextStyle(fontSize: 13)),
+                      Expanded(
+                        child: Text(tr("дней"), style: TextStyle(fontSize: 13)),
                       ),
                     ],
                   ),
                   const SizedBox(height: 12),
                   Text(
                     service.lastScheduledAt == null
-                        ? 'Первая копия создаётся после включения.'
-                        : 'Следующая: ${DateFormat("d MMMM · HH:mm", "ru").format(service.nextScheduledAt!.toLocal())}',
+                        ? tr("Первая копия создаётся после включения.")
+                        : tr("Следующая: {0}", [
+                            DateFormat(
+                              "d MMMM · HH:mm",
+                              AppLocale.language,
+                            ).format(service.nextScheduledAt!.toLocal()),
+                          ]),
                     style: TextStyle(
                       fontSize: 12,
                       color: context.palette.muted,
@@ -252,7 +271,9 @@ class _LocalBackupsPanelState extends ConsumerState<LocalBackupsPanel> {
                 ],
                 const SizedBox(height: 8),
                 Text(
-                  'Храним две успешные автоматические копии. Если приложение закрыто — создадим копию при следующем запуске. Ручные копии не удаляются.',
+                  tr(
+                    "Храним две успешные автоматические копии. Если приложение закрыто — создадим копию при следующем запуске. Ручные копии не удаляются.",
+                  ),
                   style: TextStyle(
                     fontSize: 12,
                     height: 1.5,
@@ -281,14 +302,14 @@ class _LocalBackupsPanelState extends ConsumerState<LocalBackupsPanel> {
               FilledButton.icon(
                 onPressed: locked
                     ? null
-                    : () => action('Создаём локальную копию…', () async {
+                    : () => action(tr("Создаём локальную копию…"), () async {
                         if (!await ensureEncryptionPassword(context, ref)) {
                           return;
                         }
                         await service.create();
                       }),
                 icon: const Icon(Icons.save_alt_rounded),
-                label: const Text('Создать на устройстве'),
+                label: Text(tr("Создать на устройстве")),
               ),
               OutlinedButton.icon(
                 onPressed: locked
@@ -301,12 +322,12 @@ class _LocalBackupsPanelState extends ConsumerState<LocalBackupsPanel> {
                         if (file == null || !mounted) return;
                         final path = file.files.single.path;
                         if (path == null) {
-                          throw StateError('Не удалось прочитать архив');
+                          throw StateError(tr("Не удалось прочитать архив"));
                         }
                         await restore(path);
                       }),
                 icon: const Icon(Icons.restore_rounded),
-                label: const Text('Восстановить из файла'),
+                label: Text(tr("Восстановить из файла")),
               ),
               if (!Platform.isIOS && !Platform.isAndroid)
                 TextButton.icon(
@@ -319,12 +340,12 @@ class _LocalBackupsPanelState extends ConsumerState<LocalBackupsPanel> {
                             mode: LaunchMode.externalApplication,
                           )) {
                             throw StateError(
-                              'Не удалось открыть папку ${folder.path}',
+                              tr("Не удалось открыть папку {0}", [folder.path]),
                             );
                           }
                         }),
                   icon: const Icon(Icons.folder_open_rounded),
-                  label: const Text('Открыть папку с копиями'),
+                  label: Text(tr("Открыть папку с копиями")),
                 ),
             ],
           ),
@@ -354,53 +375,64 @@ class _LocalBackupsPanelState extends ConsumerState<LocalBackupsPanel> {
               title: Text(
                 DateFormat(
                   'd MMMM yyyy · HH:mm',
-                  'ru',
+                  AppLocale.language,
                 ).format(entry.created.toLocal()),
               ),
               subtitle: Text(
-                '${(entry.bytes / 1048576).toStringAsFixed(1)} МБ · ${entry.automatic ? 'автоматическая' : 'ручная / страховочная'}',
+                tr("{0} МБ · {1}", [
+                  (entry.bytes / 1048576).toStringAsFixed(1),
+                  entry.automatic
+                      ? tr("автоматическая")
+                      : tr("ручная / страховочная"),
+                ]),
               ),
               trailing: PopupMenuButton<String>(
                 enabled: !locked,
-                tooltip: 'Действия с копией',
+                tooltip: tr("Действия с копией"),
                 onSelected: (value) async {
                   if (value == 'restore') {
                     await restore(entry.path);
                     return;
                   }
                   if (value == 'export') {
-                    await action('Сохраняем копию…', () => export(entry));
+                    await action(tr("Сохраняем копию…"), () => export(entry));
                     return;
                   }
                   final yes = await showDialog<bool>(
                     context: context,
                     builder: (dialog) => AlertDialog(
-                      title: const Text('Удалить эту локальную копию?'),
+                      title: Text(tr("Удалить эту локальную копию?")),
                       actions: [
                         TextButton(
                           onPressed: () => Navigator.pop(dialog, false),
-                          child: const Text('Отмена'),
+                          child: Text(tr("Отмена")),
                         ),
                         FilledButton(
                           onPressed: () => Navigator.pop(dialog, true),
-                          child: const Text('Удалить'),
+                          child: Text(tr("Удалить")),
                         ),
                       ],
                     ),
                   );
                   if (yes == true && mounted) {
-                    await action('Удаляем копию…', () async {
+                    await action(tr("Удаляем копию…"), () async {
                       await File(entry.path).delete();
                     });
                   }
                 },
-                itemBuilder: (_) => const [
+                itemBuilder: (_) => [
                   PopupMenuItem(
                     value: 'export',
-                    child: Text('Сохранить / поделиться'),
+                    child: Text(tr("Сохранить / поделиться")),
                   ),
-                  PopupMenuItem(value: 'restore', child: Text('Восстановить')),
-                  PopupMenuItem(value: 'delete', child: Text('Удалить копию')),
+                  PopupMenuItem(
+                    value: 'restore',
+                    child: Text(tr("Восстановить")),
+                  ),
+                  PopupMenuItem(
+                    value: 'delete',
+                    child: Text(tr("Удалить копию")),
+                  ),
                 ],
               ),
             ),

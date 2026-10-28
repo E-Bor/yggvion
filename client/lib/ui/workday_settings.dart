@@ -1,3 +1,4 @@
+import '../l10n/strings.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'providers.dart';
@@ -13,13 +14,13 @@ class WorkdaySettings extends ConsumerWidget {
     final repo = ref.watch(appProvider);
     final settings = repo.snapshot.settings;
     String label(int minute) =>
-        '${(minute ~/ 60 % 24).toString().padLeft(2, '0')}:${(minute % 60).toString().padLeft(2, '0')}${minute >= 1440 ? ' · следующий день' : ''}';
+        '${(minute ~/ 60 % 24).toString().padLeft(2, '0')}:${(minute % 60).toString().padLeft(2, '0')}${minute >= 1440 ? tr(" · следующий день") : ''}';
     Future<void> pick(bool start) async {
       final value = start ? settings.workdayStart : settings.workdayEnd;
       final time = await showTimePicker(
         context: context,
         initialTime: TimeOfDay(hour: value ~/ 60 % 24, minute: value % 60),
-        helpText: start ? 'Начало рабочего дня' : 'Конец рабочего дня',
+        helpText: start ? tr("Начало рабочего дня") : tr("Конец рабочего дня"),
         builder: (context, child) => MediaQuery(
           data: MediaQuery.of(context).copyWith(alwaysUse24HourFormat: true),
           child: child!,
@@ -43,7 +44,9 @@ class WorkdaySettings extends ConsumerWidget {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Text(
-          'Начало и конец учитываются автоматически. Передвиньте метку в календаре, чтобы скорректировать время конкретного дня, в том числе задним числом. Если окончание раньше начала, рабочий день продолжается после полуночи.',
+          tr(
+            "Начало и конец учитываются автоматически. Передвиньте метку в календаре, чтобы скорректировать время конкретного дня, в том числе задним числом. Если окончание раньше начала, рабочий день продолжается после полуночи.",
+          ),
           style: TextStyle(
             color: context.palette.muted,
             fontSize: 12,
@@ -59,13 +62,13 @@ class WorkdaySettings extends ConsumerWidget {
               key: const ValueKey('workday-start-setting'),
               icon: const Icon(Icons.wb_sunny_outlined, size: 18),
               onPressed: () => pick(true),
-              label: Text('Начало · ${label(settings.workdayStart)}'),
+              label: Text(tr("Начало · {0}", [label(settings.workdayStart)])),
             ),
             OutlinedButton.icon(
               key: const ValueKey('workday-end-setting'),
               icon: const Icon(Icons.bedtime_outlined, size: 18),
               onPressed: () => pick(false),
-              label: Text('Конец · ${label(settings.workdayEnd)}'),
+              label: Text(tr("Конец · {0}", [label(settings.workdayEnd)])),
             ),
           ],
         ),
@@ -78,7 +81,15 @@ class WorkdaySettings extends ConsumerWidget {
               FilterChip(
                 key: ValueKey('workday-weekday-$day'),
                 label: Text(
-                  const ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'][day - 1],
+                  [
+                    tr("Пн"),
+                    tr("Вт"),
+                    tr("Ср"),
+                    tr("Чт"),
+                    tr("Пт"),
+                    tr("Сб"),
+                    tr("Вс"),
+                  ][day - 1],
                 ),
                 showCheckmark: false,
                 selected: settings.workdays.contains(day),
@@ -97,7 +108,10 @@ class WorkdaySettings extends ConsumerWidget {
         ),
         const SizedBox(height: 10),
         Text(
-          'Часовой пояс: ${settings.timezone}. Изменения сохраняются сразу и действуют со вчерашнего дня. Более ранние дни и ручные корректировки сохраняются.',
+          tr(
+            "Часовой пояс: {0}. Изменения сохраняются сразу и действуют со вчерашнего дня. Более ранние дни и ручные корректировки сохраняются.",
+            [settings.timezone],
+          ),
           style: TextStyle(
             color: context.palette.muted,
             fontSize: 11,

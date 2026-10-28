@@ -1,24 +1,25 @@
+import '../l10n/strings.dart';
 import 'package:flutter/material.dart';
 import 'package:timezone/timezone.dart' as tz;
 import '../domain/recurrence.dart';
 import 'theme.dart';
 
-const repeatPresets = {
-  '': 'Не повторять',
-  'FREQ=DAILY': 'Каждый день',
-  'FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR': 'По будням',
-  'FREQ=WEEKLY': 'Каждую неделю',
-  'FREQ=MONTHLY': 'Каждый месяц',
-  'FREQ=YEARLY': 'Каждый год',
+final repeatPresets = {
+  '': tr("Не повторять"),
+  'FREQ=DAILY': tr("Каждый день"),
+  'FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR': tr("По будням"),
+  'FREQ=WEEKLY': tr("Каждую неделю"),
+  'FREQ=MONTHLY': tr("Каждый месяц"),
+  'FREQ=YEARLY': tr("Каждый год"),
 };
-const repeatWeekdays = {
-  'MO': 'Пн',
-  'TU': 'Вт',
-  'WE': 'Ср',
-  'TH': 'Чт',
-  'FR': 'Пт',
-  'SA': 'Сб',
-  'SU': 'Вс',
+final repeatWeekdays = {
+  'MO': tr("Пн"),
+  'TU': tr("Вт"),
+  'WE': tr("Ср"),
+  'TH': tr("Чт"),
+  'FR': tr("Пт"),
+  'SA': tr("Сб"),
+  'SU': tr("Вс"),
 };
 
 String repeatLabel(String value) {
@@ -29,10 +30,10 @@ String repeatLabel(String value) {
   };
   final unit =
       {
-        'DAILY': 'дн.',
-        'WEEKLY': 'нед.',
-        'MONTHLY': 'мес.',
-        'YEARLY': 'г.',
+        'DAILY': tr("дн."),
+        'WEEKLY': tr("нед."),
+        'MONTHLY': tr("мес."),
+        'YEARLY': tr("г."),
       }[fields['FREQ']] ??
       '';
   final days = (fields['BYDAY'] ?? '')
@@ -40,7 +41,11 @@ String repeatLabel(String value) {
       .map((d) => repeatWeekdays[d] ?? d)
       .where((d) => d.isNotEmpty)
       .join(', ');
-  return 'Каждые ${fields['INTERVAL'] ?? '1'} $unit${days.isEmpty ? '' : ' · $days'}';
+  return tr("Каждые {0} {1}{2}", [
+    fields['INTERVAL'] ?? '1',
+    unit,
+    days.isEmpty ? '' : ' · $days',
+  ]);
 }
 
 class RepeatPicker extends StatelessWidget {
@@ -98,8 +103,8 @@ class RepeatPicker extends StatelessWidget {
             enabledBorder: InputBorder.none,
             focusedBorder: InputBorder.none,
           )
-        : const InputDecoration(
-            labelText: 'Повторение',
+        : InputDecoration(
+            labelText: tr("Повторение"),
             prefixIcon: Icon(Icons.repeat_rounded, size: 19),
           ),
     items: [
@@ -109,7 +114,7 @@ class RepeatPicker extends StatelessWidget {
         value: 'custom',
         child: Text(
           repeatPresets.containsKey(value)
-              ? 'Настроить повторение…'
+              ? tr("Настроить повторение…")
               : repeatLabel(value),
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
@@ -184,8 +189,9 @@ class _RepeatEditorState extends State<RepeatEditor> {
         n > 999 ||
         (frequency == 'WEEKLY' && days.isEmpty)) {
       setState(
-        () => error =
-            'Интервал — от 1 до 999. Выберите хотя бы один день недели.',
+        () => error = tr(
+          "Интервал — от 1 до 999. Выберите хотя бы один день недели.",
+        ),
       );
       return;
     }
@@ -204,7 +210,7 @@ class _RepeatEditorState extends State<RepeatEditor> {
 
   @override
   Widget build(BuildContext context) => AlertDialog(
-    title: const Text('Настроить повторение'),
+    title: Text(tr("Настроить повторение")),
     content: SizedBox(
       width: 420,
       child: SingleChildScrollView(
@@ -213,7 +219,7 @@ class _RepeatEditorState extends State<RepeatEditor> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              'ПОВТОРЯТЬ КАЖДЫЕ',
+              tr("ПОВТОРЯТЬ КАЖДЫЕ"),
               style: TextStyle(
                 fontSize: 10,
                 letterSpacing: 1.4,
@@ -229,18 +235,27 @@ class _RepeatEditorState extends State<RepeatEditor> {
                     key: const ValueKey('repeat-interval'),
                     controller: interval,
                     keyboardType: TextInputType.number,
-                    decoration: const InputDecoration(labelText: 'Интервал'),
+                    decoration: InputDecoration(labelText: tr("Интервал")),
                   ),
                 ),
                 const SizedBox(width: 12),
                 Expanded(
                   child: DropdownButtonFormField<String>(
                     initialValue: frequency,
-                    items: const [
-                      DropdownMenuItem(value: 'DAILY', child: Text('дни')),
-                      DropdownMenuItem(value: 'WEEKLY', child: Text('недели')),
-                      DropdownMenuItem(value: 'MONTHLY', child: Text('месяцы')),
-                      DropdownMenuItem(value: 'YEARLY', child: Text('годы')),
+                    items: [
+                      DropdownMenuItem(value: 'DAILY', child: Text(tr("дни"))),
+                      DropdownMenuItem(
+                        value: 'WEEKLY',
+                        child: Text(tr("недели")),
+                      ),
+                      DropdownMenuItem(
+                        value: 'MONTHLY',
+                        child: Text(tr("месяцы")),
+                      ),
+                      DropdownMenuItem(
+                        value: 'YEARLY',
+                        child: Text(tr("годы")),
+                      ),
                     ],
                     onChanged: (v) => setState(() => frequency = v!),
                   ),
@@ -250,7 +265,7 @@ class _RepeatEditorState extends State<RepeatEditor> {
             if (frequency == 'WEEKLY') ...[
               const SizedBox(height: 22),
               Text(
-                'В ДНИ НЕДЕЛИ',
+                tr("В ДНИ НЕДЕЛИ"),
                 style: TextStyle(
                   fontSize: 10,
                   letterSpacing: 1.4,
@@ -281,12 +296,15 @@ class _RepeatEditorState extends State<RepeatEditor> {
                 items: [
                   DropdownMenuItem(
                     value: 'date',
-                    child: Text('Каждое ${start.day}-е число'),
+                    child: Text(tr("Каждое {0}-е число", [start.day])),
                   ),
                   DropdownMenuItem(
                     value: 'weekday',
                     child: Text(
-                      '${ordinal == 5 ? 'Последний' : '$ordinal-й'} ${repeatWeekdays[weekday]} месяца',
+                      tr("{0} {1} месяца", [
+                        ordinal == 5 ? tr("Последний") : tr("{0}-й", [ordinal]),
+                        repeatWeekdays[weekday],
+                      ]),
                     ),
                   ),
                 ],
@@ -295,7 +313,9 @@ class _RepeatEditorState extends State<RepeatEditor> {
             ],
             const SizedBox(height: 20),
             Text(
-              'Повторяется, пока вы не удалите серию или последующие задачи.',
+              tr(
+                "Повторяется, пока вы не удалите серию или последующие задачи.",
+              ),
               style: TextStyle(
                 color: context.palette.muted,
                 fontSize: 12,
@@ -317,9 +337,9 @@ class _RepeatEditorState extends State<RepeatEditor> {
     actions: [
       TextButton(
         onPressed: () => Navigator.pop(context),
-        child: const Text('Отмена'),
+        child: Text(tr("Отмена")),
       ),
-      FilledButton(onPressed: save, child: const Text('Готово')),
+      FilledButton(onPressed: save, child: Text(tr("Готово"))),
     ],
   );
 }

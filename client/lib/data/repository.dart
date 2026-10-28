@@ -1,3 +1,4 @@
+import '../l10n/strings.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -30,6 +31,8 @@ class Repository extends ChangeNotifier {
   CalendarView plannerView = CalendarView.day;
   bool sidebarCollapsed = false;
   bool lightTheme = false;
+  double interfaceScale = 1, calendarZoom = 1;
+  String language = 'ru';
   double calendarFraction = .64, scratchpadFraction = .62;
   double plannerFraction = .30;
   String? lastCalendarTaskId;
@@ -46,7 +49,9 @@ class Repository extends ChangeNotifier {
   }
 
   Future<T> serial<T>(Future<T> Function() work) {
-    if (_closing) return Future<T>.error(StateError('Хранилище закрывается'));
+    if (_closing) {
+      return Future<T>.error(StateError(tr("Хранилище закрывается")));
+    }
     final result = _tail.then((_) => work());
     _tail = result.then<void>(
       (_) {},
@@ -72,6 +77,13 @@ class Repository extends ChangeNotifier {
     }
     sidebarCollapsed = await db.meta('sidebar_collapsed') == 'true';
     lightTheme = await db.meta('light_theme') == 'true';
+    final scale = double.tryParse(await db.meta('interface_scale') ?? '');
+    interfaceScale = [.5, .7, 1.0, 1.5, 2.0].contains(scale) ? scale! : 1;
+    final zoom = double.tryParse(await db.meta('calendar_zoom') ?? '');
+    calendarZoom = zoom != null && zoom.isFinite ? zoom.clamp(0, 3) : 1;
+    final locale = await db.meta('language');
+    language = AppLocale.supported.contains(locale) ? locale! : 'ru';
+    AppLocale.use(language);
     calendarFraction =
         double.tryParse(await db.meta('home_calendar_fraction') ?? '') ?? .64;
     scratchpadFraction =
@@ -226,6 +238,40 @@ class Repository extends ChangeNotifier {
     publish();
   });
 
+  Future<void> setInterfaceScale(double value) => serial(() async {
+    if (![.5, .7, 1.0, 1.5, 2.0].contains(value)) {
+      throw ArgumentError(tr("Недопустимый масштаб"));
+    }
+    await db.setMeta('interface_scale', '$value');
+    interfaceScale = value;
+    publish();
+  });
+
+  Future<void> setLanguage(String value) => serial(() async {
+    if (!AppLocale.supported.contains(value)) {
+      throw ArgumentError(tr("Неподдерживаемый язык"));
+    }
+    await db.setMeta('language', value);
+    language = value;
+    AppLocale.use(value);
+    publish();
+  });
+
+  void previewCalendarZoom(double value) {
+    if (!value.isFinite) return;
+    calendarZoom = value.clamp(0, 3);
+    publish();
+  }
+
+  Future<void> setCalendarZoom(double value) => serial(() async {
+    if (!value.isFinite || value < 0 || value > 3) {
+      throw ArgumentError(tr("Недопустимый масштаб"));
+    }
+    await db.setMeta('calendar_zoom', '$value');
+    calendarZoom = value;
+    publish();
+  });
+
   Task? get lastCalendarTask => snapshot.task(lastCalendarTaskId ?? '');
 
   /// The shared running timer takes precedence over this device's last choice.
@@ -266,7 +312,9 @@ class Repository extends ChangeNotifier {
     List<int>? reminders,
     String? timezone,
   }) async {
-    if (title.trim().isEmpty) throw ArgumentError('Введите название задачи');
+    if (title.trim().isEmpty) {
+      throw ArgumentError(tr("Введите название задачи"));
+    }
     final task = Task.create(
       newId(),
       title,
@@ -301,7 +349,7 @@ class Repository extends ChangeNotifier {
     String? projectId,
   }) async {
     if (title != null && title.trim().isEmpty) {
-      throw ArgumentError('Введите название');
+      throw ArgumentError(tr("Введите название"));
     }
     await commit([
       task.entity.change({
@@ -336,7 +384,7 @@ class Repository extends ChangeNotifier {
       task.entity.change({'status': 'done', 'completed_at': wireTime(time)}),
       Task.create(
         newId(),
-        'Проверить: ${task.title}',
+        tr("Проверить: {0}", [task.title]),
         description: task.description,
         projectId: task.projectId,
         parentId: task.id,
@@ -352,10 +400,10 @@ class Repository extends ChangeNotifier {
 
   static void validateInterval(DateTime start, DateTime end) {
     if (!end.isAfter(start)) {
-      throw ArgumentError('Конец должен быть позже начала');
+      throw ArgumentError(tr("Конец должен быть позже начала"));
     }
     if (end.difference(start) > const Duration(days: 366)) {
-      throw ArgumentError('Интервал не может превышать 366 дней');
+      throw ArgumentError(tr("Интервал не может превышать 366 дней"));
     }
   }
 
@@ -378,7 +426,9 @@ class Repository extends ChangeNotifier {
         if (!current.isProposed) return [];
         if (start.isBefore(now())) {
           throw StateError(
-            'Предложенное время уже прошло. Выберите другой интервал в календаре.',
+            tr(
+              "Предложенное время уже прошло. Выберите другой интервал в календаре.",
+            ),
           );
         }
         if (snapshot.blocks.any(
@@ -389,7 +439,7 @@ class Repository extends ChangeNotifier {
               b.end.isAfter(start),
         )) {
           throw StateError(
-            'Это время уже занято. Выберите другой интервал в календаре.',
+            tr("Это время уже занято. Выберите другой интервал в календаре."),
           );
         }
       }
@@ -446,7 +496,7 @@ class Repository extends ChangeNotifier {
 
   Future<void> splitBlock(TimeBlock block, DateTime at) async {
     if (!at.isAfter(block.start) || !at.isBefore(block.end)) {
-      throw ArgumentError('Выберите время внутри блока');
+      throw ArgumentError(tr("Выберите время внутри блока"));
     }
     await commit([
       block.entity.change({'end': wireTime(at)}),
@@ -507,7 +557,7 @@ class Repository extends ChangeNotifier {
       final alreadyRunning = running.any((s) => s.taskId == task.id);
       final start = requested ?? !alreadyRunning;
       if (start && (current == null || current.done)) {
-        throw StateError('Сначала верните задачу в работу');
+        throw StateError(tr("Сначала верните задачу в работу"));
       }
       if (requested != null && start == alreadyRunning) return [];
       final changes = <Entity>[
@@ -603,7 +653,9 @@ class Repository extends ChangeNotifier {
   }) async {
     validateInterval(start, end);
     if (end.isAfter(now().add(const Duration(seconds: 2)))) {
-      throw ArgumentError('Потраченное время не может находиться в будущем');
+      throw ArgumentError(
+        tr("Потраченное время не может находиться в будущем"),
+      );
     }
     await commit([
       session == null
@@ -621,16 +673,22 @@ class Repository extends ChangeNotifier {
     List<TimeRange> ranges, {
     WorkSession? replacing,
   }) async {
-    if (ranges.isEmpty) throw ArgumentError('Выделите хотя бы один интервал');
+    if (ranges.isEmpty) {
+      throw ArgumentError(tr("Выделите хотя бы один интервал"));
+    }
     for (final range in ranges) {
       validateInterval(range.start, range.end);
       if (range.end.isAfter(now().add(const Duration(seconds: 2)))) {
-        throw ArgumentError('Потраченное время не может находиться в будущем');
+        throw ArgumentError(
+          tr("Потраченное время не может находиться в будущем"),
+        );
       }
     }
     await commitComputed(() async {
       final task = await db.entity(taskId);
-      if (task == null || task.deleted) throw StateError('Задача уже удалена');
+      if (task == null || task.deleted) {
+        throw StateError(tr("Задача уже удалена"));
+      }
       Entity? current;
       if (replacing != null) {
         current = await db.entity(replacing.id);
@@ -638,10 +696,10 @@ class Repository extends ChangeNotifier {
             current.deleted ||
             current.data['discarded'] == true ||
             current.data['task_id'] != taskId) {
-          throw StateError('Запись времени уже удалена');
+          throw StateError(tr("Запись времени уже удалена"));
         }
         if (current.encoded != replacing.entity.encoded) {
-          throw StateError('Запись времени изменилась. Откройте её заново');
+          throw StateError(tr("Запись времени изменилась. Откройте её заново"));
         }
       }
       return [
@@ -698,7 +756,7 @@ class Repository extends ChangeNotifier {
     await commitComputed(() async {
       if (folderId.isNotEmpty &&
           !snapshot.noteFolders.any((folder) => folder.id == folderId)) {
-        throw ArgumentError('Папка уже удалена');
+        throw ArgumentError(tr("Папка уже удалена"));
       }
       final siblings = snapshot.notesInFolder(folderId);
       note = Note.create(newId(), 'Новая заметка').change({
@@ -763,7 +821,7 @@ class Repository extends ChangeNotifier {
 
   Future<void> renameNote(String id, String title) => commitComputed(() async {
     if (utf8.encode(title.trim()).length > 1000) {
-      throw ArgumentError('Название слишком длинное');
+      throw ArgumentError(tr("Название слишком длинное"));
     }
     final entity = await db.entity(id);
     if (entity == null || entity.deleted || entity.kind != 'note') return [];
@@ -786,7 +844,7 @@ class Repository extends ChangeNotifier {
 
   Future<void> saveNoteFolder(String title, {NoteFolder? folder}) async {
     if (title.trim().isEmpty || utf8.encode(title.trim()).length > 1000) {
-      throw ArgumentError('Введите название папки до 250 символов');
+      throw ArgumentError(tr("Введите название папки до 250 символов"));
     }
     await commitComputed(
       () async => _preserveNoteLinks([
@@ -818,7 +876,7 @@ class Repository extends ChangeNotifier {
         if (note == null || note.pinned.isNotEmpty) return [];
         if (folderId.isNotEmpty &&
             !snapshot.noteFolders.any((f) => f.id == folderId)) {
-          throw ArgumentError('Папка уже удалена');
+          throw ArgumentError(tr("Папка уже удалена"));
         }
         final siblings = snapshot
             .notesInFolder(folderId)
@@ -880,7 +938,9 @@ class Repository extends ChangeNotifier {
   }
 
   Future<void> saveProject(String title, int color, {Project? project}) async {
-    if (title.trim().isEmpty) throw ArgumentError('Введите название проекта');
+    if (title.trim().isEmpty) {
+      throw ArgumentError(tr("Введите название проекта"));
+    }
     await commit([
       project?.entity.change({'title': title.trim(), 'color': color}) ??
           Entity(
@@ -907,7 +967,7 @@ class Repository extends ChangeNotifier {
 
   Future<void> deleteEntity(Entity entity) async {
     if (entity.id == 'scratchpad' || entity.id == 'reference') {
-      throw ArgumentError('Постоянная заметка не удаляется');
+      throw ArgumentError(tr("Постоянная заметка не удаляется"));
     }
     final changes = <Entity>[];
     if (entity.kind == 'task') {
@@ -950,12 +1010,14 @@ class Repository extends ChangeNotifier {
     try {
       pattern.validate();
     } on FormatException {
-      throw ArgumentError('Рабочий день должен длиться от 5 минут до 24 часов');
+      throw ArgumentError(
+        tr("Рабочий день должен длиться от 5 минут до 24 часов"),
+      );
     }
     await commitComputed(() async {
       final settings = await db.entity('settings');
       if (settings == null || settings.deleted) {
-        throw StateError('Настройки недоступны');
+        throw StateError(tr("Настройки недоступны"));
       }
       final current = AppSettings(settings);
       final history = WorkdayHistory(current);
@@ -978,7 +1040,9 @@ class Repository extends ChangeNotifier {
     required DateTime? value,
   }) => commitComputed(() async {
     final window = WorkdaySchedule(snapshot).forDate(date);
-    if (window == null) throw StateError('Этот день не отмечен как рабочий');
+    if (window == null) {
+      throw StateError(tr("Этот день не отмечен как рабочий"));
+    }
     final day = window.date;
     final zone = tz.getLocation(snapshot.settings.timezone);
     final next = tz.TZDateTime(zone, day.year, day.month, day.day + 1);
@@ -988,8 +1052,8 @@ class Repository extends ChangeNotifier {
             (start ? !value.isBefore(next) : value.isAfter(lastEnd)))) {
       throw ArgumentError(
         start
-            ? 'Начало должно быть в выбранном дне'
-            : 'Конец может быть в выбранном или следующем дне',
+            ? tr("Начало должно быть в выбранном дне")
+            : tr("Конец может быть в выбранном или следующем дне"),
       );
     }
     final record =
@@ -1021,19 +1085,19 @@ class Repository extends ChangeNotifier {
     int? searchTypos,
   }) async {
     if (minutes < 5 || minutes > 1440) {
-      throw ArgumentError('Длительность: от 5 до 1440 минут');
+      throw ArgumentError(tr("Длительность: от 5 до 1440 минут"));
     }
     if (accentColor != null &&
         (accentColor < 0xff000000 || accentColor > 0xffffffff)) {
-      throw ArgumentError('Выберите непрозрачный акцентный цвет');
+      throw ArgumentError(tr("Выберите непрозрачный акцентный цвет"));
     }
     if (searchTypos != null && (searchTypos < 0 || searchTypos > 2)) {
-      throw ArgumentError('Допустимо от 0 до 2 опечаток');
+      throw ArgumentError(tr("Допустимо от 0 до 2 опечаток"));
     }
     await commitComputed(() async {
       final current = await db.entity('settings');
       if (current == null || current.deleted) {
-        throw StateError('Настройки недоступны');
+        throw StateError(tr("Настройки недоступны"));
       }
       return [
         current.change({
@@ -1049,8 +1113,8 @@ class Repository extends ChangeNotifier {
 
   static const maxAttachmentMiB = 300;
   static const maxAttachmentBytes = maxAttachmentMiB * 1024 * 1024;
-  static const attachmentSizeError =
-      'Размер файла не должен превышать $maxAttachmentMiB МБ';
+  static String get attachmentSizeError =>
+      tr("Размер файла не должен превышать {0} МБ", [maxAttachmentMiB]);
 
   /// Materialize native clipboard streams without retaining the whole file in RAM.
   Future<String> attachStream(Stream<List<int>> stream, String name) async {
@@ -1060,7 +1124,7 @@ class Repository extends ChangeNotifier {
         .replaceAll(RegExp(r'[<>:"/\\|?*\x00-\x1f]'), '_')
         .trim();
     final safeName = basename.isEmpty || basename == '.' || basename == '..'
-        ? 'Вложение'
+        ? tr("Вложение")
         : basename;
     final file = File(p.join(directory.path, safeName));
     try {
@@ -1202,7 +1266,7 @@ class Repository extends ChangeNotifier {
           kind: 'note',
           data: {
             ...local.data,
-            'title': '${local.data['title']} — копия с устройства',
+            'title': tr("{0} — копия с устройства", [local.data['title']]),
             'pinned': '',
           },
         ),

@@ -1,3 +1,4 @@
+import '../l10n/strings.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../data/sync.dart';
@@ -11,13 +12,17 @@ class EncryptionPage extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) => SettingsDetail(
-    title: 'Шифрование',
+    title: tr("Шифрование"),
     children: [
       const EncryptionSettings(),
-      settingsCard('Очистить хранилище', [
-        const Text(
-          'Удалить все данные Yggvion с этого устройства и начать заново. '
-          'Подходит, если на устройстве остался прежний формат шифрования.',
+      settingsCard(tr("Очистить хранилище"), [
+        Text(
+          (tr(
+                "Удалить все данные Yggvion с этого устройства и начать заново. ",
+              ) +
+              tr(
+                "Подходит, если на устройстве остался прежний формат шифрования.",
+              )),
           style: TextStyle(height: 1.5),
         ),
         const SizedBox(height: 16),
@@ -29,7 +34,7 @@ class EncryptionPage extends ConsumerWidget {
               foregroundColor: Theme.of(context).colorScheme.error,
             ),
             icon: const Icon(Icons.delete_forever_outlined),
-            label: const Text('Очистить хранилище'),
+            label: Text(tr("Очистить хранилище")),
             onPressed: () => showStorageResetDialog(
               context,
               reset: ref.read(resetStorageProvider),
@@ -61,7 +66,7 @@ class _StorageResetDialog extends StatefulWidget {
 }
 
 class _StorageResetDialogState extends State<_StorageResetDialog> {
-  static const phrase = 'Удалить хранилище';
+  static final phrase = tr("Удалить хранилище");
   final controller = TextEditingController();
   bool busy = false;
   String? error;
@@ -95,7 +100,7 @@ class _StorageResetDialogState extends State<_StorageResetDialog> {
   Widget build(BuildContext context) => PopScope(
     canPop: !busy,
     child: AlertDialog(
-      title: const Text('Удалить хранилище?'),
+      title: Text(tr("Удалить хранилище?")),
       icon: Icon(
         Icons.delete_forever_outlined,
         color: Theme.of(context).colorScheme.error,
@@ -107,16 +112,20 @@ class _StorageResetDialogState extends State<_StorageResetDialog> {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Text(
-                'С этого устройства будут удалены задачи, заметки, проекты, '
-                'учёт времени, вложения, локальные резервные копии, пароль и настройки. '
-                'Подключение к серверу будет сброшено.\n\n'
-                'Данные на VPS и копии, сохранённые вне приложения, останутся. '
-                'Это действие нельзя отменить.',
+              Text(
+                (tr("С этого устройства будут удалены задачи, заметки, проекты, ") +
+                    tr(
+                      "учёт времени, вложения, локальные резервные копии, пароль и настройки. ",
+                    ) +
+                    tr("Подключение к серверу будет сброшено.\n\n") +
+                    tr(
+                      "Данные на VPS и копии, сохранённые вне приложения, останутся. ",
+                    ) +
+                    tr("Это действие нельзя отменить.")),
                 style: TextStyle(height: 1.5),
               ),
               const SizedBox(height: 20),
-              const Text('Для подтверждения введите «Удалить хранилище»:'),
+              Text(tr("Для подтверждения введите «Удалить хранилище»:")),
               const SizedBox(height: 12),
               TextField(
                 key: const ValueKey('storage-reset-confirmation'),
@@ -126,8 +135,8 @@ class _StorageResetDialogState extends State<_StorageResetDialog> {
                 autocorrect: false,
                 enableSuggestions: false,
                 textInputAction: TextInputAction.done,
-                decoration: const InputDecoration(
-                  labelText: 'Фраза подтверждения',
+                decoration: InputDecoration(
+                  labelText: tr("Фраза подтверждения"),
                 ),
                 onChanged: (_) => setState(() {}),
                 onSubmitted: (_) => submit(),
@@ -154,7 +163,7 @@ class _StorageResetDialogState extends State<_StorageResetDialog> {
       actions: [
         TextButton(
           onPressed: busy ? null : () => Navigator.pop(context, false),
-          child: const Text('Отмена'),
+          child: Text(tr("Отмена")),
         ),
         FilledButton(
           key: const ValueKey('confirm-storage-reset'),
@@ -163,7 +172,7 @@ class _StorageResetDialogState extends State<_StorageResetDialog> {
             foregroundColor: Theme.of(context).colorScheme.onError,
           ),
           onPressed: busy || controller.text != phrase ? null : submit,
-          child: const Text('Удалить хранилище'),
+          child: Text(tr("Удалить хранилище")),
         ),
       ],
     ),
@@ -183,7 +192,7 @@ class _EncryptionSettingsState extends ConsumerState<EncryptionSettings> {
     final sync = ref.read(syncProvider);
     final locked = sync.needsEncryptionKey;
     final configured = sync.passwordConfigured;
-    return settingsCard('Сквозное шифрование', [
+    return settingsCard(tr("Сквозное шифрование"), [
       Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -195,10 +204,16 @@ class _EncryptionSettingsState extends ConsumerState<EncryptionSettings> {
           Expanded(
             child: Text(
               locked
-                  ? 'Введите пароль, чтобы открыть личные данные на этом устройстве.'
+                  ? tr(
+                      "Введите пароль, чтобы открыть личные данные на этом устройстве.",
+                    )
                   : configured
-                  ? 'Пароль шифрования настроен. Пароль сохранён локально и используется автоматически при запуске.'
-                  : 'Создайте пароль для синхронизации и резервных копий. Сохранять длинный ключ вручную больше не нужно.',
+                  ? tr(
+                      "Пароль шифрования настроен. Пароль сохранён локально и используется автоматически при запуске.",
+                    )
+                  : tr(
+                      "Создайте пароль для синхронизации и резервных копий. Сохранять длинный ключ вручную больше не нужно.",
+                    ),
               style: const TextStyle(height: 1.5),
             ),
           ),
@@ -206,7 +221,9 @@ class _EncryptionSettingsState extends ConsumerState<EncryptionSettings> {
       ),
       const SizedBox(height: 12),
       Text(
-        'Пароль не отправляется на сервер. Для восстановления на новом устройстве потребуется ваш пароль и доступ к серверу или файлу копии.',
+        tr(
+          "Пароль не отправляется на сервер. Для восстановления на новом устройстве потребуется ваш пароль и доступ к серверу или файлу копии.",
+        ),
         style: TextStyle(color: context.palette.muted, height: 1.4),
       ),
       const SizedBox(height: 16),
@@ -217,10 +234,10 @@ class _EncryptionSettingsState extends ConsumerState<EncryptionSettings> {
           icon: Icon(locked ? Icons.lock_open_rounded : Icons.password_rounded),
           label: Text(
             locked
-                ? 'Ввести пароль'
+                ? tr("Ввести пароль")
                 : configured
-                ? 'Сменить пароль'
-                : 'Создать пароль',
+                ? tr("Сменить пароль")
+                : tr("Создать пароль"),
           ),
           onPressed: () => showEncryptionPasswordDialog(
             context,
@@ -325,7 +342,7 @@ class _PasswordDialogState extends State<_PasswordDialog> {
     try {
       PasswordConfig.validatePassword(password.text, creating: widget.creating);
       if (widget.creating && password.text != confirm.text) {
-        throw const FormatException('Пароли не совпадают');
+        throw FormatException(tr("Пароли не совпадают"));
       }
       await widget.submit(password.text, widget.changing ? current.text : null);
       if (mounted) {
@@ -369,7 +386,7 @@ class _PasswordDialogState extends State<_PasswordDialog> {
         counterText: '',
         suffixIcon: controller == password
             ? IconButton(
-                tooltip: visible ? 'Скрыть пароль' : 'Показать пароль',
+                tooltip: visible ? tr("Скрыть пароль") : tr("Показать пароль"),
                 onPressed: () => setState(() => visible = !visible),
                 icon: Icon(
                   visible
@@ -388,10 +405,10 @@ class _PasswordDialogState extends State<_PasswordDialog> {
       icon: Icon(Icons.lock_outline_rounded, color: context.accentColor),
       title: Text(
         widget.changing
-            ? 'Сменить пароль шифрования'
+            ? tr("Сменить пароль шифрования")
             : widget.creating
-            ? 'Создайте пароль шифрования'
-            : 'Введите пароль шифрования',
+            ? tr("Создайте пароль шифрования")
+            : tr("Введите пароль шифрования"),
       ),
       content: SizedBox(
         width: 420,
@@ -403,25 +420,31 @@ class _PasswordDialogState extends State<_PasswordDialog> {
               children: [
                 Text(
                   widget.creating
-                      ? 'Используйте фразу от 12 символов. Сохраните её в менеджере паролей: сервер не сможет восстановить пароль.'
-                      : 'Введите пароль пространства или пароль, действовавший при создании резервной копии.',
+                      ? tr(
+                          "Используйте фразу от 12 символов. Сохраните её в менеджере паролей: сервер не сможет восстановить пароль.",
+                        )
+                      : tr(
+                          "Введите пароль пространства или пароль, действовавший при создании резервной копии.",
+                        ),
                   style: const TextStyle(height: 1.4),
                 ),
                 if (widget.changing)
-                  field(current, 'Текущий пароль', autofocus: true),
+                  field(current, tr("Текущий пароль"), autofocus: true),
                 field(
                   password,
-                  widget.creating ? 'Новый пароль' : 'Пароль',
+                  widget.creating ? tr("Новый пароль") : tr("Пароль"),
                   autofocus: !widget.changing,
                   last: !widget.creating,
                 ),
                 if (widget.creating)
-                  field(confirm, 'Повторите пароль', last: true),
+                  field(confirm, tr("Повторите пароль"), last: true),
                 if (widget.changing)
-                  const Padding(
+                  Padding(
                     padding: EdgeInsets.only(top: 12),
                     child: Text(
-                      'Данные на сервере будут перешифрованы. На других устройствах потребуется новый пароль. Старые копии сохраняют прежний пароль.',
+                      tr(
+                        "Данные на сервере будут перешифрованы. На других устройствах потребуется новый пароль. Старые копии сохраняют прежний пароль.",
+                      ),
                       style: TextStyle(fontSize: 12, height: 1.4),
                     ),
                   ),
@@ -448,11 +471,13 @@ class _PasswordDialogState extends State<_PasswordDialog> {
       actions: [
         TextButton(
           onPressed: busy ? null : () => Navigator.pop(context, false),
-          child: const Text('Отмена'),
+          child: Text(tr("Отмена")),
         ),
         FilledButton(
           onPressed: busy ? null : save,
-          child: Text(widget.creating ? 'Сохранить пароль' : 'Продолжить'),
+          child: Text(
+            widget.creating ? tr("Сохранить пароль") : tr("Продолжить"),
+          ),
         ),
       ],
     ),

@@ -120,24 +120,24 @@ void main() {
         );
         final folderId = repo.snapshot.noteFolders.single.id;
         await command(tester, LogicalKeyboardKey.digit4);
-        if (mobile) {
-          final folders = find.byKey(const ValueKey('mobile-notes-folders'));
-          await tester.ensureVisible(folders);
-          await tester.tap(folders);
-          await settle(tester);
-        }
         final folder = find.byKey(ValueKey('note-folder-$folderId'));
         await tester.ensureVisible(folder);
-        await tester.tap(folder);
-        await settle(tester);
-        await tester.tap(
-          find.descendant(
-            of: folder,
-            matching: find.byType(PopupMenuButton<String>),
-          ),
-        );
-        await settle(tester);
-        await tester.tap(find.text('Создать заметку'));
+        if (mobile) {
+          await tester.tap(
+            find.byKey(ValueKey('folder-create-note-$folderId')),
+          );
+        } else {
+          await tester.tap(folder);
+          await settle(tester);
+          await tester.tap(
+            find.descendant(
+              of: folder,
+              matching: find.byType(PopupMenuButton<String>),
+            ),
+          );
+          await settle(tester);
+          await tester.tap(find.text('Создать заметку'));
+        }
         await settle(tester);
         final note = repo.snapshot.notesInFolder(folderId).single;
         final panel = find.byWidgetPredicate(

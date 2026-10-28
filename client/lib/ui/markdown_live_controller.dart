@@ -1,3 +1,4 @@
+import '../l10n/strings.dart';
 import 'package:flutter/material.dart';
 import 'package:markdown/markdown.dart' as md;
 import '../domain/markdown_blocks.dart';
@@ -161,7 +162,7 @@ class MarkdownLiveController extends TextEditingController {
                   activeColor: context.accentColor,
                   materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
                   visualDensity: VisualDensity.compact,
-                  semanticLabel: 'Подзадача',
+                  semanticLabel: tr("Подзадача"),
                   onChanged: toggleTask == null
                       ? null
                       : (checked) => toggleTask!(

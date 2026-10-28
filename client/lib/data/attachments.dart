@@ -96,6 +96,34 @@ extension RepositoryAttachments on Repository {
     return changes;
   });
 
+  Future<AttachmentEntry?> attachmentDetails(String id) async {
+    if (!RegExp(r'^[a-f0-9]{64}$').hasMatch(id)) return null;
+    final metadata = await db.entity('attachment-$id');
+    final row = await db
+        .customSelect(
+          'SELECT name,path,uploaded FROM files WHERE id=?',
+          variables: [Variable<String>(id)],
+        )
+        .getSingleOrNull();
+    if (metadata?.deleted == true || (metadata == null && row == null)) {
+      return null;
+    }
+    final path = row?.read<String>('path');
+    final file = path == null ? null : File(path);
+    final available = file != null && await file.exists();
+    return AttachmentEntry(
+      id: id,
+      name: metadata?.data['title'] as String? ?? row!.read<String>('name'),
+      size:
+          metadata?.data['size'] as int? ??
+          (available ? await file.length() : 0),
+      references: 0,
+      uploaded: row?.read<int>('uploaded') == 1,
+      path: available ? path : null,
+      addedAt: DateTime.tryParse(metadata?.data['added_at'] as String? ?? ''),
+    );
+  }
+
   Future<List<AttachmentEntry>> attachmentInventory() async {
     await ensureAttachmentCatalog();
     final references = await attachmentReferences();

@@ -145,6 +145,8 @@ void main() {
       await tester.tap(find.text('Планировщик').last);
       await settle(tester);
       if (mobile) {
+        await tester.tap(find.byKey(const ValueKey('planner-mode')));
+        await settle(tester);
         await tester.tap(find.text('Календарь').last);
         await settle(tester);
       }
@@ -168,6 +170,8 @@ void main() {
       await tester.tap(find.text('Планировщик').last);
       await settle(tester);
       if (mobile && dropdown.evaluate().isEmpty) {
+        await tester.tap(find.byKey(const ValueKey('planner-mode')));
+        await settle(tester);
         await tester.tap(find.text('Календарь').last);
         await settle(tester);
       }

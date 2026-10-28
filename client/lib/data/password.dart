@@ -3,7 +3,7 @@ part of 'encryption.dart';
 class PasswordRequired implements Exception {
   const PasswordRequired();
   @override
-  String toString() => 'Введите пароль шифрования';
+  String toString() => tr("Введите пароль шифрования");
 }
 
 /// Public KDF parameters for direct password-derived encryption.
@@ -38,7 +38,7 @@ class PasswordConfig {
         v['salt'] is! String ||
         (v['salt'] as String).length != 24 ||
         base64.decode(v['salt'] as String).length != 16) {
-      throw const FormatException('Неверный формат парольного шифрования');
+      throw FormatException(tr("Неверный формат парольного шифрования"));
     }
     return PasswordConfig._(v);
   }
@@ -52,8 +52,8 @@ class PasswordConfig {
         password.runes.length > 256 ||
         utf8.encode(password).length > 1024 ||
         (creating && (password.runes.length < 12 || password.trim().isEmpty))) {
-      throw const FormatException(
-        'Используйте пароль или фразу от 12 до 256 символов',
+      throw FormatException(
+        tr("Используйте пароль или фразу от 12 до 256 символов"),
       );
     }
   }
@@ -93,7 +93,7 @@ class PasswordConfig {
 
   void verify(WorkspaceKey key) {
     if (key.id != keyId) {
-      throw const FormatException('Неверный пароль или повреждённые параметры');
+      throw FormatException(tr("Неверный пароль или повреждённые параметры"));
     }
   }
 
@@ -120,11 +120,11 @@ class PasswordConfig {
       if (prefix.length != 12 ||
           ascii.decode(prefix.sublist(0, 8), allowInvalid: true) !=
               'YGGPASS2') {
-        throw const FormatException('Формат копии не поддерживается');
+        throw FormatException(tr("Формат копии не поддерживается"));
       }
       final length = ByteData.sublistView(prefix).getUint32(8);
       if (length < 1 || length > 4096) {
-        throw const FormatException('Неверный заголовок копии');
+        throw FormatException(tr("Неверный заголовок копии"));
       }
       final data = await WorkspaceKey._readExact(input, length);
       return (

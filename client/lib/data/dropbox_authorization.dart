@@ -1,3 +1,4 @@
+import '../l10n/strings.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -49,10 +50,12 @@ class DropboxAuthorization {
 
   Future<bool> connect(SyncService sync) async {
     if (!configured) {
-      throw StateError('Dropbox не настроен в этой сборке приложения.');
+      throw StateError(tr("Dropbox не настроен в этой сборке приложения."));
     }
-    if (!sync.connected) throw StateError('Сначала подключите сервер.');
-    if (_pending != null) throw StateError('Вход в Dropbox уже выполняется.');
+    if (!sync.connected) throw StateError(tr("Сначала подключите сервер."));
+    if (_pending != null) {
+      throw StateError(tr("Вход в Dropbox уже выполняется."));
+    }
     final server = sync.url;
     final state = _random(), verifier = _random();
     final pending = Completer<String?>();
@@ -78,7 +81,9 @@ class DropboxAuthorization {
         return false;
       }
       if (uri.queryParameters.containsKey('error')) {
-        pending.completeError(StateError('Доступ к Dropbox не предоставлен.'));
+        pending.completeError(
+          StateError(tr("Доступ к Dropbox не предоставлен.")),
+        );
       } else {
         final codes = uri.queryParametersAll['code'];
         if (codes == null ||
@@ -87,7 +92,7 @@ class DropboxAuthorization {
             codes.single.length > 4096) {
           pending.completeError(
             StateError(
-              'Dropbox вернул некорректный ответ. Попробуйте ещё раз.',
+              tr("Dropbox вернул некорректный ответ. Попробуйте ещё раз."),
             ),
           );
         } else {
@@ -102,7 +107,7 @@ class DropboxAuthorization {
     final timer = Timer(timeout, () {
       if (!pending.isCompleted) {
         pending.completeError(
-          StateError('Время входа в Dropbox истекло. Попробуйте ещё раз.'),
+          StateError(tr("Время входа в Dropbox истекло. Попробуйте ещё раз.")),
         );
       }
     });
@@ -116,7 +121,9 @@ class DropboxAuthorization {
           );
         } on SocketException {
           throw StateError(
-            'Локальный порт входа Dropbox (43827) занят. Закройте другое окно входа и повторите попытку.',
+            tr(
+              "Локальный порт входа Dropbox (43827) занят. Закройте другое окно входа и повторите попытку.",
+            ),
           );
         }
         callbackServer.listen((request) async {
@@ -134,8 +141,10 @@ class DropboxAuthorization {
             );
           request.response.write(
             accepted
-                ? 'Ответ Dropbox получен. Вернитесь в Yggvion для завершения подключения.'
-                : 'Неизвестный запрос. Начните подключение в Yggvion.',
+                ? tr(
+                    "Ответ Dropbox получен. Вернитесь в Yggvion для завершения подключения.",
+                  )
+                : tr("Неизвестный запрос. Начните подключение в Yggvion."),
           );
           await request.response.close();
         });
@@ -145,7 +154,7 @@ class DropboxAuthorization {
           onError: (Object _) {
             if (!pending.isCompleted) {
               pending.completeError(
-                StateError('Не удалось получить ответ Dropbox.'),
+                StateError(tr("Не удалось получить ответ Dropbox.")),
               );
             }
           },
@@ -164,14 +173,14 @@ class DropboxAuthorization {
             .replaceAll('=', ''),
       });
       if (!await _openBrowser(authorization)) {
-        throw StateError('Не удалось открыть Dropbox в браузере.');
+        throw StateError(tr("Не удалось открыть Dropbox в браузере."));
       }
       final result = await callback;
       if (result == null) return false;
       if (result is! String) throw result;
       if (!sync.connected || sync.url != server) {
         throw StateError(
-          'Подключение к серверу изменилось. Повторите вход в Dropbox.',
+          tr("Подключение к серверу изменилось. Повторите вход в Dropbox."),
         );
       }
       await sync.request(

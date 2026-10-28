@@ -1,3 +1,4 @@
+import '../l10n/strings.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -16,10 +17,11 @@ class PlannedReminder {
     this.taskId,
     this.title,
     this.at, {
-    this.body = 'Пора начать · Yggvion',
-  });
+    String? body,
+  }) : _body = body;
   final String key, taskId, title;
-  final String body;
+  final String? _body;
+  String get body => _body ?? tr("Пора начать · Yggvion");
   final DateTime at;
   String get deliveryKey => 'notified:$key:${at.millisecondsSinceEpoch}';
   int get id => int.parse(
@@ -51,8 +53,8 @@ List<PlannedReminder> remindersFor(Snapshot snapshot, DateTime now) {
               task.title,
               at,
               body: task.isBirthday
-                  ? 'Сегодня день рождения. Не забудьте поздравить!'
-                  : 'Пора начать · Yggvion',
+                  ? tr("Сегодня день рождения. Не забудьте поздравить!")
+                  : tr("Пора начать · Yggvion"),
             ),
           );
         }
@@ -79,8 +81,8 @@ List<PlannedReminder> remindersFor(Snapshot snapshot, DateTime now) {
           task.title,
           at,
           body: task.isBirthday
-              ? 'Напоминание о дне рождения'
-              : 'Пора начать · Yggvion',
+              ? tr("Напоминание о дне рождения")
+              : tr("Пора начать · Yggvion"),
         ),
       );
     }
@@ -111,7 +113,7 @@ class ReminderService {
     if (response.actionId == 'snooze') {
       unawaited(
         repo.snooze(id, const Duration(minutes: 10)).catchError((Object e) {
-          error = 'Не удалось отложить уведомление: $e';
+          error = tr("Не удалось отложить уведомление: {0}", [e]);
           repo.publish();
         }),
       );
@@ -130,7 +132,7 @@ class ReminderService {
           actions: [
             DarwinNotificationAction.plain(
               'snooze',
-              'Через 10 минут',
+              tr("Через 10 минут"),
               options: {DarwinNotificationActionOption.foreground},
             ),
           ],
@@ -153,9 +155,7 @@ class ReminderService {
             requestSoundPermission: false,
             notificationCategories: categories,
           ),
-          linux: const LinuxInitializationSettings(
-            defaultActionName: 'Открыть',
-          ),
+          linux: LinuxInitializationSettings(defaultActionName: tr("Открыть")),
           windows: const WindowsInitializationSettings(
             appName: 'Yggvion',
             appUserModelId: 'dev.yggvion.yggvion',
@@ -185,7 +185,7 @@ class ReminderService {
         );
       }
     } catch (e) {
-      error = 'Не удалось включить уведомления: $e';
+      error = tr("Не удалось включить уведомления: {0}", [e]);
     }
   }
 
@@ -247,11 +247,15 @@ class ReminderService {
         'dev.yggvion/notification_settings',
       ).invokeMethod<bool>('open');
       if (opened != true) {
-        throw StateError('Не удалось открыть системные настройки уведомлений.');
+        throw StateError(
+          tr("Не удалось открыть системные настройки уведомлений."),
+        );
       }
     } else if (platform == TargetPlatform.windows) {
       if (!await launchUrl(Uri.parse('ms-settings:notifications'))) {
-        throw StateError('Не удалось открыть настройки уведомлений Windows.');
+        throw StateError(
+          tr("Не удалось открыть настройки уведомлений Windows."),
+        );
       }
     } else {
       for (final command in [
@@ -270,13 +274,15 @@ class ReminderService {
         }
       }
       throw StateError(
-        'Откройте раздел уведомлений в настройках рабочего окружения.',
+        tr("Откройте раздел уведомлений в настройках рабочего окружения."),
       );
     }
   }
 
   Future<void> requestPermission() async {
-    if (!initialized) throw StateError(error ?? 'Служба уведомлений не готова');
+    if (!initialized) {
+      throw StateError(error ?? tr("Служба уведомлений не готова"));
+    }
     await plugin
         .resolvePlatformSpecificImplementation<
           AndroidFlutterLocalNotificationsPlugin
@@ -307,14 +313,14 @@ class ReminderService {
     if (_disposed) return;
     if (permissionGranted == false) {
       throw StateError(
-        'Разрешите уведомления для Yggvion в настройках устройства',
+        tr("Разрешите уведомления для Yggvion в настройках устройства"),
       );
     }
     if ((platform == TargetPlatform.linux)) {
       await plugin.show(
         testNotificationId,
         'Yggvion',
-        'Проверка уведомлений',
+        tr("Проверка уведомлений"),
         details,
       );
       return;
@@ -322,24 +328,24 @@ class ReminderService {
     await plugin.zonedSchedule(
       testNotificationId,
       'Yggvion',
-      'Уведомления работают',
+      tr("Уведомления работают"),
       tz.TZDateTime.from(repo.now().add(const Duration(seconds: 10)), tz.UTC),
       details,
       androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
     );
   }
 
-  NotificationDetails get details => const NotificationDetails(
+  NotificationDetails get details => NotificationDetails(
     android: AndroidNotificationDetails(
       'calendar',
-      'Календарь',
-      channelDescription: 'Начало запланированных задач',
+      tr("Календарь"),
+      channelDescription: tr("Начало запланированных задач"),
       importance: Importance.high,
       priority: Priority.high,
       actions: [
         AndroidNotificationAction(
           'snooze',
-          'Через 10 минут',
+          tr("Через 10 минут"),
           showsUserInterface: true,
         ),
       ],
@@ -354,11 +360,13 @@ class ReminderService {
     macOS: DarwinNotificationDetails(categoryIdentifier: 'calendar'),
     linux: LinuxNotificationDetails(
       actions: [
-        LinuxNotificationAction(key: 'snooze', label: 'Через 10 минут'),
+        LinuxNotificationAction(key: 'snooze', label: tr("Через 10 минут")),
       ],
     ),
     windows: WindowsNotificationDetails(
-      actions: [WindowsAction(content: 'Через 10 минут', arguments: 'snooze')],
+      actions: [
+        WindowsAction(content: tr("Через 10 минут"), arguments: 'snooze'),
+      ],
     ),
   );
   Future<void> refresh() async {
@@ -408,7 +416,7 @@ class ReminderService {
       scheduledCount = pending.length;
       error = null;
     } catch (e) {
-      error = 'Не удалось обновить напоминания: $e';
+      error = tr("Не удалось обновить напоминания: {0}", [e]);
     } finally {
       _busy = false;
       if (error != previousError || scheduledCount != previousCount) {
@@ -446,7 +454,7 @@ class ReminderService {
         }
       }
     } catch (e) {
-      error = 'Уведомление не доставлено: $e';
+      error = tr("Уведомление не доставлено: {0}", [e]);
     } finally {
       _linuxBusy = false;
     }
@@ -458,7 +466,7 @@ class ReminderService {
     while (_busy || _linuxBusy) {
       if (DateTime.now().isAfter(deadline)) {
         throw StateError(
-          'Не удалось остановить уведомления. Повторите очистку.',
+          tr("Не удалось остановить уведомления. Повторите очистку."),
         );
       }
       await Future<void>.delayed(const Duration(milliseconds: 25));

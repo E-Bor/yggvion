@@ -13,6 +13,7 @@ import 'package:yggvion/data/encryption.dart';
 import 'package:yggvion/data/local_backup.dart';
 import 'package:yggvion/data/repository.dart';
 import 'package:yggvion/domain/workday.dart';
+import 'package:yggvion/l10n/strings.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -54,6 +55,29 @@ void main() {
       },
     );
   });
+  test(
+    'background archive validation reports errors in the device language',
+    () async {
+      await repo.setLanguage('en');
+      await repo.saveNoteContent(
+        'scratchpad',
+        '[Missing](attachment:${List.filled(64, 'a').join()})',
+      );
+      await expectLater(
+        backups.create(),
+        throwsA(
+          isA<StateError>().having(
+            (error) => error.message,
+            'localized error',
+            tr(
+              'Не все вложения загружены на устройство. Откройте синхронизацию и повторите создание копии.',
+            ),
+          ),
+        ),
+      );
+    },
+  );
+
   Future<String> decryptedArchive(String path) async {
     final wrapped = await PasswordConfig.readArchive(File(path));
     final key = await wrapped.config.unlock(password);

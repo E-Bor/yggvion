@@ -1,3 +1,4 @@
+import '../l10n/strings.dart';
 import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
@@ -71,7 +72,7 @@ class AppIconService extends ChangeNotifier with WidgetsBindingObserver {
       _applied = color;
       error = null;
     } catch (exception) {
-      error = 'Не удалось изменить системную иконку. Цвет темы сохранён.';
+      error = tr("Не удалось изменить системную иконку. Цвет темы сохранён.");
       debugPrint('App icon update failed: $exception');
     } finally {
       _busy = false;

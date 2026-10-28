@@ -29,6 +29,7 @@
 		33CC11132044BFA00003C045 /* MainFlutterWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 33CC11122044BFA00003C045 /* MainFlutterWindow.swift */; };
 		6AA4DA59346B011D157BAD42 /* Pods_RunnerTests.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = A4400F4002AACCAD8C3B2737 /* Pods_RunnerTests.framework */; };
 		70A80B9F870C645A3ED3E5F8 /* Pods_Runner.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 0016C540ECCB8C37F5583B9D /* Pods_Runner.framework */; };
+		E24A0A5F92CFB7A211D2EBEF /* InfoPlist.strings in Resources */ = {isa = PBXBuildFile; fileRef = DAFAC7FABDF60114C56B213C /* InfoPlist.strings */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -88,6 +89,12 @@
 		CD007B4B3013FBF42A53DB74 /* Pods-Runner.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-Runner.debug.xcconfig"; path = "Target Support Files/Pods-Runner/Pods-Runner.debug.xcconfig"; sourceTree = "<group>"; };
 		F8C1EDAA0FA3874ACE0CD5A1 /* Pods-RunnerTests.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-RunnerTests.debug.xcconfig"; path = "Target Support Files/Pods-RunnerTests/Pods-RunnerTests.debug.xcconfig"; sourceTree = "<group>"; };
 		F9E29E7942AB2DDAEE5D29C0 /* Pods-Runner.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-Runner.release.xcconfig"; path = "Target Support Files/Pods-Runner/Pods-Runner.release.xcconfig"; sourceTree = "<group>"; };
+		DC8020A3126CADE6E455A286 /* ru */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = "ru"; path = "Runner/ru.lproj/InfoPlist.strings"; sourceTree = "<group>"; };
+		E67F10BD2EE1AAEF6D60C1E8 /* en */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = "en"; path = "Runner/en.lproj/InfoPlist.strings"; sourceTree = "<group>"; };
+		092D60767CC0657BC7338E18 /* es */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = "es"; path = "Runner/es.lproj/InfoPlist.strings"; sourceTree = "<group>"; };
+		105BD4CE2D47464633A10FD7 /* de */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = "de"; path = "Runner/de.lproj/InfoPlist.strings"; sourceTree = "<group>"; };
+		94DCB921E794B5F9D4548B7E /* zh-Hans */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = "zh-Hans"; path = "Runner/zh-Hans.lproj/InfoPlist.strings"; sourceTree = "<group>"; };
+		3AE575D61911289F076B5C1D /* hi */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = "hi"; path = "Runner/hi.lproj/InfoPlist.strings"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -156,6 +163,7 @@
 				33CC10F22044A3C60003C045 /* Assets.xcassets */,
 				33CC10F42044A3C60003C045 /* MainMenu.xib */,
 				33CC10F72044A3C60003C045 /* Info.plist */,
+				DAFAC7FABDF60114C56B213C /* InfoPlist.strings */,
 			);
 			name = Resources;
 			path = ..;
@@ -288,6 +296,11 @@
 			developmentRegion = en;
 			hasScannedForEncodings = 0;
 			knownRegions = (
+				"ru",
+				"es",
+				"de",
+				"zh-Hans",
+				"hi",
 				en,
 				Base,
 			);
@@ -316,6 +329,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				33CC10F32044A3C60003C045 /* Assets.xcassets in Resources */,
+				E24A0A5F92CFB7A211D2EBEF /* InfoPlist.strings in Resources */,
 				33CC10F62044A3C60003C045 /* MainMenu.xib in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -466,6 +480,19 @@
 			);
 			name = MainMenu.xib;
 			path = Runner;
+			sourceTree = "<group>";
+		};
+		DAFAC7FABDF60114C56B213C /* InfoPlist.strings */ = {
+			isa = PBXVariantGroup;
+			children = (
+				DC8020A3126CADE6E455A286 /* ru */,
+				E67F10BD2EE1AAEF6D60C1E8 /* en */,
+				092D60767CC0657BC7338E18 /* es */,
+				105BD4CE2D47464633A10FD7 /* de */,
+				94DCB921E794B5F9D4548B7E /* zh-Hans */,
+				3AE575D61911289F076B5C1D /* hi */,
+			);
+			name = InfoPlist.strings;
 			sourceTree = "<group>";
 		};
 /* End PBXVariantGroup section */

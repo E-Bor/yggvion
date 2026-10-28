@@ -1,3 +1,4 @@
+import '../l10n/strings.dart';
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -108,9 +109,9 @@ class _SessionEditorState extends ConsumerState<SessionEditor> {
                     size: 22,
                   ),
                   const SizedBox(width: 10),
-                  const Expanded(
+                  Expanded(
                     child: Text(
-                      'Потраченное время',
+                      tr("Потраченное время"),
                       style: TextStyle(
                         fontSize: 18,
                         fontWeight: FontWeight.w600,
@@ -118,7 +119,7 @@ class _SessionEditorState extends ConsumerState<SessionEditor> {
                     ),
                   ),
                   IconButton(
-                    tooltip: 'Закрыть учёт времени',
+                    tooltip: tr("Закрыть учёт времени"),
                     onPressed: saving ? null : () => Navigator.pop(context),
                     icon: const Icon(Icons.close_rounded, size: 20),
                   ),
@@ -147,15 +148,19 @@ class _SessionEditorState extends ConsumerState<SessionEditor> {
                           error = null;
                         }),
                   icon: const Icon(Icons.done_all_rounded, size: 17),
-                  label: const Text('Затрекать всё доступное время'),
+                  label: Text(tr("Затрекать всё доступное время")),
                 ),
               ),
               Padding(
                 padding: const EdgeInsets.only(bottom: 12),
                 child: Text(
                   mobile
-                      ? 'Удерживайте и тяните, чтобы отметить время. Можно добавить несколько интервалов.'
-                      : 'Выделите один или несколько интервалов. Контур — план задачи.',
+                      ? tr(
+                          "Удерживайте и тяните, чтобы отметить время. Можно добавить несколько интервалов.",
+                        )
+                      : tr(
+                          "Выделите один или несколько интервалов. Контур — план задачи.",
+                        ),
                   style: TextStyle(
                     fontSize: 12,
                     color: context.palette.muted,
@@ -174,7 +179,7 @@ class _SessionEditorState extends ConsumerState<SessionEditor> {
                       final entry = entries[index];
                       return InputChip(
                         label: Text(
-                          '${DateFormat('d MMM, HH:mm', 'ru').format(tz.TZDateTime.from(entry.start, zone))} · ${formatDuration(entry.duration)}',
+                          '${DateFormat('d MMM, HH:mm', AppLocale.language).format(tz.TZDateTime.from(entry.start, zone))} · ${formatDuration(entry.duration)}',
                           style: const TextStyle(fontSize: 11),
                         ),
                         onPressed: () => setState(() {
@@ -238,7 +243,7 @@ class _SessionEditorState extends ConsumerState<SessionEditor> {
                           ),
                         ),
                         Text(
-                          'Пересечения считаются один раз',
+                          tr("Пересечения считаются один раз"),
                           style: TextStyle(
                             fontSize: 10,
                             color: context.palette.muted,
@@ -249,13 +254,13 @@ class _SessionEditorState extends ConsumerState<SessionEditor> {
                   ),
                   TextButton(
                     onPressed: saving ? null : () => Navigator.pop(context),
-                    child: const Text('Отмена'),
+                    child: Text(tr("Отмена")),
                   ),
                   const SizedBox(width: 6),
                   FilledButton(
                     key: const ValueKey('save-time-entries'),
                     onPressed: saving || entries.isEmpty ? null : save,
-                    child: const Text('ОК'),
+                    child: Text(tr("ОК")),
                   ),
                 ],
               ),

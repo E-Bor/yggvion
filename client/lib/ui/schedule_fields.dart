@@ -1,3 +1,4 @@
+import '../l10n/strings.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:timezone/timezone.dart' as tz;
@@ -35,7 +36,7 @@ class ScheduleFields extends StatelessWidget {
       );
   DateTime get visibleEnd => allDay ? civil(end, days: -1) : end;
   String dateLabel(DateTime value) =>
-      '${value.day}.${DateFormat('MMM', 'ru').format(value).replaceAll('.', '')}.${value.year}';
+      '${value.day}.${DateFormat('MMM', AppLocale.language).format(value).replaceAll('.', '')}.${value.year}';
 
   void changeStart(DateTime next) {
     final span = DateTime.utc(
@@ -131,28 +132,28 @@ class ScheduleFields extends StatelessWidget {
                   context,
                   'schedule-start-date',
                   dateLabel(start),
-                  'Дата начала',
+                  tr("Дата начала"),
                   () => date(context, true),
                 );
                 final lastDate = field(
                   context,
                   'schedule-end-date',
                   dateLabel(visibleEnd),
-                  'Дата окончания',
+                  tr("Дата окончания"),
                   () => date(context, false),
                 );
                 final firstTime = field(
                   context,
                   'schedule-start-time',
                   DateFormat('HH:mm').format(start),
-                  'Время начала',
+                  tr("Время начала"),
                   () => time(context, true),
                 );
                 final lastTime = field(
                   context,
                   'schedule-end-time',
                   DateFormat('HH:mm').format(end),
-                  'Время окончания',
+                  tr("Время окончания"),
                   () => time(context, false),
                 );
                 final dash = Text(
@@ -178,7 +179,7 @@ class ScheduleFields extends StatelessWidget {
                     if (!multipleDays)
                       IconButton(
                         key: const ValueKey('schedule-end-date'),
-                        tooltip: 'Выбрать дату окончания',
+                        tooltip: tr("Выбрать дату окончания"),
                         onPressed: () => date(context, false),
                         visualDensity: VisualDensity.compact,
                         icon: Icon(
@@ -208,7 +209,7 @@ class ScheduleFields extends StatelessWidget {
                           onChanged: (value) => toggleAllDay(value!),
                         ),
                       ),
-                      const Text('Весь день', style: TextStyle(fontSize: 12)),
+                      Text(tr("Весь день"), style: TextStyle(fontSize: 12)),
                     ],
                   ),
                 ),

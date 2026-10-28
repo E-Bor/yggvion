@@ -71,6 +71,24 @@ void main() {
   });
 
   test(
+    'language changes refresh lock-screen labels without changing time',
+    () async {
+      final task = await repo.createTask('My task');
+      await repo.toggleCalendarTimer(task);
+      await service.initialize();
+      await repo.setLanguage('de');
+      await service.refresh();
+      final state = publications.last['state'] as Map;
+      expect(state['title'], 'My task');
+      expect((state['labels'] as Map)['running'], 'In Arbeit');
+      expect((state['labels'] as Map)['minute'], 'Min.');
+      expect(state['elapsedMs'], 0);
+      expect(repo.snapshot.sessions, hasLength(1));
+      await repo.setLanguage('ru');
+    },
+  );
+
+  test(
     'background pause/resume/stop use tap times and survive unacknowledged replay',
     () async {
       final task = await repo.createTask('Доклад');

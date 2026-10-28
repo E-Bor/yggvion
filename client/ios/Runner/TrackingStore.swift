@@ -10,6 +10,7 @@ struct TrackingState: Codable, Equatable {
   var running: Bool
   var sessionIds: [String]
   var accent: UInt32
+  var labels: [String: String]? = nil
 
   func elapsed(at time: Int64) -> Int64 {
     max(0, elapsedMs) + (running ? max(0, time - updatedAtMs) : 0)

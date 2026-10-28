@@ -1,3 +1,4 @@
+import '../l10n/strings.dart';
 import 'dart:async';
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
@@ -17,12 +18,14 @@ import 'shortcuts.dart';
 import 'timer_control.dart';
 import 'calendar_sharing.dart';
 import 'notes.dart';
+import 'attachments.dart';
 import 'providers.dart';
 import 'settings.dart';
 import 'task_card.dart';
 import 'task_editor.dart';
 import 'theme.dart';
 import 'app_logo.dart';
+import 'interface_scale.dart';
 import 'server_settings.dart';
 
 class YggvionApp extends ConsumerWidget {
@@ -39,8 +42,15 @@ class YggvionApp extends ConsumerWidget {
         appProvider.select((repo) => repo.snapshot.settings.accentColor),
       ),
     ),
-    locale: const Locale('ru'),
-    supportedLocales: const [Locale('ru'), Locale('en')],
+    locale: Locale(ref.watch(appProvider.select((repo) => repo.language))),
+    supportedLocales: const [
+      Locale('ru'),
+      Locale('en'),
+      Locale('es'),
+      Locale('de'),
+      Locale('zh'),
+      Locale('hi'),
+    ],
     localizationsDelegates: GlobalMaterialLocalizations.delegates,
     builder: (context, child) => AnnotatedRegion<SystemUiOverlayStyle>(
       value:
@@ -59,7 +69,10 @@ class YggvionApp extends ConsumerWidget {
         onPointerSignal: (_) => ref.read(activityProvider)?.interact(),
         onPointerPanZoomStart: (_) => ref.read(activityProvider)?.interact(),
         onPointerPanZoomUpdate: (_) => ref.read(activityProvider)?.interact(),
-        child: child!,
+        child: InterfaceScale(
+          scale: ref.watch(appProvider.select((repo) => repo.interfaceScale)),
+          child: child!,
+        ),
       ),
     ),
     home: const Workspace(),
@@ -92,12 +105,12 @@ class _WorkspaceState extends ConsumerState<Workspace>
   double? sidebarWidth, sidebarDragOrigin, sidebarDragWidth;
   bool sidebarEdgeHovered = false;
   String? runtimeError;
-  static const labels = [
-    'Сегодня',
-    'Планировщик',
-    'Канбан',
-    'Заметки',
-    'Настройки',
+  static List<String> get labels => [
+    tr("Сегодня"),
+    tr("Планировщик"),
+    tr("Канбан"),
+    tr("Заметки"),
+    tr("Настройки"),
   ];
   static const icons = [
     Icons.wb_sunny_outlined,
@@ -148,8 +161,9 @@ class _WorkspaceState extends ConsumerState<Workspace>
             onError: (Object error) {
               if (mounted && error is! MissingPluginException) {
                 setState(
-                  () => runtimeError =
-                      'Не удалось открыть приглашение. Вставьте ссылку в разделе «Синхронизация».',
+                  () => runtimeError = tr(
+                    "Не удалось открыть приглашение. Вставьте ссылку в разделе «Синхронизация».",
+                  ),
                 );
               }
             },
@@ -175,7 +189,9 @@ class _WorkspaceState extends ConsumerState<Workspace>
       if (mounted) setState(() => runtimeError = null);
     } catch (e) {
       if (mounted) {
-        setState(() => runtimeError = 'Не удалось обновить календарь: $e');
+        setState(
+          () => runtimeError = tr("Не удалось обновить календарь: {0}", [e]),
+        );
       }
     }
   }
@@ -274,7 +290,7 @@ class _WorkspaceState extends ConsumerState<Workspace>
 
   @override
   Widget build(BuildContext context) {
-    final repo = ref.watch(appProvider), size = MediaQuery.sizeOf(context);
+    final repo = ref.watch(appProvider);
     ref.listen(openNoteProvider, (_, id) {
       if (id == null) return;
       FocusManager.instance.primaryFocus?.unfocus();
@@ -296,7 +312,7 @@ class _WorkspaceState extends ConsumerState<Workspace>
         setState(() => projectId = '');
       }
     });
-    final desktop = size.width >= 1000;
+    final desktop = !usesMobileLayout(context);
     final conflicts =
         repo.conflictCount +
         sessionConflicts(repo.snapshot.sessions, repo.now()).length;
@@ -376,7 +392,7 @@ class _WorkspaceState extends ConsumerState<Workspace>
                           actions: [
                             TextButton(
                               onPressed: refresh,
-                              child: const Text('Повторить'),
+                              child: Text(tr("Повторить")),
                             ),
                           ],
                         ),
@@ -391,7 +407,10 @@ class _WorkspaceState extends ConsumerState<Workspace>
                             ),
                             color: context.palette.pink.withValues(alpha: .1),
                             child: Text(
-                              'Есть изменения с разных устройств ($conflicts) · Выбрать или объединить',
+                              tr(
+                                "Есть изменения с разных устройств ({0}) · Выбрать или объединить",
+                                [conflicts],
+                              ),
                               style: TextStyle(
                                 color: context.palette.pink,
                                 fontSize: 12,
@@ -453,6 +472,9 @@ class _WorkspaceState extends ConsumerState<Workspace>
               ? null
               : NavigationBar(
                   height: 68,
+                  labelBehavior: MediaQuery.sizeOf(context).width < 330
+                      ? NavigationDestinationLabelBehavior.alwaysHide
+                      : NavigationDestinationLabelBehavior.alwaysShow,
                   selectedIndex: mobilePages.indexOf(
                     page == PageKind.settings ? PageKind.today : page,
                   ),
@@ -478,7 +500,7 @@ class _WorkspaceState extends ConsumerState<Workspace>
                   children: [
                     _MobileCreateButton(
                       key: const ValueKey('create-event'),
-                      label: 'Событие',
+                      label: tr("Событие"),
                       icon: Icons.event_outlined,
                       primary: true,
                       onPressed: () => guard(context, () => openTask(context)),
@@ -486,7 +508,7 @@ class _WorkspaceState extends ConsumerState<Workspace>
                     const SizedBox(height: 12),
                     _MobileCreateButton(
                       key: const ValueKey('create-note'),
-                      label: 'Заметка',
+                      label: tr("Заметка"),
                       icon: Icons.note_add_outlined,
                       onPressed: () => guard(context, createNote),
                     ),
@@ -530,7 +552,9 @@ class _WorkspaceState extends ConsumerState<Workspace>
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  birthdays ? 'Дни рождения' : labels[page.index],
+                  birthdays ? tr("Дни рождения") : labels[page.index],
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                   style: TextStyle(
                     fontSize: desktop ? 26 : 22,
                     fontWeight: FontWeight.w600,
@@ -540,8 +564,8 @@ class _WorkspaceState extends ConsumerState<Workspace>
                 if (desktop && page == PageKind.settings)
                   Text(
                     birthdays
-                        ? 'Настройки · Близкие люди и важные даты'
-                        : 'Ваше рабочее пространство',
+                        ? tr("Настройки · Близкие люди и важные даты")
+                        : tr("Ваше рабочее пространство"),
                     style: TextStyle(
                       color: context.palette.muted,
                       fontSize: 12,
@@ -556,12 +580,12 @@ class _WorkspaceState extends ConsumerState<Workspace>
                   key: const ValueKey('add-birthday'),
                   onPressed: () => editBirthday(context),
                   icon: const Icon(Icons.add_rounded, size: 18),
-                  label: const Text('Добавить день рождения'),
+                  label: Text(tr("Добавить день рождения")),
                 )
               else
                 IconButton.filledTonal(
                   key: const ValueKey('add-birthday'),
-                  tooltip: 'Добавить день рождения',
+                  tooltip: tr("Добавить день рождения"),
                   onPressed: () => editBirthday(context),
                   icon: const Icon(Icons.add_rounded, size: 22),
                 ),
@@ -572,7 +596,7 @@ class _WorkspaceState extends ConsumerState<Workspace>
                   page != PageKind.notes &&
                   repo.snapshot.projects.isNotEmpty)
                 PopupMenuButton<String>(
-                  tooltip: 'Фильтр проектов',
+                  tooltip: tr("Фильтр проектов"),
                   icon: Icon(
                     Icons.filter_list_rounded,
                     color: projectId.isEmpty
@@ -581,7 +605,7 @@ class _WorkspaceState extends ConsumerState<Workspace>
                   ),
                   onSelected: (value) => setState(() => projectId = value),
                   itemBuilder: (_) => [
-                    const PopupMenuItem(value: '', child: Text('Все проекты')),
+                    PopupMenuItem(value: '', child: Text(tr("Все проекты"))),
                     for (final project in repo.snapshot.projects)
                       PopupMenuItem(
                         value: project.id,
@@ -593,19 +617,29 @@ class _WorkspaceState extends ConsumerState<Workspace>
                   ref.read(syncProvider).connected)
                 IconButton(
                   key: const ValueKey('share-calendar'),
-                  tooltip: 'Поделиться календарём',
+                  tooltip: tr("Поделиться календарём"),
                   onPressed: () => shareCalendar(context),
                   icon: const Icon(Icons.ios_share_rounded, size: 20),
                 ),
+              if (!desktop && page == PageKind.notes)
+                IconButton(
+                  key: const ValueKey('mobile-notes-attachments'),
+                  tooltip: tr("Вложения"),
+                  onPressed: () {
+                    FocusManager.instance.primaryFocus?.unfocus();
+                    openAttachments(context);
+                  },
+                  icon: const Icon(Icons.attach_file_rounded, size: 21),
+                ),
               TimerControl(compact: !wide),
               IconButton(
-                tooltip: 'Поиск · ⌘F / Ctrl+F',
+                tooltip: tr("Поиск · ⌘F / Ctrl+F"),
                 onPressed: search,
                 icon: const Icon(Icons.search_rounded),
               ),
               if (!desktop)
                 IconButton(
-                  tooltip: 'Настройки',
+                  tooltip: tr("Настройки"),
                   onPressed: () => go(PageKind.settings),
                   icon: const Icon(Icons.tune_rounded),
                 ),
@@ -615,11 +649,11 @@ class _WorkspaceState extends ConsumerState<Workspace>
                   OutlinedButton.icon(
                     onPressed: createNote,
                     icon: const Icon(Icons.note_add_outlined, size: 17),
-                    label: const Text('Заметка'),
+                    label: Text(tr("Заметка")),
                   )
                 else
                   IconButton(
-                    tooltip: 'Создать заметку',
+                    tooltip: tr("Создать заметку"),
                     onPressed: createNote,
                     icon: const Icon(Icons.note_add_outlined, size: 20),
                   ),
@@ -628,19 +662,43 @@ class _WorkspaceState extends ConsumerState<Workspace>
                   FilledButton.icon(
                     onPressed: () => openTask(context),
                     icon: const Icon(Icons.add_rounded, size: 18),
-                    label: const Text('Задача'),
+                    label: Text(tr("Задача")),
                   )
                 else
                   IconButton.filled(
-                    tooltip: 'Создать задачу',
+                    tooltip: tr("Создать задачу"),
                     onPressed: () => openTask(context),
                     icon: const Icon(Icons.add_rounded, size: 20),
                   ),
               ],
             ];
+      final narrow = !desktop && constraints.maxWidth < 330;
+      final heading = Row(
+        children: [
+          if (birthdays || (!desktop && page == PageKind.settings))
+            IconButton(
+              key: birthdays ? const ValueKey('back-from-birthdays') : null,
+              tooltip: birthdays ? tr("К настройкам") : tr("К календарю"),
+              onPressed: birthdays
+                  ? () => setState(() => birthdaysOpen = false)
+                  : () => go(PageKind.today),
+              icon: const Icon(Icons.arrow_back_rounded),
+            ),
+          Expanded(
+            child: home && desktop
+                ? toolbar
+                : !desktop && page == PageKind.planner
+                ? plannerSwitcher(compact: constraints.maxWidth < 420)
+                : title,
+          ),
+          if (!narrow) ...[const SizedBox(width: 8), ...actions],
+        ],
+      );
       return Container(
         key: const ValueKey('workspace-header'),
-        height: home && !desktop
+        height: narrow
+            ? (home ? 136 : 88)
+            : home && !desktop
             ? 108
             : desktop
             ? 78
@@ -648,26 +706,16 @@ class _WorkspaceState extends ConsumerState<Workspace>
         padding: EdgeInsets.symmetric(horizontal: desktop ? 24 : 12),
         child: Column(
           children: [
-            Expanded(
-              child: Row(
-                children: [
-                  if (birthdays || (!desktop && page == PageKind.settings))
-                    IconButton(
-                      key: birthdays
-                          ? const ValueKey('back-from-birthdays')
-                          : null,
-                      tooltip: birthdays ? 'К настройкам' : 'К календарю',
-                      onPressed: birthdays
-                          ? () => setState(() => birthdaysOpen = false)
-                          : () => go(PageKind.today),
-                      icon: const Icon(Icons.arrow_back_rounded),
-                    ),
-                  Expanded(child: home && desktop ? toolbar : title),
-                  const SizedBox(width: 12),
-                  ...actions,
-                ],
+            Expanded(child: heading),
+            if (narrow)
+              SizedBox(
+                height: 40,
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  alignment: Alignment.centerRight,
+                  child: Row(mainAxisSize: MainAxisSize.min, children: actions),
+                ),
               ),
-            ),
             if (home && !desktop)
               Padding(
                 padding: const EdgeInsets.only(bottom: 8),
@@ -825,7 +873,7 @@ class _WorkspaceState extends ConsumerState<Workspace>
                     Padding(
                       padding: EdgeInsets.symmetric(horizontal: 26),
                       child: Text(
-                        'ПРОЕКТЫ',
+                        tr("ПРОЕКТЫ"),
                         style: TextStyle(
                           fontSize: 10,
                           letterSpacing: 1.7,
@@ -901,8 +949,8 @@ class _WorkspaceState extends ConsumerState<Workspace>
                           TextButton.icon(
                             onPressed: () => go(PageKind.settings),
                             icon: const Icon(Icons.add_rounded, size: 14),
-                            label: const Text(
-                              'Добавить проект',
+                            label: Text(
+                              tr("Добавить проект"),
                               style: TextStyle(fontSize: 12),
                             ),
                           ),
@@ -912,14 +960,14 @@ class _WorkspaceState extends ConsumerState<Workspace>
                   navigation(PageKind.settings.index),
                   if (collapsed) ...[
                     IconButton(
-                      tooltip: 'Клавиши · F1',
+                      tooltip: tr("Клавиши · F1"),
                       onPressed: () => showShortcutHelp(context),
                       icon: const Icon(Icons.keyboard_outlined, size: 20),
                     ),
                     Padding(
                       padding: const EdgeInsets.symmetric(vertical: 20),
                       child: Tooltip(
-                        message: repo.syncError ?? repo.syncStatus,
+                        message: repo.syncError ?? tr(repo.syncStatus),
                         child: Icon(
                           repo.syncError == null
                               ? Icons.cloud_done_outlined
@@ -945,8 +993,8 @@ class _WorkspaceState extends ConsumerState<Workspace>
                             contentPadding: const EdgeInsets.symmetric(
                               horizontal: 12,
                             ),
-                            title: const Text(
-                              'Клавиши',
+                            title: Text(
+                              tr("Клавиши"),
                               style: TextStyle(fontSize: 12),
                             ),
                             trailing: Text(
@@ -962,7 +1010,7 @@ class _WorkspaceState extends ConsumerState<Workspace>
                           Tooltip(
                             message:
                                 repo.syncError ??
-                                'Данные сохранены на устройстве',
+                                tr("Данные сохранены на устройстве"),
                             child: Row(
                               children: [
                                 Icon(
@@ -975,7 +1023,7 @@ class _WorkspaceState extends ConsumerState<Workspace>
                                 const SizedBox(width: 7),
                                 Expanded(
                                   child: Text(
-                                    repo.syncStatus,
+                                    tr(repo.syncStatus),
                                     style: TextStyle(
                                       fontSize: 10,
                                       color: context.palette.muted,
@@ -1000,16 +1048,18 @@ class _WorkspaceState extends ConsumerState<Workspace>
             right: 0,
             width: 10,
             child: Semantics(
-              label: 'Ширина бокового меню',
-              value: collapsed ? 'Свёрнуто' : 'Развёрнуто',
-              increasedValue: 'Развёрнуто',
-              decreasedValue: 'Свёрнуто',
+              label: tr("Ширина бокового меню"),
+              value: collapsed ? tr("Свёрнуто") : tr("Развёрнуто"),
+              increasedValue: tr("Развёрнуто"),
+              decreasedValue: tr("Свёрнуто"),
               onIncrease: () =>
                   guard(context, () => repo.setSidebarCollapsed(false)),
               onDecrease: () =>
                   guard(context, () => repo.setSidebarCollapsed(true)),
               child: Tooltip(
-                message: 'Потяните границу, чтобы свернуть или развернуть меню',
+                message: tr(
+                  "Потяните границу, чтобы свернуть или развернуть меню",
+                ),
                 child: MouseRegion(
                   cursor: SystemMouseCursors.resizeLeftRight,
                   onEnter: (_) => setState(() => sidebarEdgeHovered = true),
@@ -1082,6 +1132,54 @@ class _WorkspaceState extends ConsumerState<Workspace>
     );
   }
 
+  Widget plannerSwitcher({required bool compact}) {
+    if (compact) {
+      return PopupMenuButton<bool>(
+        key: const ValueKey('planner-mode'),
+        tooltip: tr("Раздел планировщика"),
+        initialValue: mobileTasks,
+        onSelected: (value) => setState(() => mobileTasks = value),
+        itemBuilder: (_) => [
+          PopupMenuItem(value: true, child: Text(tr("Задачи"))),
+          PopupMenuItem(value: false, child: Text(tr("Календарь"))),
+        ],
+        child: Row(
+          children: [
+            Flexible(
+              child: Text(
+                mobileTasks ? tr("Задачи") : tr("Календарь"),
+                style: const TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+            const Icon(Icons.expand_more_rounded, size: 18),
+          ],
+        ),
+      );
+    }
+    return SegmentedButton<bool>(
+      key: const ValueKey('planner-mode'),
+      showSelectedIcon: false,
+      style: SegmentedButton.styleFrom(
+        visualDensity: VisualDensity.compact,
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+        minimumSize: Size.zero,
+        textStyle: Theme.of(
+          context,
+        ).textTheme.labelLarge?.copyWith(fontSize: 12),
+        side: BorderSide(color: context.palette.border, width: .6),
+      ),
+      segments: [
+        ButtonSegment(value: true, label: Text(tr("Задачи"))),
+        ButtonSegment(value: false, label: Text(tr("Календарь"))),
+      ],
+      selected: {mobileTasks},
+      onSelectionChanged: (value) => setState(() => mobileTasks = value.single),
+    );
+  }
+
   Widget _planner(bool desktop) {
     final repo = ref.watch(appProvider);
     final currentSelection = selected == null
@@ -1110,11 +1208,18 @@ class _WorkspaceState extends ConsumerState<Workspace>
             children: [
               Row(
                 children: [
-                  const Text(
-                    'Без расписания',
-                    style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
+                  Expanded(
+                    child: Text(
+                      tr("Без расписания"),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
                   ),
-                  const Spacer(),
+                  const SizedBox(width: 8),
                   Text(
                     '${tasks.length}',
                     style: TextStyle(color: context.palette.muted),
@@ -1124,8 +1229,8 @@ class _WorkspaceState extends ConsumerState<Workspace>
               const SizedBox(height: 12),
               TextField(
                 onChanged: (v) => setState(() => query = v),
-                decoration: const InputDecoration(
-                  hintText: 'Найти задачу',
+                decoration: InputDecoration(
+                  hintText: tr("Найти задачу"),
                   prefixIcon: Icon(Icons.search_rounded, size: 18),
                   isDense: true,
                 ),
@@ -1136,10 +1241,10 @@ class _WorkspaceState extends ConsumerState<Workspace>
         const Divider(),
         Expanded(
           child: tasks.isEmpty
-              ? const EmptyState(
+              ? EmptyState(
                   icon: Icons.event_available_rounded,
-                  title: 'Всё на своих местах',
-                  subtitle: 'Создайте задачу или снимите фильтр',
+                  title: tr("Всё на своих местах"),
+                  subtitle: tr("Создайте задачу или снимите фильтр"),
                 )
               : ListView.builder(
                   padding: const EdgeInsets.all(12),
@@ -1157,7 +1262,9 @@ class _WorkspaceState extends ConsumerState<Workspace>
                           Padding(
                             padding: const EdgeInsets.fromLTRB(4, 2, 4, 12),
                             child: Text(
-                              'Предложения · ${tasks.where((t) => t.isProposed).length}',
+                              tr("Предложения · {0}", [
+                                tasks.where((t) => t.isProposed).length,
+                              ]),
                               style: TextStyle(
                                 fontSize: 12,
                                 fontWeight: FontWeight.w600,
@@ -1171,7 +1278,7 @@ class _WorkspaceState extends ConsumerState<Workspace>
                           Padding(
                             padding: const EdgeInsets.fromLTRB(4, 10, 4, 12),
                             child: Text(
-                              'Ваши задачи',
+                              tr("Ваши задачи"),
                               style: TextStyle(
                                 fontSize: 12,
                                 color: context.palette.muted,
@@ -1224,12 +1331,12 @@ class _WorkspaceState extends ConsumerState<Workspace>
                 const SizedBox(width: 9),
                 Expanded(
                   child: Text(
-                    'Выберите время: ${currentSelection.title}',
+                    tr("Выберите время: {0}", [currentSelection.title]),
                     style: TextStyle(fontSize: 12, color: context.accentColor),
                   ),
                 ),
                 IconButton(
-                  tooltip: 'Отменить выбор',
+                  tooltip: tr("Отменить выбор"),
                   onPressed: () => setState(() => selected = null),
                   icon: const Icon(Icons.close_rounded, size: 16),
                 ),
@@ -1272,7 +1379,7 @@ class _WorkspaceState extends ConsumerState<Workspace>
                     PanelDivider(
                       key: const ValueKey('planner-calendar-divider'),
                       axis: Axis.vertical,
-                      label: 'Размер списка задач и календаря',
+                      label: tr("Размер списка задач и календаря"),
                       onDelta: (delta) => setState(
                         () => plannerFraction = (fraction + delta / width)
                             .clamp(minimum, maximum),
@@ -1288,29 +1395,9 @@ class _WorkspaceState extends ConsumerState<Workspace>
                 );
               },
             )
-          : Column(
-              children: [
-                SegmentedButton<bool>(
-                  segments: const [
-                    ButtonSegment(
-                      value: true,
-                      label: Text('Задачи'),
-                      icon: Icon(Icons.list_rounded),
-                    ),
-                    ButtonSegment(
-                      value: false,
-                      label: Text('Календарь'),
-                      icon: Icon(Icons.calendar_today_outlined),
-                    ),
-                  ],
-                  selected: {mobileTasks},
-                  onSelectionChanged: (s) =>
-                      setState(() => mobileTasks = s.first),
-                ),
-                const SizedBox(height: 14),
-                Expanded(child: mobileTasks ? list : calendar),
-              ],
-            ),
+          : mobileTasks
+          ? list
+          : calendar,
     );
   }
 
@@ -1403,7 +1490,7 @@ class _WorkspaceState extends ConsumerState<Workspace>
                                         key: const ValueKey(
                                           'board-done-period',
                                         ),
-                                        tooltip: 'Период завершённых задач',
+                                        tooltip: tr("Период завершённых задач"),
                                         initialValue: boardDoneDays,
                                         onSelected: (days) => setState(() {
                                           boardDoneDays = days;
@@ -1416,8 +1503,10 @@ class _WorkspaceState extends ConsumerState<Workspace>
                                               checked: boardDoneDays == days,
                                               child: Text(
                                                 days == 0
-                                                    ? 'Вся история'
-                                                    : 'Последние $days дней',
+                                                    ? tr("Вся история")
+                                                    : tr("Последние {0} дней", [
+                                                        days,
+                                                      ]),
                                               ),
                                             ),
                                         ],
@@ -1431,8 +1520,10 @@ class _WorkspaceState extends ConsumerState<Workspace>
                                             children: [
                                               Text(
                                                 boardDoneDays == 0
-                                                    ? 'Всё время'
-                                                    : '$boardDoneDays дней',
+                                                    ? tr("Всё время")
+                                                    : tr("{0} дней", [
+                                                        boardDoneDays,
+                                                      ]),
                                                 style: TextStyle(
                                                   fontSize: 11,
                                                   color: context.palette.muted,
@@ -1470,8 +1561,13 @@ class _WorkspaceState extends ConsumerState<Workspace>
                                       padding: const EdgeInsets.all(20),
                                       child: Text(
                                         boardDoneDays == 0
-                                            ? 'Здесь появятся завершённые задачи.'
-                                            : 'За последние $boardDoneDays дней нет завершённых задач. Более ранние доступны в истории.',
+                                            ? tr(
+                                                "Здесь появятся завершённые задачи.",
+                                              )
+                                            : tr(
+                                                "За последние {0} дней нет завершённых задач. Более ранние доступны в истории.",
+                                                [boardDoneDays],
+                                              ),
                                         textAlign: TextAlign.center,
                                         style: TextStyle(
                                           fontSize: 12,
@@ -1501,7 +1597,10 @@ class _WorkspaceState extends ConsumerState<Workspace>
                                           child: Column(
                                             children: [
                                               Text(
-                                                'Показано $visibleCount из ${tasks.length}',
+                                                tr("Показано {0} из {1}", [
+                                                  visibleCount,
+                                                  tasks.length,
+                                                ]),
                                                 style: TextStyle(
                                                   fontSize: 11,
                                                   color: context.palette.muted,
@@ -1516,7 +1615,9 @@ class _WorkspaceState extends ConsumerState<Workspace>
                                                   () => boardDoneLimit += 50,
                                                 ),
                                                 child: Text(
-                                                  'Показать ещё ${math.min(50, more)}',
+                                                  tr("Показать ещё {0}", [
+                                                    math.min(50, more),
+                                                  ]),
                                                 ),
                                               ),
                                             ],
@@ -1558,7 +1659,7 @@ class _MobileCreateButton extends StatelessWidget {
     height: 64,
     child: FloatingActionButton(
       heroTag: 'create-$label',
-      tooltip: 'Создать: $label',
+      tooltip: tr("Создать: {0}", [label]),
       onPressed: onPressed,
       elevation: 0,
       focusElevation: 0,
@@ -1635,12 +1736,12 @@ class _SearchDialogState extends ConsumerState<SearchDialog> {
   String searchHint(int tolerance) {
     final words = searchWords(query);
     if (words.length == 1 && words.single.runes.length == 1) {
-      return 'Одна буква — точный поиск';
+      return tr("Одна буква — точный поиск");
     }
     return switch (tolerance) {
-      0 => 'Точное совпадение · настройки → точность поиска',
-      1 => 'Допуск: 1 опечатка в слове',
-      _ => 'Допуск: 2 опечатки в слове',
+      0 => tr("Точное совпадение · настройки → точность поиска"),
+      1 => tr("Допуск: 1 опечатка в слове"),
+      _ => tr("Допуск: 2 опечатки в слове"),
     };
   }
 
@@ -1662,8 +1763,8 @@ class _SearchDialogState extends ConsumerState<SearchDialog> {
             child: TextField(
               autofocus: true,
               onChanged: find,
-              decoration: const InputDecoration(
-                hintText: 'Поиск по задачам, описаниям и заметкам',
+              decoration: InputDecoration(
+                hintText: tr("Поиск по задачам, описаниям и заметкам"),
                 prefixIcon: Icon(Icons.search_rounded),
               ),
             ),
@@ -1689,13 +1790,17 @@ class _SearchDialogState extends ConsumerState<SearchDialog> {
                 ? EmptyState(
                     icon: Icons.search_rounded,
                     title: busy
-                        ? 'Ищем…'
+                        ? tr("Ищем…")
                         : query.trim().isEmpty
-                        ? 'Найдётся даже прошлое'
-                        : 'Ничего не найдено',
+                        ? tr("Найдётся даже прошлое")
+                        : tr("Ничего не найдено"),
                     subtitle: query.trim().isEmpty
-                        ? 'Можно начать с одной буквы.\nПоиск работает без интернета.'
-                        : 'Попробуйте другое слово или увеличьте\nдопуск ошибок в настройках.',
+                        ? tr(
+                            "Можно начать с одной буквы.\nПоиск работает без интернета.",
+                          )
+                        : tr(
+                            "Попробуйте другое слово или увеличьте\nдопуск ошибок в настройках.",
+                          ),
                   )
                 : ListView.builder(
                     itemCount: results.length,

@@ -1,3 +1,4 @@
+import '../l10n/strings.dart';
 import 'dart:convert';
 import 'dart:io';
 import 'package:crypto/crypto.dart';
@@ -42,7 +43,7 @@ class ServerInstaller {
           current?.host != host ||
           current?.port != httpsPort) {
         throw StateError(
-          'Обновлять и очищать можно только подключённый сервер.',
+          tr("Обновлять и очищать можно только подключённый сервер."),
         );
       }
     }
@@ -51,14 +52,16 @@ class ServerInstaller {
         sshPort > 65535 ||
         httpsPort < 1 ||
         httpsPort > 65535) {
-      throw ArgumentError('Укажите IP-адрес и корректные порты');
+      throw ArgumentError(tr("Укажите IP-адрес и корректные порты"));
     }
-    if (user.trim().isEmpty) throw ArgumentError('Укажите SSH-пользователя');
+    if (user.trim().isEmpty) {
+      throw ArgumentError(tr("Укажите SSH-пользователя"));
+    }
     _cancelled = false;
     final hostKey = 'ssh_host_${host}_$sshPort';
     final known = await sync.credentials.read(key: hostKey);
     String? accepted;
-    onStatus('Проверяем подлинность сервера');
+    onStatus(tr("Проверяем подлинность сервера"));
     final socket = await SSHSocket.connect(
       host,
       sshPort,
@@ -66,7 +69,7 @@ class ServerInstaller {
     );
     if (_cancelled) {
       socket.close();
-      throw StateError('Установка отменена');
+      throw StateError(tr("Установка отменена"));
     }
     final ssh = SSHClient(
       socket,
@@ -97,7 +100,9 @@ class ServerInstaller {
             .timeout(const Duration(minutes: 15));
         if (result.exitCode != 0) {
           throw StateError(
-            'Установка остановлена: ${utf8.decode(result.stderr, allowMalformed: true).trim()}',
+            tr("Установка остановлена: {0}", [
+              utf8.decode(result.stderr, allowMalformed: true).trim(),
+            ]),
           );
         }
         return utf8.decode(result.stdout).trim();
@@ -106,11 +111,11 @@ class ServerInstaller {
       Map<String, dynamic>? artifact;
       Uint8List? bytes;
       if (operation != ServerOperation.uninstall) {
-        onStatus('Определяем архитектуру VPS');
+        onStatus(tr("Определяем архитектуру VPS"));
         final arch = switch (await run('uname -m')) {
           'x86_64' => 'amd64',
           'aarch64' => 'arm64',
-          _ => throw StateError('Поддерживаются VPS x86_64 и ARM64'),
+          _ => throw StateError(tr("Поддерживаются VPS x86_64 и ARM64")),
         };
         final manifest =
             jsonDecode(
@@ -122,14 +127,14 @@ class ServerInstaller {
           'assets/server/${artifact['file']}',
         )).buffer.asUint8List();
         if (sha256.convert(bytes).toString() != artifact['sha256']) {
-          throw StateError('Установочный файл повреждён');
+          throw StateError(tr("Установочный файл повреждён"));
         }
       }
       temporary = await run('mktemp -d /tmp/yggvion-install.XXXXXXXX');
       if (!RegExp(
         r'^/tmp/yggvion-install\.[A-Za-z0-9]+$',
       ).hasMatch(temporary)) {
-        throw StateError('Некорректный временный каталог');
+        throw StateError(tr("Некорректный временный каталог"));
       }
       final sftp = await ssh.sftp();
       Future<void> upload(String name, Uint8List data) async {
@@ -147,7 +152,7 @@ class ServerInstaller {
         }
       }
 
-      onStatus('Передаём сервер по защищённому соединению');
+      onStatus(tr("Передаём сервер по защищённому соединению"));
       if (bytes != null) await upload('yggvion', bytes);
       final script = operation == ServerOperation.uninstall
           ? 'uninstall.sh'
@@ -159,9 +164,9 @@ class ServerInstaller {
         ),
       );
       onStatus(switch (operation) {
-        ServerOperation.install => 'Устанавливаем сервис и сертификат',
-        ServerOperation.update => 'Обновляем сервер и применяем миграции',
-        ServerOperation.uninstall => 'Удаляем сервер',
+        ServerOperation.install => tr("Устанавливаем сервис и сертификат"),
+        ServerOperation.update => tr("Обновляем сервер и применяем миграции"),
+        ServerOperation.uninstall => tr("Удаляем сервер"),
       });
       final command = operation == ServerOperation.uninstall
           ? 'sh ${quote('$temporary/install.sh')} ${deleteData ? 'purge DELETE-YGGVION' : 'keep-data'}'
@@ -181,7 +186,7 @@ class ServerInstaller {
         await session.done;
         if (session.exitCode != 0) {
           throw StateError(
-            'Операция через sudo остановлена: ${outputs[1].trim()}',
+            tr("Операция через sudo остановлена: {0}", [outputs[1].trim()]),
           );
         }
         output = outputs.first;
@@ -190,13 +195,13 @@ class ServerInstaller {
         await sync.disconnect();
         onStatus(
           deleteData
-              ? 'Сервер и его данные удалены. Локальные данные сохранены.'
-              : 'Сервер удалён. База и файлы сохранены на VPS.',
+              ? tr("Сервер и его данные удалены. Локальные данные сохранены.")
+              : tr("Сервер удалён. База и файлы сохранены на VPS."),
         );
         return;
       }
       if (operation == ServerOperation.update) {
-        onStatus('Сервер обновлён. Данные и подключения сохранены.');
+        onStatus(tr("Сервер обновлён. Данные и подключения сохранены."));
         await sync.sync();
         return;
       }
@@ -205,7 +210,7 @@ class ServerInstaller {
           .where((line) => line.startsWith('{'))
           .map((line) => jsonDecode(line) as Map<String, dynamic>)
           .last;
-      onStatus('Подключаем это устройство');
+      onStatus(tr("Подключаем это устройство"));
       final url = Uri(scheme: 'https', host: host, port: httpsPort).toString();
       await sync.pair(
         url,
@@ -213,7 +218,7 @@ class ServerInstaller {
         deviceName,
         privateCA: payload['private_ca'] as String,
       );
-      onStatus('Сервер готов. Сертификат продлевается автоматически.');
+      onStatus(tr("Сервер готов. Сертификат продлевается автоматически."));
     } finally {
       if (temporary != null && !_cancelled) {
         try {

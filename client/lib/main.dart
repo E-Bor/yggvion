@@ -1,3 +1,4 @@
+import 'l10n/strings.dart';
 import 'package:flutter/material.dart';
 import 'package:app_links/app_links.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -20,7 +21,7 @@ import 'ui/theme.dart';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   timezone.initializeTimeZones();
-  await initializeDateFormatting('ru');
+  await initializeDateFormatting();
   try {
     final localZone = await FlutterTimezone.getLocalTimezone();
     final repo = Repository(await LocalDatabase.open());
@@ -88,7 +89,7 @@ Future<void> main() async {
             child: Padding(
               padding: const EdgeInsets.all(32),
               child: SelectableText(
-                'Не удалось открыть рабочее пространство.\n\n$error',
+                tr("Не удалось открыть рабочее пространство.\n\n{0}", [error]),
               ),
             ),
           ),
@@ -112,8 +113,8 @@ Widget _resetScreen({Object? error, Future<void> Function()? retry}) =>
                 const SizedBox(height: 24),
                 Text(
                   error == null
-                      ? 'Очищаем хранилище…'
-                      : 'Не удалось завершить очистку',
+                      ? tr("Очищаем хранилище…")
+                      : tr("Не удалось завершить очистку"),
                   textAlign: TextAlign.center,
                 ),
                 if (error != null) ...[
@@ -122,7 +123,7 @@ Widget _resetScreen({Object? error, Future<void> Function()? retry}) =>
                   const SizedBox(height: 24),
                   FilledButton(
                     onPressed: retry,
-                    child: const Text('Повторить очистку'),
+                    child: Text(tr("Повторить очистку")),
                   ),
                 ],
               ],

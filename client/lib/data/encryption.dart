@@ -1,3 +1,4 @@
+import '../l10n/strings.dart';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:isolate';
@@ -14,7 +15,7 @@ part 'password.dart';
 /// deliberately excludes server-assigned versions/sequence numbers.
 class WorkspaceKey {
   WorkspaceKey(List<int> bytes) : _bytes = Uint8List.fromList(bytes) {
-    if (_bytes.length != 32) throw const FormatException('Неверный ключ');
+    if (_bytes.length != 32) throw FormatException(tr("Неверный ключ"));
   }
 
   final Uint8List _bytes;
@@ -65,7 +66,7 @@ class WorkspaceKey {
     );
     if (plaintext.length > 2 * 1024 * 1024 - 16) {
       throw StateError(
-        'Запись слишком большая для синхронизации (максимум 2 МБ)',
+        tr("Запись слишком большая для синхронизации (максимум 2 МБ)"),
       );
     }
     final box = await AesGcm.with256bits().encrypt(
@@ -94,14 +95,14 @@ class WorkspaceKey {
   ) async {
     final e = wire.data;
     if (e['e2ee'] != 1 || e['key_id'] != id) {
-      throw const FormatException('Получена запись без ожидаемого E2EE');
+      throw FormatException(tr("Получена запись без ожидаемого E2EE"));
     }
     final files = (e['files'] as List).cast<String>();
     if ((e['box'] as String).length > 3 * 1024 * 1024 || files.length > 10000) {
-      throw const FormatException('Слишком большая зашифрованная запись');
+      throw FormatException(tr("Слишком большая зашифрованная запись"));
     }
     final bytes = base64.decode(e['box'] as String);
-    if (bytes.length < 16) throw const FormatException('Повреждена запись');
+    if (bytes.length < 16) throw FormatException(tr("Повреждена запись"));
     final plain = await AesGcm.with256bits().decrypt(
       SecretBox(
         bytes.sublist(0, bytes.length - 16),
@@ -114,12 +115,12 @@ class WorkspaceKey {
     final value = jsonDecode(utf8.decode(plain)) as Map<String, dynamic>;
     final localId = value['id'] as String;
     if (wireId(localId) != wire.id) {
-      throw const FormatException('Подменён идентификатор записи');
+      throw FormatException(tr("Подменён идентификатор записи"));
     }
     final attachments = Map<String, String>.from(value['attachments'] as Map);
     if (attachments.values.toSet().length != files.length ||
         !files.toSet().containsAll(attachments.values)) {
-      throw const FormatException('Повреждён список вложений');
+      throw FormatException(tr("Повреждён список вложений"));
     }
     return (
       record: Entity(
@@ -177,7 +178,7 @@ class WorkspaceKey {
         remaining -= count;
       } while (remaining > 0);
       if ((await input.read(1)).isNotEmpty) {
-        throw const FormatException('Файл изменился во время копирования');
+        throw FormatException(tr("Файл изменился во время копирования"));
       }
       await output.flush();
     } finally {
@@ -200,14 +201,14 @@ class WorkspaceKey {
       final header = await _readExact(input, 112);
       if (ascii.decode(header.sublist(0, 8), allowInvalid: true) !=
           'YGGFILE1') {
-        throw const FormatException('Неверный формат зашифрованного файла');
+        throw FormatException(tr("Неверный формат зашифрованного файла"));
       }
       if (ascii.decode(header.sublist(48, 112)) != id) {
-        throw const FormatException('Нужен другой ключ восстановления');
+        throw FormatException(tr("Нужен другой ключ восстановления"));
       }
       final length = ByteData.sublistView(header).getUint64(40);
       if (length < 0 || length > maximumBytes) {
-        throw const FormatException('Превышен размер файла');
+        throw FormatException(tr("Превышен размер файла"));
       }
       final key = await _derive('file/$purpose', salt: header.sublist(8, 40));
       output = await target.open(mode: FileMode.write);
@@ -230,7 +231,7 @@ class WorkspaceKey {
         remaining -= count;
       } while (remaining > 0);
       if ((await input.read(1)).isNotEmpty) {
-        throw const FormatException('Лишние данные в файле');
+        throw FormatException(tr("Лишние данные в файле"));
       }
       await output.flush();
     } finally {
@@ -244,7 +245,7 @@ class WorkspaceKey {
     var offset = 0;
     while (offset < length) {
       final read = await file.readInto(bytes, offset, length);
-      if (read == 0) throw const FormatException('Зашифрованный файл обрезан');
+      if (read == 0) throw FormatException(tr("Зашифрованный файл обрезан"));
       offset += read;
     }
     return bytes;

@@ -1,3 +1,4 @@
+import '../l10n/strings.dart';
 import 'package:timezone/timezone.dart' as tz;
 import 'package:uuid/uuid.dart';
 import '../data/repository.dart';
@@ -40,7 +41,9 @@ DateTime _date(String text, String zone) {
   final m = RegExp(
     r'^(\d{4})(\d{2})(\d{2})(?:T(\d{2})(\d{2})(\d{2})?(Z)?)?$',
   ).firstMatch(text);
-  if (m == null) throw FormatException('Неподдерживаемая дата: $text');
+  if (m == null) {
+    throw FormatException(tr("Неподдерживаемая дата: {0}", [text]));
+  }
   final values = [for (var i = 1; i <= 6; i++) int.parse(m[i] ?? '0')];
   if (m[7] == 'Z') {
     return DateTime.utc(
@@ -65,7 +68,7 @@ DateTime _date(String text, String zone) {
 
 CalendarImport parseCalendar(String source, String defaultZone) {
   if (!source.contains('BEGIN:VCALENDAR')) {
-    throw const FormatException('Это не файл iCalendar');
+    throw FormatException(tr("Это не файл iCalendar"));
   }
   final lines = source
       .replaceAll('\r\n', '\n')
@@ -100,11 +103,13 @@ CalendarImport parseCalendar(String source, String defaultZone) {
         if (value('STATUS') == 'CANCELLED') continue;
         if (data.containsKey('RECURRENCE-ID')) {
           warnings.add(
-            'Исключение серии «${value('SUMMARY')}» импортируется отдельной задачей.',
+            tr("Исключение серии «{0}» импортируется отдельной задачей.", [
+              value('SUMMARY'),
+            ]),
           );
         }
         final startProperty = data['DTSTART']?.first;
-        if (startProperty == null) throw const FormatException('Нет DTSTART');
+        if (startProperty == null) throw FormatException(tr("Нет DTSTART"));
         final zone = zoneFor(startProperty.$1),
             start = _date(startProperty.$2, zone),
             allDay = startProperty.$2.length == 8;
@@ -117,7 +122,7 @@ CalendarImport parseCalendar(String source, String defaultZone) {
             r'^P(?:(\d+)W)?(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?)?$',
           ).firstMatch(value('DURATION'));
           if (match == null) {
-            throw const FormatException('Неподдерживаемая длительность');
+            throw FormatException(tr("Неподдерживаемая длительность"));
           }
           int n(int i) => int.parse(match[i] ?? '0');
           end = start.add(
@@ -146,7 +151,10 @@ CalendarImport parseCalendar(String source, String defaultZone) {
             data.containsKey('EXRULE') ||
             (recurrence?.$1.contains('RANGE=THISANDFUTURE') ?? false)) {
           warnings.add(
-            '«${value('SUMMARY')}»: дополнительные правила RDATE/EXRULE и RANGE=THISANDFUTURE не переносятся.',
+            tr(
+              "«{0}»: дополнительные правила RDATE/EXRULE и RANGE=THISANDFUTURE не переносятся.",
+              [value('SUMMARY')],
+            ),
           );
         }
         final exceptions = <String>[];
@@ -169,7 +177,9 @@ CalendarImport parseCalendar(String source, String defaultZone) {
             );
           } else {
             warnings.add(
-              '«${value('SUMMARY')}»: нестандартное напоминание не перенесено.',
+              tr("«{0}»: нестандартное напоминание не перенесено.", [
+                value('SUMMARY'),
+              ]),
             );
           }
         }
@@ -177,7 +187,7 @@ CalendarImport parseCalendar(String source, String defaultZone) {
           ImportedEvent(
             uid:
                 '${value('UID', start.toIso8601String())}${value('RECURRENCE-ID')}',
-            title: _unescape(value('SUMMARY', 'Без названия')),
+            title: _unescape(value('SUMMARY', tr("Без названия"))),
             description: _unescape(value('DESCRIPTION')),
             start: start,
             end: end,
@@ -190,7 +200,10 @@ CalendarImport parseCalendar(String source, String defaultZone) {
         );
       } catch (e) {
         warnings.add(
-          'Не удалось импортировать «${data['SUMMARY']?.first.$2 ?? 'Событие'}»: $e',
+          tr("Не удалось импортировать «{0}»: {1}", [
+            data['SUMMARY']?.first.$2 ?? tr("Событие"),
+            e,
+          ]),
         );
       }
       continue;

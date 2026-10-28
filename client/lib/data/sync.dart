@@ -1,3 +1,4 @@
+import '../l10n/strings.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -76,13 +77,13 @@ class SyncService {
   String? get url => _url;
   bool get connected => _url != null && _token != null;
   Future<void> disconnect() async {
-    if (_pairing) throw StateError('Дождитесь завершения подключения');
+    if (_pairing) throw StateError(tr("Дождитесь завершения подключения"));
     _pairing = true;
     try {
       final deadline = DateTime.now().add(const Duration(minutes: 2));
       while (_busy) {
         if (DateTime.now().isAfter(deadline)) {
-          throw StateError('Синхронизация ещё выполняется');
+          throw StateError(tr("Синхронизация ещё выполняется"));
         }
         await Future<void>.delayed(const Duration(milliseconds: 50));
       }
@@ -173,7 +174,7 @@ class SyncService {
             !(uri.scheme == 'http' &&
                 ['localhost', '127.0.0.1', '::1'].contains(uri.host)))) {
       throw ArgumentError(
-        'Укажите HTTPS-адрес сервера. HTTP разрешён только для localhost.',
+        tr("Укажите HTTPS-адрес сервера. HTTP разрешён только для localhost."),
       );
     }
     return uri;
@@ -192,7 +193,7 @@ class SyncService {
   void requireDisconnected() {
     if (connected) {
       throw StateError(
-        'Сначала забудьте текущий сервер в разделе «Синхронизация».',
+        tr("Сначала забудьте текущий сервер в разделе «Синхронизация»."),
       );
     }
   }
@@ -204,13 +205,13 @@ class SyncService {
     String? privateCA,
   }) async {
     requireDisconnected();
-    if (_pairing) throw StateError('Подключение уже выполняется');
+    if (_pairing) throw StateError(tr("Подключение уже выполняется"));
     _pairing = true;
     try {
       final deadline = DateTime.now().add(const Duration(minutes: 2));
       while (_busy) {
         if (DateTime.now().isAfter(deadline)) {
-          throw StateError('Дождитесь завершения текущей синхронизации');
+          throw StateError(tr("Дождитесь завершения текущей синхронизации"));
         }
         await Future<void>.delayed(const Duration(milliseconds: 50));
       }
@@ -246,7 +247,9 @@ class SyncService {
     final data = response.data!;
     if (data['protocol'] != 6) {
       throw StateError(
-        'Несовместимая версия сервера. Нужна новая установка с парольным E2EE.',
+        tr(
+          "Несовместимая версия сервера. Нужна новая установка с парольным E2EE.",
+        ),
       );
     }
     _requiredKeyId = null;
@@ -336,7 +339,7 @@ class SyncService {
     Object? data,
   }) async {
     if (!connected || !path.startsWith('/api/v1/')) {
-      throw StateError('Сначала подключите сервер');
+      throw StateError(tr("Сначала подключите сервер"));
     }
     final result = await client.request<Map<String, dynamic>>(
       '$_url$path',
@@ -350,14 +353,14 @@ class SyncService {
     final deadline = DateTime.now().add(const Duration(seconds: 30));
     while (_busy) {
       if (DateTime.now().isAfter(deadline)) {
-        throw StateError('Дождитесь окончания синхронизации');
+        throw StateError(tr("Дождитесь окончания синхронизации"));
       }
       await Future<void>.delayed(const Duration(milliseconds: 100));
     }
     await sync();
     if (!connected || repo.syncError != null) {
       throw StateError(
-        'Для создания ссылки подключитесь к серверу синхронизации',
+        tr("Для создания ссылки подключитесь к серверу синхронизации"),
       );
     }
     final zone = repo.snapshot.settings.timezone;
@@ -405,7 +408,7 @@ class SyncService {
         uri.scheme != 'yggvion' ||
         uri.host != 'connect' ||
         uri.fragment.isEmpty) {
-      throw ArgumentError('Неверная ссылка приглашения');
+      throw ArgumentError(tr("Неверная ссылка приглашения"));
     }
     final payload =
         jsonDecode(utf8.decode(base64Url.decode(uri.fragment)))
@@ -419,15 +422,15 @@ class SyncService {
           'ca',
           'expires_at',
         }.containsAll(payload.keys)) {
-      throw const FormatException(
-        'Формат приглашения не поддерживается. Создайте новое приглашение.',
+      throw FormatException(
+        tr("Формат приглашения не поддерживается. Создайте новое приглашение."),
       );
     }
     if (!DateTime.parse(
       payload['expires_at'] as String,
     ).isAfter(DateTime.now())) {
       throw StateError(
-        'Приглашение истекло. Создайте новое на подключённом устройстве.',
+        tr("Приглашение истекло. Создайте новое на подключённом устройстве."),
       );
     }
     await pair(
@@ -690,10 +693,13 @@ class SyncService {
     } on DioException catch (e) {
       repo.syncStatus = 'Изменения на устройстве';
       repo.syncError = e.response?.statusCode == 401
-          ? 'Доступ к серверу отозван. Подключите устройство заново.'
+          ? tr("Доступ к серверу отозван. Подключите устройство заново.")
           : e.response != null
-          ? 'Сервер отклонил синхронизацию (${e.response!.statusCode}). Данные сохранены локально.'
-          : 'Сервер недоступен. Повторим подключение автоматически.';
+          ? tr(
+              "Сервер отклонил синхронизацию ({0}). Данные сохранены локально.",
+              [e.response!.statusCode],
+            )
+          : tr("Сервер недоступен. Повторим подключение автоматически.");
     } on Object catch (e) {
       repo.syncStatus = 'Ошибка синхронизации';
       repo.syncError = '$e';
@@ -724,7 +730,7 @@ class SyncService {
     while (_busy || _pairing) {
       if (DateTime.now().isAfter(deadline)) {
         throw StateError(
-          'Не удалось остановить синхронизацию. Повторите очистку.',
+          tr("Не удалось остановить синхронизацию. Повторите очистку."),
         );
       }
       await Future<void>.delayed(const Duration(milliseconds: 25));

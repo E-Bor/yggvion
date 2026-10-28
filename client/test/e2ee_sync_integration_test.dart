@@ -53,6 +53,25 @@ void main() {
 
       final sa = SyncService(a, realtime: false),
           sb = SyncService(b, realtime: false);
+      // This scenario compresses hundreds of retries and cleanup requests into
+      // seconds. Pace the harness below the production source quota; admission
+      // limits themselves are covered by the Go HTTP security tests.
+      var nextRequest = DateTime.now();
+      for (final client in [sa.client, sb.client, probe]) {
+        client.interceptors.add(
+          InterceptorsWrapper(
+            onRequest: (options, handler) async {
+              final now = DateTime.now();
+              final delay = nextRequest.difference(now);
+              nextRequest = (nextRequest.isAfter(now) ? nextRequest : now).add(
+                const Duration(milliseconds: 40),
+              );
+              if (delay > Duration.zero) await Future<void>.delayed(delay);
+              handler.next(options);
+            },
+          ),
+        );
+      }
       var devicePath = '${dir.path}/a';
       const pathChannel = MethodChannel('plugins.flutter.io/path_provider');
       TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger

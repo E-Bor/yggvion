@@ -1,3 +1,4 @@
+import '../l10n/strings.dart';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:isolate';
@@ -79,7 +80,9 @@ class LocalBackupService extends ChangeNotifier {
     required bool enabled,
     required int days,
   }) async {
-    if (days < 1 || days > 365) throw ArgumentError('Укажите от 1 до 365 дней');
+    if (days < 1 || days > 365) {
+      throw ArgumentError(tr("Укажите от 1 до 365 дней"));
+    }
     await loadSchedule();
     await repo.serial(
       () => repo.db.transaction(() async {
@@ -133,7 +136,9 @@ class LocalBackupService extends ChangeNotifier {
         _publish();
       }
     } catch (error) {
-      scheduleError = 'Не удалось создать автоматическую копию: $error';
+      scheduleError = tr("Не удалось создать автоматическую копию: {0}", [
+        error,
+      ]);
       _retryAfter = repo.now().add(const Duration(minutes: 5));
       _publish();
     } finally {
@@ -147,7 +152,9 @@ class LocalBackupService extends ChangeNotifier {
     while (busy || _checking) {
       if (DateTime.now().isAfter(deadline)) {
         throw StateError(
-          'Дождитесь завершения резервного копирования и повторите очистку.',
+          tr(
+            "Дождитесь завершения резервного копирования и повторите очистку.",
+          ),
         );
       }
       await Future<void>.delayed(const Duration(milliseconds: 25));
@@ -222,7 +229,7 @@ class LocalBackupService extends ChangeNotifier {
   );
 
   Future<LocalBackupEntry> create() async {
-    if (busy) throw StateError('Резервное копирование уже выполняется');
+    if (busy) throw StateError(tr("Резервное копирование уже выполняется"));
     busy = true;
     try {
       return await _create();
@@ -259,7 +266,7 @@ class LocalBackupService extends ChangeNotifier {
         recoveryConfig.verify(recoveryKey);
         return (key: recoveryKey, config: recoveryConfig);
       }
-      throw StateError('Сначала создайте пароль шифрования в настройках');
+      throw StateError(tr("Сначала создайте пароль шифрования в настройках"));
     });
     final temporary = await root.createTemp('.encrypt-');
     try {
@@ -286,7 +293,7 @@ class LocalBackupService extends ChangeNotifier {
   }
 
   Future<void> restore(String source, {String? password}) async {
-    if (busy) throw StateError('Резервное копирование уже выполняется');
+    if (busy) throw StateError(tr("Резервное копирование уже выполняется"));
     busy = true;
     Directory? stage;
     try {
@@ -457,7 +464,9 @@ Future<void> _writeArchive(Map<String, dynamic> data, String target) async {
     for (final match in _attachmentReference.allMatches(jsonEncode(record))) {
       if (!ids.contains(match[1])) {
         throw StateError(
-          'Не все вложения загружены на устройство. Откройте синхронизацию и повторите создание копии.',
+          tr(
+            "Не все вложения загружены на устройство. Откройте синхронизацию и повторите создание копии.",
+          ),
         );
       }
     }
@@ -469,17 +478,17 @@ Future<void> _writeArchive(Map<String, dynamic> data, String target) async {
     final size = await file.length();
     total += size;
     if (size > 300 * 1024 * 1024 || total > _maximumArchive) {
-      throw StateError('Превышен размер резервной копии');
+      throw StateError(tr("Превышен размер резервной копии"));
     }
     if ((await sha256.bind(file.openRead()).first).toString() != item['id']) {
-      throw StateError('Повреждено вложение ${item['name']}');
+      throw StateError(tr("Повреждено вложение {0}", [item['name']]));
     }
     fileMetadata.add({'id': item['id'], 'name': item['name'], 'size': size});
   }
   data['files'] = fileMetadata;
   final bytes = utf8.encode(jsonEncode(data));
   if (bytes.length > _maximumSnapshot) {
-    throw StateError('Слишком большой снимок данных');
+    throw StateError(tr("Слишком большой снимок данных"));
   }
   final encoder = ZipFileEncoder();
   final temporary = '$target.part';
@@ -516,7 +525,7 @@ Future<void> _writeArchive(Map<String, dynamic> data, String target) async {
 Future<Map<String, dynamic>> _readArchive(String source, String stage) async {
   tzdata.initializeTimeZones();
   if (await File(source).length() > _maximumArchive + _maximumSnapshot) {
-    throw const FormatException('Слишком большой архив');
+    throw FormatException(tr("Слишком большой архив"));
   }
   final input = InputFileStream(source);
   try {
@@ -534,7 +543,7 @@ Future<Map<String, dynamic>> _readArchive(String source, String stage) async {
           !(name == 'snapshot.json' ||
               name == 'snapshot.sha256' ||
               RegExp(r'^attachments/[a-f0-9]{64}$').hasMatch(name))) {
-        throw const FormatException('Некорректная структура локального бэкапа');
+        throw FormatException(tr("Некорректная структура локального бэкапа"));
       }
       final limit = name == 'snapshot.json'
           ? _maximumSnapshot
@@ -542,15 +551,15 @@ Future<Map<String, dynamic>> _readArchive(String source, String stage) async {
           ? 64
           : 300 * 1024 * 1024;
       if (header.uncompressedSize < 0 || header.uncompressedSize > limit) {
-        throw const FormatException('Некорректный размер файла');
+        throw FormatException(tr("Некорректный размер файла"));
       }
       total += header.uncompressedSize;
       if (total > _maximumArchive + _maximumSnapshot) {
-        throw const FormatException('Превышен размер архива');
+        throw FormatException(tr("Превышен размер архива"));
       }
     }
     if (!names.containsAll(['snapshot.json', 'snapshot.sha256'])) {
-      throw const FormatException('Это не локальная копия Yggvion');
+      throw FormatException(tr("Это не локальная копия Yggvion"));
     }
     ArchiveFile entry(String name) {
       final h = directory.fileHeaders.singleWhere((h) => h.filename == name);
@@ -560,8 +569,8 @@ Future<Map<String, dynamic>> _readArchive(String source, String stage) async {
     final bytes = entry('snapshot.json').readBytes()!;
     final checksum = utf8.decode(entry('snapshot.sha256').readBytes()!);
     if (sha256.convert(bytes).toString() != checksum) {
-      throw const FormatException(
-        'Контрольная сумма заметок и событий не совпадает',
+      throw FormatException(
+        tr("Контрольная сумма заметок и событий не совпадает"),
       );
     }
     final data = Map<String, dynamic>.from(
@@ -574,11 +583,11 @@ Future<Map<String, dynamic>> _readArchive(String source, String stage) async {
       final id = file['id'] as String;
       final name = 'attachments/$id';
       if (!expected.add(name) || !names.contains(name)) {
-        throw const FormatException('Отсутствующее или повторное вложение');
+        throw FormatException(tr("Отсутствующее или повторное вложение"));
       }
       final archived = entry(name);
       if (archived.size != file['size']) {
-        throw const FormatException('Размер вложения не совпадает');
+        throw FormatException(tr("Размер вложения не совпадает"));
       }
       final path = p.join(stage, id);
       final output = OutputFileStream(path);
@@ -589,11 +598,11 @@ Future<Map<String, dynamic>> _readArchive(String source, String stage) async {
       }
       if (await File(path).length() != file['size'] ||
           (await sha256.bind(File(path).openRead()).first).toString() != id) {
-        throw const FormatException('Контрольная сумма вложения не совпадает');
+        throw FormatException(tr("Контрольная сумма вложения не совпадает"));
       }
     }
     if (expected.length != names.length) {
-      throw const FormatException('Лишние файлы в архиве');
+      throw FormatException(tr("Лишние файлы в архиве"));
     }
     final fileIds = (data['files'] as List)
         .map((f) => (f as Map)['id'])
@@ -601,7 +610,7 @@ Future<Map<String, dynamic>> _readArchive(String source, String stage) async {
     for (final record in _attachmentRecords(data)) {
       for (final match in _attachmentReference.allMatches(jsonEncode(record))) {
         if (!fileIds.contains(match[1])) {
-          throw const FormatException('Неполная копия вложений');
+          throw FormatException(tr("Неполная копия вложений"));
         }
       }
     }
@@ -618,12 +627,12 @@ void _validateSnapshot(Map<String, dynamic> data) {
       data['conflicts'] is! List ||
       data['preferences'] is! Map ||
       data['activity'] is! List) {
-    throw const FormatException('Неподдерживаемый формат локальной копии');
+    throw FormatException(tr("Неподдерживаемый формат локальной копии"));
   }
   final created = DateTime.tryParse(data['created'] as String? ?? '');
   if (created == null ||
       created.isAfter(DateTime.now().add(const Duration(minutes: 5)))) {
-    throw const FormatException('Некорректная дата снимка');
+    throw FormatException(tr("Некорректная дата снимка"));
   }
   final ids = <String>{};
   final entities = <Entity>[];
@@ -645,11 +654,11 @@ void _validateSnapshot(Map<String, dynamic> data) {
     if (!RegExp(r'^[a-zA-Z0-9_-]{1,160}$').hasMatch(e.id) ||
         !ids.add(e.id) ||
         !kinds.contains(e.kind)) {
-      throw const FormatException('Некорректные записи');
+      throw FormatException(tr("Некорректные записи"));
     }
     entities.add(e);
     if (utf8.encode(e.encoded).length > 2 * 1024 * 1024) {
-      throw const FormatException('Слишком большая запись');
+      throw FormatException(tr("Слишком большая запись"));
     }
     _validateEntity(e);
   }
@@ -660,7 +669,7 @@ void _validateSnapshot(Map<String, dynamic> data) {
           !e.deleted &&
           e.kind == (id == 'settings' ? 'settings' : 'note'),
     )) {
-      throw const FormatException('Отсутствуют основные записи');
+      throw FormatException(tr("Отсутствуют основные записи"));
     }
   }
   for (final f in data['files'] as List) {
@@ -670,7 +679,7 @@ void _validateSnapshot(Map<String, dynamic> data) {
         f['name'] is! String ||
         f['size'] is! int ||
         (f['size'] as int) < 0) {
-      throw const FormatException('Некорректное вложение');
+      throw FormatException(tr("Некорректное вложение"));
     }
   }
   final conflictIds = <String>{};
@@ -681,21 +690,21 @@ void _validateSnapshot(Map<String, dynamic> data) {
         !conflictIds.add(row['id'] as String) ||
         row['local'] is! String ||
         row['remote'] is! String) {
-      throw const FormatException('Некорректный конфликт');
+      throw FormatException(tr("Некорректный конфликт"));
     }
     for (final key in ['local', 'remote']) {
       final e = Entity.fromJson(
         jsonDecode(row[key] as String) as Map<String, dynamic>,
       );
       if (e.id != row['id'] || !kinds.contains(e.kind)) {
-        throw const FormatException('Некорректный конфликт');
+        throw FormatException(tr("Некорректный конфликт"));
       }
       _validateEntity(e);
     }
   }
   for (final entry in (data['preferences'] as Map).entries) {
     if (!_preferences.contains(entry.key) || entry.value is! String) {
-      throw const FormatException('Некорректные настройки');
+      throw FormatException(tr("Некорректные настройки"));
     }
   }
   for (final row in data['activity'] as List) {
@@ -703,7 +712,7 @@ void _validateSnapshot(Map<String, dynamic> data) {
         row['start'] is! int ||
         row['end'] is! int ||
         (row['end'] as int) < (row['start'] as int)) {
-      throw const FormatException('Некорректная статистика');
+      throw FormatException(tr("Некорректная статистика"));
     }
   }
 }
@@ -712,7 +721,7 @@ void _validateSnapshot(Map<String, dynamic> data) {
 // Server authorization and business validation still run when reconnecting.
 void _validateEntity(Entity e) {
   void check(bool valid) {
-    if (!valid) throw FormatException('Некорректная запись ${e.kind}');
+    if (!valid) throw FormatException(tr("Некорректная запись {0}", [e.kind]));
   }
 
   void reminders(List<int> values) {
@@ -769,7 +778,7 @@ void _validateEntity(Entity e) {
       case 'block':
         final b = TimeBlock(e);
         if (!b.end.isAfter(b.start)) {
-          throw const FormatException('Некорректный интервал');
+          throw FormatException(tr("Некорректный интервал"));
         }
         tz.getLocation(b.timezone);
         b.taskId;
@@ -828,7 +837,7 @@ void _validateEntity(Entity e) {
         parseTime(e.data['at']);
     }
   } on Object catch (error) {
-    throw FormatException('Некорректная запись ${e.kind}: $error');
+    throw FormatException(tr("Некорректная запись {0}: {1}", [e.kind, error]));
   }
 }
 
@@ -844,7 +853,18 @@ Iterable<Object?> _attachmentRecords(Map<String, dynamic> data) sync* {
 }
 
 // Top-level closures capture only transferable arguments, never a Repository.
-Future<void> _writeInBackground(Map<String, dynamic> data, String target) =>
-    Isolate.run(() => _writeArchive(data, target));
-Future<Map<String, dynamic>> _readInBackground(String source, String stage) =>
-    Isolate.run(() => _readArchive(source, stage));
+Future<void> _writeInBackground(Map<String, dynamic> data, String target) {
+  final language = AppLocale.language;
+  return Isolate.run(() {
+    AppLocale.use(language);
+    return _writeArchive(data, target);
+  });
+}
+
+Future<Map<String, dynamic>> _readInBackground(String source, String stage) {
+  final language = AppLocale.language;
+  return Isolate.run(() {
+    AppLocale.use(language);
+    return _readArchive(source, stage);
+  });
+}

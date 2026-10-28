@@ -90,6 +90,7 @@ void main() {
       );
       await command(tester, LogicalKeyboardKey.digit5);
       await tester.ensureVisible(find.byKey(const ValueKey('search-typos')));
+      await settle(tester);
       await tester.tap(find.text('2 ошибки'));
       await settle(tester);
       expect(repo.snapshot.settings.searchTypos, 2);
@@ -114,6 +115,30 @@ void main() {
       await tester.tap(find.text('Стоматолог'));
       await settle(tester);
       expect(find.byType(TaskEditor), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testInteraction(
+    'background statistics uses the chosen language and preserves project names',
+    (tester) async {
+      await workspace(
+        tester,
+        mobile: true,
+        prepare: (repo) async {
+          await statisticsFixture(repo);
+          await repo.setLanguage('en');
+        },
+      );
+      await command(tester, LogicalKeyboardKey.digit5);
+      await tester.tap(find.byKey(const ValueKey('open-statistics')));
+      await tester.pump();
+      await settle(tester);
+      await tester.ensureVisible(find.text('Where time goes'));
+      await settle(tester);
+      expect(find.text('No project'), findsOneWidget);
+      expect(find.text('Разработка'), findsOneWidget);
+      expect(find.text('Без проекта'), findsNothing);
       expect(tester.takeException(), isNull);
     },
   );

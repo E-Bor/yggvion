@@ -48,22 +48,20 @@ void main() {
   });
 
   testInteraction(
-    'phone library actions stay visible above long notes and restore scroll',
+    'phone attachments stay in header and folders collapse inline',
     (tester) async {
-      late String noteId;
+      late String noteId, folderId;
       await workspace(
         tester,
         mobile: true,
         prepare: (repo) async {
-          await repo.saveNote(
+          await repo.saveNoteContent(
             'scratchpad',
-            '',
             List.generate(60, (i) => 'Строка черновика $i').join('\n'),
           );
           await repo.saveNoteFolder('Работа');
-          final note = await repo.createNote(
-            folderId: repo.snapshot.noteFolders.single.id,
-          );
+          folderId = repo.snapshot.noteFolders.single.id;
+          final note = await repo.createNote(folderId: folderId);
           noteId = note.id;
           await repo.saveNote(note.id, 'Материалы встречи', 'План обсуждения');
         },
@@ -73,52 +71,51 @@ void main() {
       final attachments = find.byKey(
         const ValueKey('mobile-notes-attachments'),
       );
-      final folders = find.byKey(const ValueKey('mobile-notes-folders'));
-      final toolbar = find.byKey(const ValueKey('mobile-notes-toolbar'));
-      expect(find.text('Вложения').hitTestable(), findsOneWidget);
-      expect(find.text('Папки').hitTestable(), findsOneWidget);
-      final toolbarBounds = tester.getRect(toolbar);
+      final header = find.byKey(const ValueKey('workspace-header'));
+      expect(find.byKey(const ValueKey('mobile-notes-folders')), findsNothing);
+      expect(find.byKey(const ValueKey('mobile-notes-toolbar')), findsNothing);
+      expect(
+        find.descendant(of: header, matching: attachments),
+        findsOneWidget,
+      );
+      final bounds = tester.getRect(header);
       final scroll = tester
           .widget<ListView>(find.byKey(const ValueKey('mobile-notes-list')))
           .controller!;
       scroll.jumpTo(700);
       await tester.pumpAndSettle();
-      expect(tester.getRect(toolbar), toolbarBounds);
+      expect(tester.getRect(header), bounds);
       expect(attachments.hitTestable(), findsOneWidget);
-      expect(folders.hitTestable(), findsOneWidget);
       final offset = scroll.offset;
-
       await tester.runAsync(() async {
         await tester.tap(attachments);
         await tester.pump();
       });
       await settle(tester);
       expect(find.byType(AttachmentsPage), findsOneWidget);
-      expect(find.text('Пока нет картинок'), findsOneWidget);
-      await tester.tap(find.text('Файлы'));
-      await settle(tester);
-      expect(find.text('Пока нет файлов'), findsOneWidget);
       await tester.tap(find.byType(BackButton));
       await settle(tester);
       expect(scroll.offset, closeTo(offset, 1));
-      expect(tester.testTextInput.isVisible, isFalse);
-
-      tester.view.physicalSize = const Size(320, 700);
-      await tester.pumpAndSettle();
-      expect(attachments.hitTestable(), findsOneWidget);
-      expect(folders.hitTestable(), findsOneWidget);
-      expect(tester.getSize(attachments).height, greaterThanOrEqualTo(44));
-      await tester.tap(folders);
-      await settle(tester);
-      expect(find.byType(NoteLibrary), findsOneWidget);
-      await tester.tap(find.byKey(ValueKey('note-list-$noteId')));
-      await settle(tester);
-      expect(find.byType(NoteLibrary), findsNothing);
-      expect(
-        find.byKey(ValueKey('note-title-$noteId')).hitTestable(),
-        findsOneWidget,
+      final folder = find.byKey(ValueKey('note-folder-$folderId'));
+      await tester.scrollUntilVisible(
+        folder,
+        400,
+        scrollable: find
+            .descendant(
+              of: find.byKey(const ValueKey('mobile-notes-list')),
+              matching: find.byType(Scrollable),
+            )
+            .first,
       );
-      expect(scroll.offset, 0);
+      await tester.tap(folder);
+      await settle(tester);
+      expect(find.byKey(ValueKey('note-title-$noteId')), findsNothing);
+      await tester.tap(folder);
+      await settle(tester);
+      expect(find.byKey(ValueKey('note-title-$noteId')), findsOneWidget);
+      tester.view.physicalSize = const Size(320, 700);
+      await settle(tester);
+      expect(attachments.hitTestable(), findsOneWidget);
       expect(tester.takeException(), isNull);
     },
   );
@@ -263,6 +260,46 @@ void main() {
     },
   );
 
+  testInteraction(
+    'phone note moves into a folder without losing unsaved text',
+    (tester) async {
+      final repo = await workspace(
+        tester,
+        mobile: true,
+        prepare: (repo) async {
+          await repo.saveNoteFolder('Проекты');
+        },
+      );
+      final folderId = repo.snapshot.noteFolders.single.id;
+      await tester.tap(find.byKey(const ValueKey('create-note')));
+      await settle(tester);
+      final id = repo.snapshot.notes
+          .singleWhere((note) => note.pinned.isEmpty)
+          .id;
+      await tester.enterText(phoneNoteField(id), '# Идея\n\nСохранить текст');
+      // Open the menu before the save debounce fires.
+      await tester.tap(find.byKey(ValueKey('note-actions-$id')));
+      await settle(tester);
+      await tester.tap(find.text('Переместить в папку'));
+      await settle(tester);
+      await tester.runAsync(
+        () => tester.tap(find.byKey(ValueKey('move-note-folder-$folderId'))),
+      );
+      await settle(tester);
+      expect(repo.snapshot.note(id)!.folderId, folderId);
+      expect(repo.snapshot.note(id)!.content, '# Идея\n\nСохранить текст');
+      final folder = find.byKey(ValueKey('note-folder-$folderId'));
+      expect(folder.hitTestable(), findsOneWidget);
+      await tester.tap(folder);
+      await settle(tester);
+      expect(find.byKey(ValueKey('note-title-$id')), findsNothing);
+      await tester.tap(folder);
+      await settle(tester);
+      expect(find.byKey(ValueKey('note-title-$id')), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
   for (final id in ['scratchpad', 'reference']) {
     testInteraction(
       'phone pinned note $id clears only its content after confirmation',
@@ -375,6 +412,7 @@ void main() {
         await settle(tester);
         final field = phoneNoteField(id);
         await tester.ensureVisible(field);
+        await settle(tester);
         expect(tester.widget<TextField>(field).focusNode!.hasFocus, isFalse);
         expect(tester.testTextInput.isVisible, isFalse);
 

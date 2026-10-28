@@ -1,3 +1,4 @@
+import '../l10n/strings.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/foundation.dart';
@@ -73,7 +74,7 @@ class DateTimeButton extends StatelessWidget {
     },
     icon: const Icon(Icons.calendar_today_outlined, size: 16),
     label: Text(
-      '$label ${DateFormat(dateOnly ? 'd MMM y' : 'd MMM, HH:mm', 'ru').format(value)}',
+      '$label ${DateFormat(dateOnly ? 'd MMM y' : 'd MMM, HH:mm', AppLocale.language).format(value)}',
     ),
   );
 }
@@ -93,49 +94,52 @@ Future<void> editBlock(BuildContext context, TimeBlock block) =>
       builder: (_) => BlockEditor(block: block),
     );
 
-Future<RepeatScope?> chooseScope(
-  BuildContext context, {
-  String title = 'Изменить повторение',
-}) => showDialog<RepeatScope>(
-  context: context,
-  builder: (c) => SimpleDialog(
-    title: Text(title),
-    children: [
-      for (final scope in RepeatScope.values)
-        SimpleDialogOption(
-          onPressed: () => Navigator.pop(c, scope),
-          child: Text(
-            scope == RepeatScope.instance
-                ? 'Только эту задачу'
-                : scope == RepeatScope.following
-                ? 'Эту и последующие'
-                : 'Всю серию',
-          ),
-        ),
-    ],
-  ),
-);
+Future<RepeatScope?> chooseScope(BuildContext context, {String? title}) =>
+    showDialog<RepeatScope>(
+      context: context,
+      builder: (c) => SimpleDialog(
+        title: Text(title ?? tr("Изменить повторение")),
+        children: [
+          for (final scope in RepeatScope.values)
+            SimpleDialogOption(
+              onPressed: () => Navigator.pop(c, scope),
+              child: Text(
+                scope == RepeatScope.instance
+                    ? tr("Только эту задачу")
+                    : scope == RepeatScope.following
+                    ? tr("Эту и последующие")
+                    : tr("Всю серию"),
+              ),
+            ),
+        ],
+      ),
+    );
 
 Future<bool> deleteTask(BuildContext context, WidgetRef ref, Task task) async {
   RepeatScope? scope;
   if (task.seriesId.isNotEmpty) {
-    scope = await chooseScope(context, title: 'Удалить повторяющуюся задачу');
+    scope = await chooseScope(
+      context,
+      title: tr("Удалить повторяющуюся задачу"),
+    );
   } else {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (c) => AlertDialog(
-        title: const Text('Удалить задачу?'),
+        title: Text(tr("Удалить задачу?")),
         content: Text(
-          '«${task.title}» и её записи времени будут удалены на всех устройствах.',
+          tr("«{0}» и её записи времени будут удалены на всех устройствах.", [
+            task.title,
+          ]),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(c, false),
-            child: const Text('Отмена'),
+            child: Text(tr("Отмена")),
           ),
           FilledButton(
             onPressed: () => Navigator.pop(c, true),
-            child: const Text('Удалить'),
+            child: Text(tr("Удалить")),
           ),
         ],
       ),
@@ -199,7 +203,7 @@ class _BlockEditorState extends ConsumerState<BlockEditor> {
 
   @override
   Widget build(BuildContext context) => AlertDialog(
-    title: const Text('Календарный блок'),
+    title: Text(tr("Календарный блок")),
     content: SizedBox(
       width: 460,
       child: SingleChildScrollView(
@@ -225,7 +229,7 @@ class _BlockEditorState extends ConsumerState<BlockEditor> {
             ),
             const SizedBox(height: 12),
             Text(
-              'План: ${formatDuration(end.difference(start))}',
+              tr("План: {0}", [formatDuration(end.difference(start))]),
               style: TextStyle(color: context.palette.muted),
             ),
           ],
@@ -235,7 +239,7 @@ class _BlockEditorState extends ConsumerState<BlockEditor> {
     actions: [
       TextButton(
         onPressed: () => Navigator.pop(context),
-        child: const Text('Отмена'),
+        child: Text(tr("Отмена")),
       ),
       FilledButton(
         onPressed: () => guard(context, () async {
@@ -251,7 +255,7 @@ class _BlockEditorState extends ConsumerState<BlockEditor> {
           );
           if (context.mounted) Navigator.pop(context);
         }),
-        child: const Text('Сохранить'),
+        child: Text(tr("Сохранить")),
       ),
     ],
   );
@@ -275,14 +279,14 @@ class TimezoneField extends StatelessWidget {
     fieldViewBuilder: (context, controller, focus, onSubmitted) => TextField(
       controller: controller,
       focusNode: focus,
-      decoration: const InputDecoration(labelText: 'Часовой пояс IANA'),
+      decoration: InputDecoration(labelText: tr("Часовой пояс IANA")),
       onSubmitted: (v) {
         try {
           tz.getLocation(v);
           onChanged(v);
         } catch (e) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Выберите часовой пояс из списка')),
+            SnackBar(content: Text(tr("Выберите часовой пояс из списка"))),
           );
         }
       },
@@ -308,7 +312,7 @@ class _ReminderOffsetEditorState extends State<ReminderOffsetEditor> {
 
   @override
   Widget build(BuildContext context) => AlertDialog(
-    title: const Text('Напомнить заранее'),
+    title: Text(tr("Напомнить заранее")),
     content: SizedBox(
       width: 360,
       child: Row(
@@ -319,7 +323,10 @@ class _ReminderOffsetEditorState extends State<ReminderOffsetEditor> {
               controller: amount,
               autofocus: true,
               keyboardType: TextInputType.number,
-              decoration: InputDecoration(labelText: 'За', errorText: error),
+              decoration: InputDecoration(
+                labelText: tr("За"),
+                errorText: error,
+              ),
             ),
           ),
           const SizedBox(width: 12),
@@ -327,11 +334,11 @@ class _ReminderOffsetEditorState extends State<ReminderOffsetEditor> {
             child: DropdownButtonFormField<int>(
               key: const ValueKey('reminder-unit'),
               initialValue: unit,
-              items: const [
-                DropdownMenuItem(value: 1, child: Text('минут')),
-                DropdownMenuItem(value: 60, child: Text('часов')),
-                DropdownMenuItem(value: 1440, child: Text('дней')),
-                DropdownMenuItem(value: 10080, child: Text('недель')),
+              items: [
+                DropdownMenuItem(value: 1, child: Text(tr("минут"))),
+                DropdownMenuItem(value: 60, child: Text(tr("часов"))),
+                DropdownMenuItem(value: 1440, child: Text(tr("дней"))),
+                DropdownMenuItem(value: 10080, child: Text(tr("недель"))),
               ],
               onChanged: (v) => setState(() => unit = v!),
             ),
@@ -342,32 +349,32 @@ class _ReminderOffsetEditorState extends State<ReminderOffsetEditor> {
     actions: [
       TextButton(
         onPressed: () => Navigator.pop(context),
-        child: const Text('Отмена'),
+        child: Text(tr("Отмена")),
       ),
       FilledButton(
         onPressed: () {
           final n = int.tryParse(amount.text);
           if (n == null || n < 0 || n * unit > 525600) {
-            setState(() => error = 'От 0 до ${525600 ~/ unit}');
+            setState(() => error = tr("От 0 до {0}", [525600 ~/ unit]));
           } else {
             Navigator.pop(context, n * unit);
           }
         },
-        child: const Text('Добавить'),
+        child: Text(tr("Добавить")),
       ),
     ],
   );
 }
 
 String reminderLabel(int minutes) => minutes == 0
-    ? 'В начале события'
+    ? tr("В начале события")
     : minutes >= 10080 && minutes % 10080 == 0
-    ? 'За ${minutes ~/ 10080} нед.'
+    ? tr("За {0} нед.", [minutes ~/ 10080])
     : minutes >= 1440 && minutes % 1440 == 0
-    ? 'За ${minutes ~/ 1440} дн.'
+    ? tr("За {0} дн.", [minutes ~/ 1440])
     : minutes >= 60 && minutes % 60 == 0
-    ? 'За ${minutes ~/ 60} ч'
-    : 'За $minutes мин';
+    ? tr("За {0} ч", [minutes ~/ 60])
+    : tr("За {0} мин", [minutes]);
 
 class ReminderPicker extends StatelessWidget {
   const ReminderPicker({
@@ -424,9 +431,9 @@ class ReminderPicker extends StatelessWidget {
                           fontSize: 13,
                         ),
                         items: [
-                          const DropdownMenuItem(
+                          DropdownMenuItem(
                             value: -1,
-                            child: Text('Без напоминания'),
+                            child: Text(tr("Без напоминания")),
                           ),
                           for (final v in {
                             0,
@@ -443,9 +450,9 @@ class ReminderPicker extends StatelessWidget {
                               value: v,
                               child: Text(reminderLabel(v)),
                             ),
-                          const DropdownMenuItem(
+                          DropdownMenuItem(
                             value: -2,
-                            child: Text('Другое…'),
+                            child: Text(tr("Другое…")),
                           ),
                         ],
                         onChanged: (value) {
@@ -456,7 +463,7 @@ class ReminderPicker extends StatelessWidget {
                   ),
                   if (values.length > 1)
                     IconButton(
-                      tooltip: 'Удалить напоминание',
+                      tooltip: tr("Удалить напоминание"),
                       icon: const Icon(Icons.close_rounded, size: 18),
                       onPressed: () => onChanged([...values]..removeAt(i)),
                     ),
@@ -469,8 +476,8 @@ class ReminderPicker extends StatelessWidget {
                   padding: EdgeInsets.zero,
                   minimumSize: const Size(0, 32),
                 ),
-                child: const Text(
-                  'Добавить напоминание',
+                child: Text(
+                  tr("Добавить напоминание"),
                   style: TextStyle(fontSize: 12),
                 ),
               ),
@@ -559,7 +566,7 @@ class _TaskEditorState extends ConsumerState<TaskEditor> {
             !listEquals(originalBlock!.reminders, reminders);
 
   Future<void> save() => guard(context, () async {
-    if (title.text.trim().isEmpty) throw ArgumentError('Введите название');
+    if (title.text.trim().isEmpty) throw ArgumentError(tr("Введите название"));
     if (start != null) Repository.validateInterval(start!, end!);
     if (rule.isNotEmpty) RecurrenceService.parse(rule);
     setState(() => saving = true);
@@ -567,7 +574,7 @@ class _TaskEditorState extends ConsumerState<TaskEditor> {
       final repo = ref.read(appProvider);
       var task = repo.snapshot.task(widget.taskId ?? '');
       if (widget.taskId != null && task == null) {
-        throw StateError('Задача уже удалена');
+        throw StateError(tr("Задача уже удалена"));
       }
       final recurrence = RecurrenceService(repo);
       if (task == null) {
@@ -626,7 +633,7 @@ class _TaskEditorState extends ConsumerState<TaskEditor> {
             final current = repo.snapshot.blocks
                 .where((b) => b.id == originalBlock!.id)
                 .firstOrNull;
-            if (current == null) throw StateError('Этот блок уже удалён');
+            if (current == null) throw StateError(tr("Этот блок уже удалён"));
             await recurrence.editTiming(
               current,
               metadataChanged && scope == RepeatScope.following
@@ -710,7 +717,7 @@ class _TaskEditorState extends ConsumerState<TaskEditor> {
 
   String dateLabel(DateTime value) => DateFormat(
     'd MMM, HH:mm',
-    'ru',
+    AppLocale.language,
   ).format(tz.TZDateTime.from(value, tz.getLocation(zone)));
 
   @override
@@ -776,7 +783,7 @@ class _TaskEditorState extends ConsumerState<TaskEditor> {
                           letterSpacing: -.4,
                         ),
                         decoration: InputDecoration(
-                          hintText: 'Введите название',
+                          hintText: tr("Введите название"),
                           filled: false,
                           border: UnderlineInputBorder(
                             borderSide: BorderSide(
@@ -802,7 +809,7 @@ class _TaskEditorState extends ConsumerState<TaskEditor> {
                     ),
                     const SizedBox(width: 8),
                     IconButton(
-                      tooltip: 'Закрыть',
+                      tooltip: tr("Закрыть"),
                       onPressed: saving ? null : () => Navigator.pop(context),
                       icon: const Icon(Icons.close_rounded, size: 20),
                     ),
@@ -834,7 +841,7 @@ class _TaskEditorState extends ConsumerState<TaskEditor> {
                           Padding(
                             padding: EdgeInsets.only(left: 32, top: 4),
                             child: Text(
-                              'Новая периодичность — с этой задачи.',
+                              tr("Новая периодичность — с этой задачи."),
                               style: TextStyle(
                                 color: context.palette.muted,
                                 fontSize: 12,
@@ -852,7 +859,7 @@ class _TaskEditorState extends ConsumerState<TaskEditor> {
                           child: TextButton.icon(
                             onPressed: planNow,
                             icon: const Icon(Icons.schedule_rounded, size: 20),
-                            label: const Text('Запланировать'),
+                            label: Text(tr("Запланировать")),
                           ),
                         ),
                       const SizedBox(height: 4),
@@ -881,9 +888,9 @@ class _TaskEditorState extends ConsumerState<TaskEditor> {
                                   color: context.palette.text,
                                 ),
                                 items: [
-                                  const DropdownMenuItem(
+                                  DropdownMenuItem(
                                     value: '',
-                                    child: Text('Без проекта'),
+                                    child: Text(tr("Без проекта")),
                                   ),
                                   for (final project in repo.snapshot.projects)
                                     DropdownMenuItem(
@@ -918,7 +925,7 @@ class _TaskEditorState extends ConsumerState<TaskEditor> {
                       if (task != null) ...[
                         disclosure(
                           'task-blocks',
-                          'Блоки в календаре',
+                          tr("Блоки в календаре"),
                           Icons.view_agenda_outlined,
                           [
                             for (final b in blocks)
@@ -931,7 +938,7 @@ class _TaskEditorState extends ConsumerState<TaskEditor> {
                                 ),
                                 subtitle: Text(
                                   b.historical
-                                      ? 'История плана'
+                                      ? tr("История плана")
                                       : formatDuration(b.duration),
                                 ),
                                 onTap: () async {
@@ -979,14 +986,14 @@ class _TaskEditorState extends ConsumerState<TaskEditor> {
                                       }
                                     }
                                   }),
-                                  itemBuilder: (_) => const [
+                                  itemBuilder: (_) => [
                                     PopupMenuItem(
                                       value: 'split',
-                                      child: Text('Разделить пополам'),
+                                      child: Text(tr("Разделить пополам")),
                                     ),
                                     PopupMenuItem(
                                       value: 'remove',
-                                      child: Text('Убрать из плана'),
+                                      child: Text(tr("Убрать из плана")),
                                     ),
                                   ],
                                 ),
@@ -1030,7 +1037,7 @@ class _TaskEditorState extends ConsumerState<TaskEditor> {
                                   }
                                 }),
                                 icon: const Icon(Icons.add_rounded, size: 18),
-                                label: const Text('Добавить блок'),
+                                label: Text(tr("Добавить блок")),
                               ),
                             ),
                           ],
@@ -1039,7 +1046,7 @@ class _TaskEditorState extends ConsumerState<TaskEditor> {
                         ),
                         disclosure(
                           'task-sessions',
-                          'Потраченное время',
+                          tr("Потраченное время"),
                           Icons.timelapse_rounded,
                           [
                             Align(
@@ -1048,7 +1055,7 @@ class _TaskEditorState extends ConsumerState<TaskEditor> {
                                 key: const ValueKey('add-work-session'),
                                 onPressed: () => editSession(context, task),
                                 icon: const Icon(Icons.add_rounded, size: 18),
-                                label: const Text('Добавить время вручную'),
+                                label: Text(tr("Добавить время вручную")),
                               ),
                             ),
                             for (final s in sessions)
@@ -1056,7 +1063,7 @@ class _TaskEditorState extends ConsumerState<TaskEditor> {
                                 contentPadding: EdgeInsets.zero,
                                 dense: true,
                                 title: Text(
-                                  '${dateLabel(s.start)} — ${s.end == null ? 'сейчас' : dateLabel(s.end!)}',
+                                  '${dateLabel(s.start)} — ${s.end == null ? tr("сейчас") : dateLabel(s.end!)}',
                                   style: const TextStyle(fontSize: 12),
                                 ),
                                 subtitle: Text(
@@ -1067,7 +1074,7 @@ class _TaskEditorState extends ConsumerState<TaskEditor> {
                                 onTap: () =>
                                     editSession(context, task, session: s),
                                 trailing: IconButton(
-                                  tooltip: 'Удалить запись времени',
+                                  tooltip: tr("Удалить запись времени"),
                                   icon: const Icon(
                                     Icons.delete_outline_rounded,
                                     size: 18,
@@ -1090,8 +1097,8 @@ class _TaskEditorState extends ConsumerState<TaskEditor> {
                         key: descriptionKey,
                         value: description,
                         onChanged: (v) => description = v,
-                        toolbarLabel: 'Описание',
-                        placeholder: 'Описание, ссылки, заметки по задаче…',
+                        toolbarLabel: tr("Описание"),
+                        placeholder: tr("Описание, ссылки, заметки по задаче…"),
                       ),
                     ],
                   ),
@@ -1104,7 +1111,7 @@ class _TaskEditorState extends ConsumerState<TaskEditor> {
                   children: [
                     if (task != null) ...[
                       IconButton(
-                        tooltip: 'Удалить задачу',
+                        tooltip: tr("Удалить задачу"),
                         icon: const Icon(
                           Icons.delete_outline_rounded,
                           size: 20,
@@ -1133,7 +1140,9 @@ class _TaskEditorState extends ConsumerState<TaskEditor> {
                                     );
                                     if (context.mounted) Navigator.pop(context);
                                   }),
-                            child: Text(task.done ? 'Вернуть' : 'Завершить'),
+                            child: Text(
+                              task.done ? tr("Вернуть") : tr("Завершить"),
+                            ),
                           ),
                         ),
                       ),
@@ -1142,7 +1151,7 @@ class _TaskEditorState extends ConsumerState<TaskEditor> {
                     const SizedBox(width: 8),
                     FilledButton(
                       onPressed: saving ? null : save,
-                      child: Text(saving ? 'Сохранение…' : 'Сохранить'),
+                      child: Text(saving ? tr("Сохранение…") : tr("Сохранить")),
                     ),
                   ],
                 ),

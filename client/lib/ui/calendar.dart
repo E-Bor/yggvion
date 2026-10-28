@@ -1,3 +1,4 @@
+import '../l10n/strings.dart';
 import 'dart:async';
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
@@ -15,6 +16,7 @@ import '../domain/recurrence.dart';
 import 'providers.dart';
 import 'task_editor.dart';
 import 'theme.dart';
+import 'calendar_zoom.dart';
 import 'birthdays.dart';
 import 'month_planning.dart';
 
@@ -40,10 +42,10 @@ class CalendarToolbar extends StatelessWidget {
 
   static String dateLabel(DateTime date, CalendarView view) {
     if (view == CalendarView.month) {
-      return DateFormat('LLLL y', 'ru').format(date);
+      return DateFormat('LLLL y', AppLocale.language).format(date);
     }
     if (view == CalendarView.day) {
-      return DateFormat('d MMMM y', 'ru').format(date);
+      return DateFormat('d MMMM y', AppLocale.language).format(date);
     }
     final first = DateTime.utc(
       date.year,
@@ -56,7 +58,7 @@ class CalendarToolbar extends StatelessWidget {
         : first.month != last.month
         ? 'd MMM'
         : 'd';
-    return '${DateFormat(pattern, 'ru').format(first)} — ${DateFormat('d MMM y', 'ru').format(last)}';
+    return '${DateFormat(pattern, AppLocale.language).format(first)} — ${DateFormat('d MMM y', AppLocale.language).format(last)}';
   }
 
   void navigate(int direction) {
@@ -77,6 +79,8 @@ class CalendarToolbar extends StatelessWidget {
   Widget build(BuildContext context) => LayoutBuilder(
     builder: (context, constraints) {
       final stacked = showDate && constraints.maxWidth < 460;
+      final compact = constraints.maxWidth < 460;
+      final tiny = constraints.maxWidth < 260;
       final label = Text(
         dateLabel(date, view),
         maxLines: 1,
@@ -92,96 +96,125 @@ class CalendarToolbar extends StatelessWidget {
               padding: const EdgeInsets.only(left: 8, bottom: 4),
               child: label,
             ),
-          Row(
-            children: [
-              IconButton(
-                tooltip: 'Назад',
-                onPressed: () => navigate(-1),
-                visualDensity: VisualDensity.compact,
-                icon: const Icon(Icons.chevron_left_rounded),
-              ),
-              IconButton(
-                tooltip: 'Вперёд',
-                onPressed: () => navigate(1),
-                visualDensity: VisualDensity.compact,
-                icon: const Icon(Icons.chevron_right_rounded),
-              ),
-              TextButton(
-                onPressed: () => onDateChanged(now),
-                child: const Text('Сегодня'),
-              ),
-              const SizedBox(width: 8),
-              if (showDate && !stacked)
-                Expanded(child: label)
-              else
-                const Spacer(),
-              const SizedBox(width: 8),
-              PopupMenuButton<CalendarView>(
-                key: const ValueKey('calendar-view-picker'),
-                tooltip: 'Вид календаря',
-                initialValue: view,
-                position: PopupMenuPosition.under,
-                offset: const Offset(0, 6),
-                borderRadius: BorderRadius.circular(8),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                onSelected: onViewChanged,
-                itemBuilder: (menuContext) => [
-                  for (final value in CalendarView.values)
-                    if (allowMonth || value != CalendarView.month)
-                      PopupMenuItem(
-                        value: value,
-                        child: Row(
-                          children: [
-                            SizedBox(
-                              width: 24,
-                              child: value == view
-                                  ? Icon(
-                                      Icons.check_rounded,
-                                      size: 17,
-                                      color: menuContext.accentColor,
-                                    )
-                                  : null,
-                            ),
-                            const SizedBox(width: 8),
-                            Text(
-                              value.label,
-                              style: const TextStyle(fontSize: 13),
-                            ),
-                          ],
-                        ),
-                      ),
-                ],
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 8,
-                    vertical: 10,
+          Builder(
+            builder: (context) {
+              final controls = Row(
+                children: [
+                  IconButton(
+                    tooltip: tr("Назад"),
+                    onPressed: () => navigate(-1),
+                    visualDensity: VisualDensity.compact,
+                    icon: const Icon(Icons.chevron_left_rounded),
                   ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        view.label,
-                        style: TextStyle(
-                          fontFamily: 'Inter',
-                          color: context.palette.text,
-                          fontSize: 13,
-                          fontWeight: FontWeight.w500,
-                          height: 1.2,
-                        ),
+                  IconButton(
+                    tooltip: tr("Вперёд"),
+                    onPressed: () => navigate(1),
+                    visualDensity: VisualDensity.compact,
+                    icon: const Icon(Icons.chevron_right_rounded),
+                  ),
+                  if (compact)
+                    IconButton(
+                      tooltip: tr("Сегодня"),
+                      onPressed: () => onDateChanged(now),
+                      icon: Icon(
+                        Icons.today_outlined,
+                        size: 20,
+                        color: context.accentColor,
                       ),
-                      const SizedBox(width: 6),
-                      Icon(
-                        Icons.expand_more_rounded,
-                        size: 16,
-                        color: context.palette.muted,
-                      ),
+                      visualDensity: VisualDensity.compact,
+                    )
+                  else
+                    TextButton(
+                      onPressed: () => onDateChanged(now),
+                      child: Text(tr("Сегодня")),
+                    ),
+                  SizedBox(width: tiny ? 0 : 8),
+                  if (showDate && !stacked)
+                    Expanded(child: label)
+                  else
+                    const Spacer(),
+                  SizedBox(width: tiny ? 0 : 8),
+                  if (view != CalendarView.month) const CalendarZoomButton(),
+                  PopupMenuButton<CalendarView>(
+                    key: const ValueKey('calendar-view-picker'),
+                    tooltip: tr("Вид календаря"),
+                    initialValue: view,
+                    position: PopupMenuPosition.under,
+                    offset: const Offset(0, 6),
+                    borderRadius: BorderRadius.circular(8),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    onSelected: onViewChanged,
+                    itemBuilder: (menuContext) => [
+                      for (final value in CalendarView.values)
+                        if (allowMonth || value != CalendarView.month)
+                          PopupMenuItem(
+                            value: value,
+                            child: Row(
+                              children: [
+                                SizedBox(
+                                  width: 24,
+                                  child: value == view
+                                      ? Icon(
+                                          Icons.check_rounded,
+                                          size: 17,
+                                          color: menuContext.accentColor,
+                                        )
+                                      : null,
+                                ),
+                                const SizedBox(width: 8),
+                                Text(
+                                  value.label,
+                                  style: const TextStyle(fontSize: 13),
+                                ),
+                              ],
+                            ),
+                          ),
                     ],
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 10,
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          if (tiny)
+                            const Icon(
+                              Icons.calendar_view_day_rounded,
+                              size: 20,
+                            )
+                          else
+                            Text(
+                              view.label,
+                              style: TextStyle(
+                                fontFamily: 'Inter',
+                                color: context.palette.text,
+                                fontSize: 13,
+                                fontWeight: FontWeight.w500,
+                                height: 1.2,
+                              ),
+                            ),
+                          const SizedBox(width: 6),
+                          Icon(
+                            Icons.expand_more_rounded,
+                            size: 16,
+                            color: context.palette.muted,
+                          ),
+                        ],
+                      ),
+                    ),
                   ),
-                ),
-              ),
-            ],
+                ],
+              );
+              return tiny
+                  ? SingleChildScrollView(
+                      scrollDirection: Axis.horizontal,
+                      child: SizedBox(width: 260, child: controls),
+                    )
+                  : controls;
+            },
           ),
         ],
       );
@@ -307,11 +340,17 @@ class _CalendarPaneState extends ConsumerState<CalendarPane>
       0.0,
       gutter - (horizontal.hasClients ? horizontal.offset : 0.0),
     );
-    final direction = local.dx < visibleGutter + 32
-        ? -1
-        : local.dx > box.size.width - 32
-        ? 1
-        : 0;
+    final direction = mobile
+        ? (local.dx < visibleGutter + 24
+              ? -1
+              : local.dx > box.size.width - 24
+              ? 1
+              : 0)
+        : (local.dx < 0
+              ? -1
+              : local.dx > box.size.width
+              ? 1
+              : 0);
     final boundary = workdayDrag;
     if (boundary != null && direction != 0) {
       if (boundary.start) return 0;
@@ -410,7 +449,8 @@ class _CalendarPaneState extends ConsumerState<CalendarPane>
     day.month,
     day.day,
   ).difference(DateTime.utc(first.year, first.month, first.day)).inDays;
-  static const hourHeight = 72.0, gutter = 48.0;
+  static const gutter = 48.0;
+  double hourHeight = 72.0;
   @override
   void initState() {
     super.initState();
@@ -471,7 +511,9 @@ class _CalendarPaneState extends ConsumerState<CalendarPane>
           },
           onError: (Object e) {
             if (mounted && generation == expansion) {
-              setState(() => error = 'Не удалось раскрыть повторения: $e');
+              setState(
+                () => error = tr("Не удалось раскрыть повторения: {0}", [e]),
+              );
             }
           },
         );
@@ -839,10 +881,30 @@ class _CalendarPaneState extends ConsumerState<CalendarPane>
     if (!mounted || range == null) return;
     await guard(context, () async {
       final current = repo.snapshot.task(task.id);
-      if (current == null) throw StateError('Задача уже удалена');
+      if (current == null) throw StateError(tr("Задача уже удалена"));
       await repo.schedule(current, range.start, range.end);
       if (mounted) widget.onPlaced?.call();
     });
+  }
+
+  void layoutHours(double height, double zoom) {
+    final next = math.max(height / 24, 72.0 * zoom);
+    if ((next - hourHeight).abs() < .01) return;
+    final anchor = scroll.hasClients
+        ? (scroll.offset + height / 2) / hourHeight
+        : null;
+    hourHeight = next;
+    if (anchor != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted || !scroll.hasClients) return;
+        scroll.jumpTo(
+          (anchor * hourHeight - height / 2).clamp(
+            0,
+            scroll.position.maxScrollExtent,
+          ),
+        );
+      });
+    }
   }
 
   @override
@@ -1015,283 +1077,316 @@ class _CalendarPaneState extends ConsumerState<CalendarPane>
                                       ),
                                     const Divider(),
                                     Expanded(
-                                      child: SizedBox(
-                                        key: viewportKey,
-                                        child: Scrollbar(
-                                          controller: scroll,
-                                          child: SingleChildScrollView(
-                                            key: const ValueKey(
-                                              'calendar-scroll',
-                                            ),
-                                            controller: scroll,
-                                            child: SizedBox(
-                                              height: 24 * hourHeight,
-                                              width: fullWidth,
-                                              child: CalendarGestureSurface(
+                                      child: LayoutBuilder(
+                                        builder: (context, viewport) {
+                                          layoutHours(
+                                            viewport.maxHeight,
+                                            repo.calendarZoom,
+                                          );
+                                          return SizedBox(
+                                            key: viewportKey,
+                                            child: Scrollbar(
+                                              controller: scroll,
+                                              child: SingleChildScrollView(
                                                 key: const ValueKey(
-                                                  'calendar-grid-gestures',
+                                                  'calendar-scroll',
                                                 ),
-                                                allowTouchTap:
-                                                    widget.planningPreview,
-                                                onTap: (global) {
-                                                  final position =
-                                                      contentPosition(global);
-                                                  if (position.dx < gutter) {
-                                                    return;
-                                                  }
-                                                  final start = at(
-                                                    position,
-                                                    width,
-                                                    count,
-                                                    first,
-                                                  );
-                                                  place(
-                                                    start,
-                                                    start.add(
-                                                      Duration(
-                                                        minutes:
-                                                            widget
-                                                                .selectionMinutes ??
-                                                            repo
-                                                                .snapshot
-                                                                .settings
-                                                                .defaultMinutes,
-                                                      ),
+                                                controller: scroll,
+                                                child: SizedBox(
+                                                  height: 24 * hourHeight,
+                                                  width: fullWidth,
+                                                  child: CalendarGestureSurface(
+                                                    key: const ValueKey(
+                                                      'calendar-grid-gestures',
                                                     ),
-                                                  );
-                                                },
-                                                onStart: (global) {
-                                                  final position =
-                                                      contentPosition(global);
-                                                  if (position.dx < gutter) {
-                                                    return;
-                                                  }
-                                                  beginInteraction(
-                                                    global,
-                                                    width,
-                                                    count,
-                                                    first,
-                                                  );
-                                                  setState(() {
-                                                    selectionAnchor = at(
-                                                      position,
-                                                      width,
-                                                      count,
-                                                      first,
-                                                    );
-                                                    selectionStart =
-                                                        selectionAnchor;
-                                                    selectionEnd = selectionStart!.add(
-                                                      Duration(
-                                                        minutes:
-                                                            widget
-                                                                .selectionMinutes ??
-                                                            repo
-                                                                .snapshot
-                                                                .settings
-                                                                .defaultMinutes,
-                                                      ),
-                                                    );
-                                                  });
-                                                },
-                                                onUpdate: updateInteraction,
-                                                onCancel: () {
-                                                  if (drag == null &&
-                                                      workdayDrag == null) {
-                                                    cancelInteraction();
-                                                  }
-                                                },
-                                                onEnd: () {
-                                                  final start = selectionStart,
-                                                      end = selectionEnd;
-                                                  cancelInteraction();
-                                                  if (start != null &&
-                                                      end != null) {
-                                                    place(start, end);
-                                                  }
-                                                },
-                                                child: Stack(
-                                                  clipBehavior: Clip.hardEdge,
-                                                  children: [
-                                                    Positioned.fill(
-                                                      child: CustomPaint(
-                                                        painter: _GridPainter(
-                                                          border: context
-                                                              .palette
-                                                              .border,
-                                                          count: count,
-                                                          columnWidth: width,
-                                                          hourHeight:
-                                                              hourHeight,
-                                                          gutter: gutter,
-                                                        ),
-                                                      ),
-                                                    ),
-                                                    for (var h = 0; h < 24; h++)
-                                                      Positioned(
-                                                        left: 8,
-                                                        top: h * hourHeight + 5,
-                                                        child: Text(
-                                                          '${h.toString().padLeft(2, '0')}:00',
-                                                          style:
-                                                              const TextStyle(
-                                                                fontSize: 10,
-                                                                color: Palette
-                                                                    .muted,
-                                                              ),
-                                                        ),
-                                                      ),
-                                                    if (enteringTime)
-                                                      ...planGuides(
-                                                        repo,
-                                                        first,
+                                                    allowTouchTap:
+                                                        widget.planningPreview,
+                                                    onTap: (global) {
+                                                      final position =
+                                                          contentPosition(
+                                                            global,
+                                                          );
+                                                      if (position.dx <
+                                                          gutter) {
+                                                        return;
+                                                      }
+                                                      final start = at(
+                                                        position,
                                                         width,
                                                         count,
-                                                      ),
-                                                    for (
-                                                      var day = 0;
-                                                      day < count;
-                                                      day++
-                                                    )
-                                                      ..._dayBlocks(
-                                                        repo,
-                                                        blocks,
-                                                        _date(
-                                                          first.year,
-                                                          first.month,
-                                                          first.day + day,
-                                                        ),
-                                                        gutter + width * day,
-                                                        width,
                                                         first,
-                                                        count,
-                                                      ),
-                                                    if (drag != null &&
-                                                        interactionOriginFirst !=
-                                                            first)
-                                                      for (
-                                                        var i = 0;
-                                                        i < interactionCount;
-                                                        i++
-                                                      )
-                                                        ..._dayBlocks(
-                                                          repo,
-                                                          [drag!.block],
-                                                          _date(
-                                                            interactionOriginFirst!
-                                                                .year,
-                                                            interactionOriginFirst!
-                                                                .month,
-                                                            interactionOriginFirst!
-                                                                    .day +
-                                                                i,
+                                                      );
+                                                      place(
+                                                        start,
+                                                        start.add(
+                                                          Duration(
+                                                            minutes:
+                                                                widget
+                                                                    .selectionMinutes ??
+                                                                repo
+                                                                    .snapshot
+                                                                    .settings
+                                                                    .defaultMinutes,
                                                           ),
-                                                          -10000,
+                                                        ),
+                                                      );
+                                                    },
+                                                    onStart: (global) {
+                                                      final position =
+                                                          contentPosition(
+                                                            global,
+                                                          );
+                                                      if (position.dx <
+                                                          gutter) {
+                                                        return;
+                                                      }
+                                                      beginInteraction(
+                                                        global,
+                                                        width,
+                                                        count,
+                                                        first,
+                                                      );
+                                                      setState(() {
+                                                        selectionAnchor = at(
+                                                          position,
                                                           width,
-                                                          first,
                                                           count,
-                                                        ),
-                                                    if (!editingDrafts)
-                                                      for (
-                                                        var day = 0;
-                                                        day < count;
-                                                        day++
-                                                      )
-                                                        ..._tracks(
-                                                          repo,
-                                                          _date(
-                                                            first.year,
-                                                            first.month,
-                                                            first.day + day,
-                                                          ),
-                                                          gutter + width * day,
-                                                        ),
-                                                    if (!_clock.isBefore(
                                                           first,
-                                                        ) &&
-                                                        _clock.isBefore(
-                                                          _date(
-                                                            first.year,
-                                                            first.month,
-                                                            first.day + count,
+                                                        );
+                                                        selectionStart =
+                                                            selectionAnchor;
+                                                        selectionEnd =
+                                                            selectionStart!.add(
+                                                              Duration(
+                                                                minutes:
+                                                                    widget
+                                                                        .selectionMinutes ??
+                                                                    repo
+                                                                        .snapshot
+                                                                        .settings
+                                                                        .defaultMinutes,
+                                                              ),
+                                                            );
+                                                      });
+                                                    },
+                                                    onUpdate: updateInteraction,
+                                                    onCancel: () {
+                                                      if (drag == null &&
+                                                          workdayDrag == null) {
+                                                        cancelInteraction();
+                                                      }
+                                                    },
+                                                    onEnd: () {
+                                                      final start =
+                                                              selectionStart,
+                                                          end = selectionEnd;
+                                                      cancelInteraction();
+                                                      if (start != null &&
+                                                          end != null) {
+                                                        place(start, end);
+                                                      }
+                                                    },
+                                                    child: Stack(
+                                                      clipBehavior:
+                                                          Clip.hardEdge,
+                                                      children: [
+                                                        Positioned.fill(
+                                                          child: CustomPaint(
+                                                            painter: _GridPainter(
+                                                              border: context
+                                                                  .palette
+                                                                  .border,
+                                                              count: count,
+                                                              columnWidth:
+                                                                  width,
+                                                              hourHeight:
+                                                                  hourHeight,
+                                                              gutter: gutter,
+                                                            ),
                                                           ),
-                                                        ))
-                                                      Positioned(
-                                                        left:
+                                                        ),
+                                                        for (
+                                                          var h = 0;
+                                                          h < 24;
+                                                          h += hourHeight < 20
+                                                              ? 2
+                                                              : 1
+                                                        )
+                                                          Positioned(
+                                                            left: 8,
+                                                            top:
+                                                                h * hourHeight +
+                                                                5,
+                                                            child: Text(
+                                                              '${h.toString().padLeft(2, '0')}:00',
+                                                              style:
+                                                                  const TextStyle(
+                                                                    fontSize:
+                                                                        10,
+                                                                    color: Palette
+                                                                        .muted,
+                                                                  ),
+                                                            ),
+                                                          ),
+                                                        if (enteringTime)
+                                                          ...planGuides(
+                                                            repo,
+                                                            first,
+                                                            width,
+                                                            count,
+                                                          ),
+                                                        for (
+                                                          var day = 0;
+                                                          day < count;
+                                                          day++
+                                                        )
+                                                          ..._dayBlocks(
+                                                            repo,
+                                                            blocks,
+                                                            _date(
+                                                              first.year,
+                                                              first.month,
+                                                              first.day + day,
+                                                            ),
                                                             gutter +
-                                                            _dayIndex(
-                                                                  _clock,
-                                                                  first,
-                                                                ) *
-                                                                width,
-                                                        top:
-                                                            (_clock.hour +
-                                                                _clock.minute /
-                                                                    60) *
-                                                            hourHeight,
-                                                        right:
-                                                            fullWidth -
-                                                            gutter -
-                                                            (_dayIndex(
+                                                                width * day,
+                                                            width,
+                                                            first,
+                                                            count,
+                                                          ),
+                                                        if (drag != null &&
+                                                            interactionOriginFirst !=
+                                                                first)
+                                                          for (
+                                                            var i = 0;
+                                                            i < interactionCount;
+                                                            i++
+                                                          )
+                                                            ..._dayBlocks(
+                                                              repo,
+                                                              [drag!.block],
+                                                              _date(
+                                                                interactionOriginFirst!
+                                                                    .year,
+                                                                interactionOriginFirst!
+                                                                    .month,
+                                                                interactionOriginFirst!
+                                                                        .day +
+                                                                    i,
+                                                              ),
+                                                              -10000,
+                                                              width,
+                                                              first,
+                                                              count,
+                                                            ),
+                                                        if (!editingDrafts)
+                                                          for (
+                                                            var day = 0;
+                                                            day < count;
+                                                            day++
+                                                          )
+                                                            ..._tracks(
+                                                              repo,
+                                                              _date(
+                                                                first.year,
+                                                                first.month,
+                                                                first.day + day,
+                                                              ),
+                                                              gutter +
+                                                                  width * day,
+                                                            ),
+                                                        if (!_clock.isBefore(
+                                                              first,
+                                                            ) &&
+                                                            _clock.isBefore(
+                                                              _date(
+                                                                first.year,
+                                                                first.month,
+                                                                first.day +
+                                                                    count,
+                                                              ),
+                                                            ))
+                                                          Positioned(
+                                                            left:
+                                                                gutter +
+                                                                _dayIndex(
                                                                       _clock,
                                                                       first,
-                                                                    ) +
-                                                                    1) *
-                                                                width,
-                                                        child: IgnorePointer(
-                                                          child: Row(
-                                                            children: [
-                                                              Container(
-                                                                width: 6,
-                                                                height: 6,
-                                                                decoration: const BoxDecoration(
-                                                                  color: Palette
-                                                                      .pink,
-                                                                  shape: BoxShape
-                                                                      .circle,
-                                                                ),
+                                                                    ) *
+                                                                    width,
+                                                            top:
+                                                                (_clock.hour +
+                                                                    _clock.minute /
+                                                                        60) *
+                                                                hourHeight,
+                                                            right:
+                                                                fullWidth -
+                                                                gutter -
+                                                                (_dayIndex(
+                                                                          _clock,
+                                                                          first,
+                                                                        ) +
+                                                                        1) *
+                                                                    width,
+                                                            child: IgnorePointer(
+                                                              child: Row(
+                                                                children: [
+                                                                  Container(
+                                                                    width: 6,
+                                                                    height: 6,
+                                                                    decoration: const BoxDecoration(
+                                                                      color: Palette
+                                                                          .pink,
+                                                                      shape: BoxShape
+                                                                          .circle,
+                                                                    ),
+                                                                  ),
+                                                                  Expanded(
+                                                                    child: Container(
+                                                                      height: 1,
+                                                                      color: Palette
+                                                                          .pink
+                                                                          .withValues(
+                                                                            alpha:
+                                                                                .7,
+                                                                          ),
+                                                                    ),
+                                                                  ),
+                                                                ],
                                                               ),
-                                                              Expanded(
-                                                                child: Container(
-                                                                  height: 1,
-                                                                  color: Palette
-                                                                      .pink
-                                                                      .withValues(
-                                                                        alpha:
-                                                                            .7,
-                                                                      ),
-                                                                ),
-                                                              ),
-                                                            ],
+                                                            ),
                                                           ),
-                                                        ),
-                                                      ),
-                                                    if (drag != null ||
-                                                        selectionStart != null)
-                                                      ...previewSegments(
-                                                        repo,
-                                                        first,
-                                                        width,
-                                                        count,
-                                                      ),
-                                                    if (!editingDrafts)
-                                                      ...workdayLines(
-                                                        repo,
-                                                        blocks,
-                                                        first,
-                                                        width,
-                                                        count,
-                                                      ),
-                                                    if (drag != null ||
-                                                        workdayDrag != null ||
-                                                        selectionStart != null)
-                                                      ...timeGuide(),
-                                                  ],
+                                                        if (drag != null ||
+                                                            selectionStart !=
+                                                                null)
+                                                          ...previewSegments(
+                                                            repo,
+                                                            first,
+                                                            width,
+                                                            count,
+                                                          ),
+                                                        if (!editingDrafts)
+                                                          ...workdayLines(
+                                                            repo,
+                                                            blocks,
+                                                            first,
+                                                            width,
+                                                            count,
+                                                          ),
+                                                        if (drag != null ||
+                                                            workdayDrag !=
+                                                                null ||
+                                                            selectionStart !=
+                                                                null)
+                                                          ...timeGuide(),
+                                                      ],
+                                                    ),
+                                                  ),
                                                 ),
                                               ),
                                             ),
-                                          ),
-                                        ),
+                                          );
+                                        },
                                       ),
                                     ),
                                   ],
@@ -1363,10 +1458,12 @@ class _CalendarPaneState extends ConsumerState<CalendarPane>
             : (value.hour + value.minute / 60) * hourHeight;
         final color = moving ? context.accentColor : context.palette.muted;
         final title = start
-            ? 'Начало дня'
+            ? tr("Начало дня")
             : nextDay
-            ? 'Конец ${DateFormat('d MMM', 'ru').format(day)}'
-            : 'Конец дня';
+            ? tr("Конец {0}", [
+                DateFormat('d MMM', AppLocale.language).format(day),
+              ])
+            : tr("Конец дня");
         final markerTop = (start ? y + 3 : y - 27).clamp(
           0.0,
           24 * hourHeight - 24,
@@ -1406,7 +1503,10 @@ class _CalendarPaneState extends ConsumerState<CalendarPane>
           child: Align(
             alignment: Alignment.centerLeft,
             child: Tooltip(
-              message: '$title · $time\nПотяните метку, чтобы изменить время.',
+              message: tr("{0} · {1}\nПотяните метку, чтобы изменить время.", [
+                title,
+                time,
+              ]),
               triggerMode: TooltipTriggerMode.manual,
               waitDuration: const Duration(milliseconds: 350),
               child: MouseRegion(
@@ -1436,7 +1536,7 @@ class _CalendarPaneState extends ConsumerState<CalendarPane>
                   },
                   child: Semantics(
                     label: '$title, $time',
-                    hint: 'Перетащите, чтобы изменить время',
+                    hint: tr("Перетащите, чтобы изменить время"),
                     child: Container(
                       width: nearHeaders > 1 ? 18 : 24,
                       height: 24,
@@ -1535,7 +1635,7 @@ class _CalendarPaneState extends ConsumerState<CalendarPane>
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
         Text(
-          DateFormat('EEE', 'ru').format(day),
+          DateFormat('EEE', AppLocale.language).format(day),
           style: TextStyle(
             fontSize: 11,
             color: today ? context.accentColor : context.palette.muted,
@@ -1754,7 +1854,7 @@ class _CalendarPaneState extends ConsumerState<CalendarPane>
             _date(first.year, first.month, first.day + index),
             gutter + width * index + 12,
             width - 21,
-            task?.title ?? 'Новая задача',
+            task?.title ?? tr("Новая задача"),
             color,
           ),
     ];
@@ -1795,7 +1895,10 @@ class _CalendarPaneState extends ConsumerState<CalendarPane>
                 alignment: Alignment.topRight,
                 padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                 child: Text(
-                  '${DateFormat('HH:mm').format(start)} — ${end == to ? '24:00' : DateFormat('HH:mm').format(end)} · план',
+                  tr("{0} — {1} · план", [
+                    DateFormat('HH:mm').format(start),
+                    end == to ? '24:00' : DateFormat('HH:mm').format(end),
+                  ]),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(fontSize: 10, color: context.accentColor),
@@ -1921,7 +2024,7 @@ class _CalendarPaneState extends ConsumerState<CalendarPane>
             ),
             child: Tooltip(
               message:
-                  '${task?.title ?? 'Работа'} · ${formatDuration(finish.difference(start))}',
+                  '${task?.title ?? tr("Работа")} · ${formatDuration(finish.difference(start))}',
               child: GestureDetector(
                 onTap: task == null
                     ? null
@@ -2132,21 +2235,21 @@ Future<void> showCalendarBlockMenu(
     context: context,
     position: menuPosition(context, position),
     items: [
-      const PopupMenuItem(value: 'task', child: Text('Открыть задачу')),
-      const PopupMenuItem(
+      PopupMenuItem(value: 'task', child: Text(tr("Открыть задачу"))),
+      PopupMenuItem(
         value: 'edit',
-        child: Text('Изменить время и напоминания'),
+        child: Text(tr("Изменить время и напоминания")),
       ),
-      const PopupMenuItem(value: 'add', child: Text('Добавить блок')),
-      const PopupMenuItem(value: 'split', child: Text('Разделить блок')),
+      PopupMenuItem(value: 'add', child: Text(tr("Добавить блок"))),
+      PopupMenuItem(value: 'split', child: Text(tr("Разделить блок"))),
       if (!task.done)
-        const PopupMenuItem(
+        PopupMenuItem(
           value: 'review',
-          child: Text('Готово → создать проверку'),
+          child: Text(tr("Готово → создать проверку")),
         ),
       const PopupMenuDivider(),
-      const PopupMenuItem(value: 'unschedule', child: Text('Убрать из плана')),
-      const PopupMenuItem(value: 'delete', child: Text('Удалить задачу')),
+      PopupMenuItem(value: 'unschedule', child: Text(tr("Убрать из плана"))),
+      PopupMenuItem(value: 'delete', child: Text(tr("Удалить задачу"))),
     ],
   );
   if (choice == null || !context.mounted) return;
@@ -2496,7 +2599,7 @@ class _CalendarBlockState extends ConsumerState<CalendarBlock> {
                                           'remove-time-${widget.block.id}',
                                         ),
                                         padding: EdgeInsets.zero,
-                                        tooltip: 'Убрать интервал',
+                                        tooltip: tr("Убрать интервал"),
                                         onPressed: widget.onDelete,
                                         icon: Icon(
                                           Icons.close_rounded,
@@ -2517,8 +2620,8 @@ class _CalendarBlockState extends ConsumerState<CalendarBlock> {
                                         ),
                                         padding: EdgeInsets.zero,
                                         tooltip: task.done
-                                            ? 'Вернуть в работу'
-                                            : 'Завершить',
+                                            ? tr("Вернуть в работу")
+                                            : tr("Завершить"),
                                         onPressed: () => guard(
                                           context,
                                           () => repo.status(
@@ -2547,8 +2650,8 @@ class _CalendarBlockState extends ConsumerState<CalendarBlock> {
                                           ),
                                           padding: EdgeInsets.zero,
                                           tooltip: running
-                                              ? 'Остановить'
-                                              : 'Начать работу',
+                                              ? tr("Остановить")
+                                              : tr("Начать работу"),
                                           onPressed: () => guard(
                                             context,
                                             () =>

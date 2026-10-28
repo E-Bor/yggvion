@@ -1,3 +1,4 @@
+import '../l10n/strings.dart';
 import 'package:flutter/material.dart';
 import 'theme.dart';
 
@@ -18,6 +19,6 @@ class AppLogo extends StatelessWidget {
     color: context.accentColor,
     colorBlendMode: BlendMode.srcIn,
     filterQuality: FilterQuality.high,
-    semanticLabel: 'Yggvion — Щит Иггдрасиля',
+    semanticLabel: tr("Yggvion — Щит Иггдрасиля"),
   );
 }

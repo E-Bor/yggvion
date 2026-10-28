@@ -13,7 +13,7 @@ extension EncryptedSync on SyncService {
       await repo.db.meta(PasswordConfig.storageKey(id)),
     );
     if (_password == null) {
-      throw StateError('Прежний формат шифрования не поддерживается');
+      throw StateError(tr("Прежний формат шифрования не поддерживается"));
     }
     if (_cipher?.id == id) {
       _password!.verify(_cipher!);
@@ -30,22 +30,22 @@ extension EncryptedSync on SyncService {
 
   Future<void> unlockWithPassword(String password) async {
     if (_busy || _pairing) {
-      throw StateError('Дождитесь завершения синхронизации');
+      throw StateError(tr("Дождитесь завершения синхронизации"));
     }
     _busy = true;
     try {
       if (connected) {
         final state = await request('GET', '/api/v1/state');
         if (state['protocol'] != 6) {
-          throw StateError('Нужна новая версия сервера');
+          throw StateError(tr("Нужна новая версия сервера"));
         }
         final raw = state['password_config'];
         if (raw is! Map<String, dynamic>) {
-          throw StateError('На сервере ещё не настроен пароль шифрования');
+          throw StateError(tr("На сервере ещё не настроен пароль шифрования"));
         }
         _password = PasswordConfig.fromJson(raw);
         if (_password!.keyId != state['encryption_key_id']) {
-          throw const FormatException('Некорректные параметры шифрования');
+          throw FormatException(tr("Некорректные параметры шифрования"));
         }
       } else {
         final id = await repo.db.meta('workspace_key_id');
@@ -56,7 +56,9 @@ extension EncryptedSync on SyncService {
               );
       }
       if (_password == null) {
-        throw StateError('Сначала подключитесь к серверу или выберите копию');
+        throw StateError(
+          tr("Сначала подключитесь к серверу или выберите копию"),
+        );
       }
       final key = await _password!.unlock(password);
       await _rememberPassword(_password!, password, key);
@@ -73,7 +75,7 @@ extension EncryptedSync on SyncService {
     String? currentPassword,
   }) async {
     if (_busy || _pairing) {
-      throw StateError('Дождитесь завершения синхронизации');
+      throw StateError(tr("Дождитесь завершения синхронизации"));
     }
     PasswordConfig.validatePassword(password, creating: true);
     _busy = true;
@@ -85,11 +87,11 @@ extension EncryptedSync on SyncService {
               await repo.db.meta(PasswordConfig.storageKey(stored)),
             );
       if (stored != null && current == null) {
-        throw StateError('Прежний формат шифрования не поддерживается');
+        throw StateError(tr("Прежний формат шифрования не поддерживается"));
       }
       if (current != null) {
         if (currentPassword == null) {
-          throw const FormatException('Введите текущий пароль');
+          throw FormatException(tr("Введите текущий пароль"));
         }
         _cipher = await current.unlock(currentPassword);
         _password = current;
@@ -104,12 +106,12 @@ extension EncryptedSync on SyncService {
       if (connected) {
         state = await request('GET', '/api/v1/state');
         if (state['protocol'] != 6) {
-          throw StateError('Нужна новая версия сервера');
+          throw StateError(tr("Нужна новая версия сервера"));
         }
         if ((state['encryption_key_id'] as String).isNotEmpty) {
           if (current == null || state['encryption_key_id'] != current.keyId) {
             throw StateError(
-              'Сначала введите пароль существующего пространства',
+              tr("Сначала введите пароль существующего пространства"),
             );
           }
         }
@@ -192,12 +194,14 @@ extension EncryptedSync on SyncService {
     Map<String, dynamic> state,
   ) async {
     if (state['e2ee'] != true || state['protocol'] != 6) {
-      throw StateError('Нужна новая версия сервера с парольным шифрованием');
+      throw StateError(
+        tr("Нужна новая версия сервера с парольным шифрованием"),
+      );
     }
     var keyId = state['encryption_key_id'] as String;
     if (keyId.isEmpty) {
       if (await repo.db.meta('encrypted_server_key_id') != null) {
-        throw StateError('Сервер потерял настройки шифрования');
+        throw StateError(tr("Сервер потерял настройки шифрования"));
       }
       final key = await prepareWorkspaceKey();
       await client.post<Object?>(
@@ -219,14 +223,16 @@ extension EncryptedSync on SyncService {
       state['password_config'] as Map<String, dynamic>,
     );
     if (config.keyId != keyId) {
-      throw const FormatException('Повреждены параметры шифрования');
+      throw FormatException(tr("Повреждены параметры шифрования"));
     }
     _password = config;
     _requiredKeyId = keyId;
     final password = await credentials.read(key: 'password_$keyId');
     if (password == null) {
       _cipher = null;
-      throw StateError('Введите пароль в разделе «Шифрование» в настройках');
+      throw StateError(
+        tr("Введите пароль в разделе «Шифрование» в настройках"),
+      );
     }
     final key = _cipher?.id == keyId ? _cipher! : await config.unlock(password);
     config.verify(key);
@@ -258,7 +264,7 @@ extension EncryptedSync on SyncService {
           )
           .getSingleOrNull();
       if (row == null) {
-        throw StateError('Вложение ещё не подготовлено для E2EE');
+        throw StateError(tr("Вложение ещё не подготовлено для E2EE"));
       }
       result[id] = row.read<String>('cipher_id');
     }
@@ -272,14 +278,14 @@ extension EncryptedSync on SyncService {
       if (repo.syncError != null) throw StateError(repo.syncError!);
     }
     if (_busy || _pairing) {
-      throw StateError('Дождитесь завершения синхронизации');
+      throw StateError(tr("Дождитесь завершения синхронизации"));
     }
     _busy = true;
     var removed = 0;
     try {
       for (final id in ids) {
         if (!RegExp(r'^[a-f0-9]{64}$').hasMatch(id)) {
-          throw ArgumentError('Некорректное вложение');
+          throw ArgumentError(tr("Некорректное вложение"));
         }
         if (connected) {
           await repo.serial(() async {
@@ -295,7 +301,7 @@ extension EncryptedSync on SyncService {
                 )
                 .getSingleOrNull();
             if (row == null) {
-              throw StateError('Вложение ещё не синхронизировано');
+              throw StateError(tr("Вложение ещё не синхронизировано"));
             }
             final encrypted = await _cipher!.encrypt(catalog.tombstone(), {});
             try {
@@ -319,7 +325,9 @@ extension EncryptedSync on SyncService {
               }
               if (code == 'server_busy') {
                 throw StateError(
-                  'Сервер занят резервным копированием или загрузкой. Повторите очистку позже.',
+                  tr(
+                    "Сервер занят резервным копированием или загрузкой. Повторите очистку позже.",
+                  ),
                 );
               }
               rethrow;
@@ -379,7 +387,7 @@ extension EncryptedSync on SyncService {
     for (final entry in result.attachments.entries) {
       if (!RegExp(r'^[a-f0-9]{64}$').hasMatch(entry.key) ||
           !RegExp(r'^[a-f0-9]{64}$').hasMatch(entry.value)) {
-        throw const FormatException('Неверный идентификатор вложения');
+        throw FormatException(tr("Неверный идентификатор вложения"));
       }
       await repo.db.customStatement(
         'INSERT OR REPLACE INTO encrypted_files VALUES(?,?,?)',
@@ -474,10 +482,10 @@ extension EncryptedSync on SyncService {
       final id = row.read<String>('id');
       final source = File(row.read<String>('path'));
       if (!await source.exists()) {
-        throw StateError('Недоступно вложение для шифрования');
+        throw StateError(tr("Недоступно вложение для шифрования"));
       }
       if ((await sha256.bind(source.openRead()).first).toString() != id) {
-        throw StateError('Вложение повреждено');
+        throw StateError(tr("Вложение повреждено"));
       }
       final temp = await Directory.systemTemp.createTemp('yggvion-encrypted-');
       try {
@@ -543,7 +551,9 @@ extension EncryptedSync on SyncService {
             variables: [Variable(_cipher!.id), Variable(id)],
           )
           .getSingleOrNull();
-      if (row == null) throw StateError('Нет шифрованного вложения в записи');
+      if (row == null) {
+        throw StateError(tr("Нет шифрованного вложения в записи"));
+      }
       final cipherId = row.read<String>('cipher_id');
       final dir = Directory(
         p.join((await getApplicationSupportDirectory()).path, 'attachments'),
@@ -569,11 +579,11 @@ extension EncryptedSync on SyncService {
         );
         if ((await sha256.bind(encrypted.openRead()).first).toString() !=
             cipherId) {
-          throw StateError('Повреждено шифрованное вложение');
+          throw StateError(tr("Повреждено шифрованное вложение"));
         }
         await _cipher!.decryptFile(encrypted, plain, 'attachment:$id');
         if ((await sha256.bind(plain.openRead()).first).toString() != id) {
-          throw StateError('Контрольная сумма вложения не совпадает');
+          throw StateError(tr("Контрольная сумма вложения не совпадает"));
         }
         await plain.rename(target.path);
         await repo.db.customStatement(
@@ -640,7 +650,7 @@ extension EncryptedSync on SyncService {
         final updates = <Map<String, dynamic>>[];
         for (final id in (share['proposal_ids'] as List? ?? const [])) {
           if (id is! String || !RegExp(r'^guest_[a-f0-9]{64}$').hasMatch(id)) {
-            throw const FormatException('Неверный идентификатор предложения');
+            throw FormatException(tr("Неверный идентификатор предложения"));
           }
           final entity = await repo.db.entity(id);
           if (entity == null || entity.version < 1 || entity.kind != 'task') {
@@ -701,7 +711,7 @@ extension EncryptedSync on SyncService {
           title.runes.length > 200 ||
           title.contains(RegExp(r'[\r\n]')) ||
           utf8.encode(description).length > 8000) {
-        throw const FormatException('Неверное предложение события');
+        throw FormatException(tr("Неверное предложение события"));
       }
       final start = DateTime.tryParse(proposal['start'] as String? ?? '');
       final end = DateTime.tryParse(proposal['end'] as String? ?? '');
@@ -710,7 +720,7 @@ extension EncryptedSync on SyncService {
           end == null ||
           !end.isAfter(start) ||
           end.difference(start) > const Duration(days: 1)) {
-        throw const FormatException('Неверное время предложения');
+        throw FormatException(tr("Неверное время предложения"));
       }
       tz.getLocation(zone);
       if (await repo.db.entity(candidate.id) == null) {

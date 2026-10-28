@@ -1,3 +1,4 @@
+import '../l10n/strings.dart';
 import 'dart:io';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
@@ -68,7 +69,9 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
       }
     } catch (error) {
       if (mounted && version == saveVersion) {
-        setState(() => saveError = 'Не удалось сохранить настройки: $error');
+        setState(
+          () => saveError = tr("Не удалось сохранить настройки: {0}", [error]),
+        );
       }
     } finally {
       if (mounted && version == saveVersion) {
@@ -80,7 +83,9 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
   void changeMinutes(String value) {
     final parsed = int.tryParse(value);
     final valid = parsed != null && parsed >= 5 && parsed <= 1440;
-    setState(() => minutesError = valid ? null : 'Введите от 5 до 1440 минут');
+    setState(
+      () => minutesError = valid ? null : tr("Введите от 5 до 1440 минут"),
+    );
     if (valid) {
       defaultMinutes = parsed;
       saveSettings();
@@ -102,7 +107,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
       context: context,
       builder: (c) => StatefulBuilder(
         builder: (c, set) => AlertDialog(
-          title: Text(project == null ? 'Новый проект' : 'Проект'),
+          title: Text(project == null ? tr("Новый проект") : tr("Проект")),
           content: SizedBox(
             width: 380,
             child: Column(
@@ -111,7 +116,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                 TextField(
                   controller: text,
                   autofocus: true,
-                  decoration: const InputDecoration(labelText: 'Название'),
+                  decoration: InputDecoration(labelText: tr("Название")),
                 ),
                 const SizedBox(height: 16),
                 ColorPalettePicker(
@@ -124,7 +129,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(c),
-              child: const Text('Отмена'),
+              child: Text(tr("Отмена")),
             ),
             FilledButton(
               onPressed: () => guard(c, () async {
@@ -133,7 +138,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                     .saveProject(text.text, color, project: project);
                 if (c.mounted) Navigator.pop(c);
               }),
-              child: const Text('Сохранить'),
+              child: Text(tr("Сохранить")),
             ),
           ],
         ),
@@ -152,7 +157,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
     await guard(context, () async {
       final file = File(selected.files.single.path!);
       if (await file.length() > 20 * 1024 * 1024) {
-        throw ArgumentError('Файл календаря превышает 20 МБ');
+        throw ArgumentError(tr("Файл календаря превышает 20 МБ"));
       }
       final repo = ref.read(appProvider);
       final parsed = parseCalendar(
@@ -165,7 +170,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
         context: context,
         builder: (c) => StatefulBuilder(
           builder: (c, set) => AlertDialog(
-            title: const Text('Импорт календаря'),
+            title: Text(tr("Импорт календаря")),
             content: SizedBox(
               width: 520,
               child: SingleChildScrollView(
@@ -174,18 +179,21 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      'Готово к импорту: ${parsed.events.length} событий. Уже импортированные записи будут пропущены.',
+                      tr(
+                        "Готово к импорту: {0} событий. Уже импортированные записи будут пропущены.",
+                        [parsed.events.length],
+                      ),
                     ),
                     const SizedBox(height: 18),
                     DropdownButtonFormField<String>(
                       initialValue: project,
-                      decoration: const InputDecoration(
-                        labelText: 'Проект для календаря',
+                      decoration: InputDecoration(
+                        labelText: tr("Проект для календаря"),
                       ),
                       items: [
-                        const DropdownMenuItem(
+                        DropdownMenuItem(
                           value: '',
-                          child: Text('Без проекта'),
+                          child: Text(tr("Без проекта")),
                         ),
                         ...repo.snapshot.projects.map(
                           (p) => DropdownMenuItem(
@@ -201,17 +209,17 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                       Padding(
                         padding: const EdgeInsets.symmetric(vertical: 4),
                         child: Text(
-                          '${DateFormat('d MMM y', 'ru').format(e.start.toLocal())} · ${e.title}',
+                          '${DateFormat('d MMM y', AppLocale.language).format(e.start.toLocal())} · ${e.title}',
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                         ),
                       ),
                     if (parsed.events.length > 10)
-                      Text('И ещё ${parsed.events.length - 10}…'),
+                      Text(tr("И ещё {0}…", [parsed.events.length - 10])),
                     if (parsed.warnings.isNotEmpty) ...[
                       const SizedBox(height: 16),
                       Text(
-                        'Требуют внимания (${parsed.warnings.length})',
+                        tr("Требуют внимания ({0})", [parsed.warnings.length]),
                         style: TextStyle(color: Theme.of(c).colorScheme.error),
                       ),
                       ...parsed.warnings.map(
@@ -228,7 +236,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
             actions: [
               TextButton(
                 onPressed: () => Navigator.pop(c),
-                child: const Text('Отмена'),
+                child: Text(tr("Отмена")),
               ),
               FilledButton(
                 onPressed: parsed.events.isEmpty
@@ -248,11 +256,13 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                           final messenger = ScaffoldMessenger.of(c);
                           Navigator.pop(c);
                           messenger.showSnackBar(
-                            SnackBar(content: Text('Импортировано: $count')),
+                            SnackBar(
+                              content: Text(tr("Импортировано: {0}", [count])),
+                            ),
                           );
                         }
                       }),
-                child: const Text('Импортировать'),
+                child: Text(tr("Импортировать")),
               ),
             ],
           ),
@@ -265,7 +275,9 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
     padding: const EdgeInsets.only(bottom: 24),
     child: Card(
       child: Padding(
-        padding: const EdgeInsets.all(24),
+        padding: EdgeInsets.all(
+          MediaQuery.sizeOf(context).width < 330 ? 10 : 24,
+        ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
@@ -286,7 +298,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
         notifications = ref.read(remindersProvider);
     final tracking = ref.watch(systemTrackingProvider);
     return ListView(
-      padding: const EdgeInsets.all(24),
+      padding: EdgeInsets.all(MediaQuery.sizeOf(context).width < 330 ? 10 : 24),
       children: [
         Center(
           child: ConstrainedBox(
@@ -307,8 +319,8 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                         Icons.insights_rounded,
                         color: context.accentColor,
                       ),
-                      title: const Text('Статистика'),
-                      subtitle: const Text('План, факт и привычки'),
+                      title: Text(tr("Статистика")),
+                      subtitle: Text(tr("План, факт и привычки")),
                       trailing: const Icon(Icons.chevron_right_rounded),
                       onTap: () => Navigator.push(
                         context,
@@ -320,27 +332,78 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                   ),
                 ),
                 section(
-                  'Оформление',
-                  SwitchListTile.adaptive(
-                    key: const ValueKey('light-theme-toggle'),
-                    activeTrackColor: context.accentColor,
-                    applyCupertinoTheme: true,
-                    contentPadding: EdgeInsets.zero,
-                    secondary: Icon(
-                      repo.lightTheme
-                          ? Icons.light_mode_outlined
-                          : Icons.dark_mode_outlined,
-                      color: context.accentColor,
-                    ),
-                    title: const Text('Светлая тема'),
-                    subtitle: const Text('Сохраняется на этом устройстве'),
-                    value: repo.lightTheme,
-                    onChanged: (value) =>
-                        guard(context, () => repo.setLightTheme(value)),
+                  tr("Оформление"),
+                  Column(
+                    children: [
+                      SwitchListTile.adaptive(
+                        key: const ValueKey('light-theme-toggle'),
+                        activeTrackColor: context.accentColor,
+                        applyCupertinoTheme: true,
+                        contentPadding: EdgeInsets.zero,
+                        secondary: Icon(
+                          repo.lightTheme
+                              ? Icons.light_mode_outlined
+                              : Icons.dark_mode_outlined,
+                          color: context.accentColor,
+                        ),
+                        title: Text(tr("Светлая тема")),
+                        subtitle: Text(tr("Сохраняется на этом устройстве")),
+                        value: repo.lightTheme,
+                        onChanged: (value) =>
+                            guard(context, () => repo.setLightTheme(value)),
+                      ),
+                      const SizedBox(height: 16),
+                      DropdownButtonFormField<double>(
+                        key: const ValueKey('interface-scale'),
+                        initialValue: repo.interfaceScale,
+                        isExpanded: true,
+                        decoration: InputDecoration(
+                          labelText: tr("Масштаб интерфейса"),
+                        ),
+                        items: [
+                          for (final value in [.5, .7, 1.0, 1.5, 2.0])
+                            DropdownMenuItem(
+                              value: value,
+                              child: Text('${(value * 100).round()}%'),
+                            ),
+                        ],
+                        onChanged: (value) {
+                          if (value != null) {
+                            guard(context, () => repo.setInterfaceScale(value));
+                          }
+                        },
+                      ),
+                      const SizedBox(height: 16),
+                      DropdownButtonFormField<String>(
+                        key: const ValueKey('app-language'),
+                        initialValue: repo.language,
+                        isExpanded: true,
+                        decoration: InputDecoration(labelText: tr("Язык")),
+                        items: [
+                          for (final entry in const {
+                            'ru': 'Русский',
+                            'en': 'English',
+                            'es': 'Español',
+                            'de': 'Deutsch',
+                            'zh': '中文',
+                            'hi': 'हिन्दी',
+                          }.entries)
+                            DropdownMenuItem(
+                              value: entry.key,
+                              child: Text(entry.value),
+                            ),
+                        ],
+                        onChanged: (value) {
+                          if (value != null) {
+                            guard(context, () => repo.setLanguage(value));
+                          }
+                        },
+                      ),
+                    ],
                   ),
                 ),
                 section(
-                  'Планирование',
+                  tr("Планирование"),
                   Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
@@ -350,8 +413,8 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                         keyboardType: TextInputType.number,
                         onChanged: changeMinutes,
                         decoration: InputDecoration(
-                          labelText: 'Длительность нового блока',
-                          suffixText: 'минут',
+                          labelText: tr("Длительность нового блока"),
+                          suffixText: tr("минут"),
                           errorText: minutesError,
                         ),
                       ),
@@ -372,7 +435,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                         },
                       ),
                       const SizedBox(height: 20),
-                      const Text('Акцентный цвет'),
+                      Text(tr("Акцентный цвет")),
                       const SizedBox(height: 10),
                       ColorPalettePicker(
                         key: const ValueKey('accent-color-picker'),
@@ -383,7 +446,9 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                       ),
                       const SizedBox(height: 8),
                       Text(
-                        'Логотип, кнопки, выделения, акцентный текст и задачи без проекта. У проектов — собственные цвета.',
+                        tr(
+                          "Логотип, кнопки, выделения, акцентный текст и задачи без проекта. У проектов — собственные цвета.",
+                        ),
                         style: TextStyle(
                           color: context.palette.muted,
                           fontSize: 12,
@@ -393,7 +458,9 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                         Padding(
                           padding: EdgeInsets.only(top: 6),
                           child: Text(
-                            'Иконка приложения тоже меняет цвет. iOS покажет системное уведомление.',
+                            tr(
+                              "Иконка приложения тоже меняет цвет. iOS покажет системное уведомление.",
+                            ),
                             style: TextStyle(
                               color: context.palette.muted,
                               fontSize: 12,
@@ -414,21 +481,21 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                             ),
                             TextButton(
                               onPressed: ref.read(appIconProvider)?.retry,
-                              child: const Text('Повторить смену иконки'),
+                              child: Text(tr("Повторить смену иконки")),
                             ),
                           ],
                         ),
                       const SizedBox(height: 12),
                       const Divider(),
                       const SizedBox(height: 12),
-                      const Text('Точность поиска'),
+                      Text(tr("Точность поиска")),
                       const SizedBox(height: 10),
                       SegmentedButton<int>(
                         key: const ValueKey('search-typos'),
-                        segments: const [
-                          ButtonSegment(value: 0, label: Text('Точно')),
-                          ButtonSegment(value: 1, label: Text('1 ошибка')),
-                          ButtonSegment(value: 2, label: Text('2 ошибки')),
+                        segments: [
+                          ButtonSegment(value: 0, label: Text(tr("Точно"))),
+                          ButtonSegment(value: 1, label: Text(tr("1 ошибка"))),
+                          ButtonSegment(value: 2, label: Text(tr("2 ошибки"))),
                         ],
                         selected: {
                           pendingSearchTypos ??
@@ -440,7 +507,9 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                       ),
                       const SizedBox(height: 8),
                       Text(
-                        'Одна буква ищется точно, для двух букв допускается не больше одной ошибки. Дописывать слово не нужно. Сначала идут заметки, затем события; в каждой группе — заголовки, потом текст. Точные совпадения первыми внутри группы.',
+                        tr(
+                          "Одна буква ищется точно, для двух букв допускается не больше одной ошибки. Дописывать слово не нужно. Сначала идут заметки, затем события; в каждой группе — заголовки, потом текст. Точные совпадения первыми внутри группы.",
+                        ),
                         style: TextStyle(
                           color: context.palette.muted,
                           fontSize: 12,
@@ -450,8 +519,8 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                       Text(
                         saveError ??
                             (savingSettings
-                                ? 'Сохраняется…'
-                                : 'Изменения сохраняются автоматически'),
+                                ? tr("Сохраняется…")
+                                : tr("Изменения сохраняются автоматически")),
                         style: TextStyle(
                           color: saveError == null
                               ? context.palette.muted
@@ -464,7 +533,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                           alignment: Alignment.centerLeft,
                           child: TextButton(
                             onPressed: saveSettings,
-                            child: const Text('Повторить'),
+                            child: Text(tr("Повторить")),
                           ),
                         ),
                     ],
@@ -486,11 +555,13 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                         Icons.cake_outlined,
                         color: context.palette.accent(birthdayColor),
                       ),
-                      title: const Text('Дни рождения'),
+                      title: Text(tr("Дни рождения")),
                       subtitle: Text(
                         repo.snapshot.birthdays.isEmpty
-                            ? 'Имена, даты и ежегодные напоминания'
-                            : 'Людей в списке: ${repo.snapshot.birthdays.length}',
+                            ? tr("Имена, даты и ежегодные напоминания")
+                            : tr("Людей в списке: {0}", [
+                                repo.snapshot.birthdays.length,
+                              ]),
                         style: TextStyle(
                           color: context.palette.muted,
                           fontSize: 12,
@@ -504,9 +575,9 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                     ),
                   ),
                 ),
-                section('Рабочий день', const WorkdaySettings()),
+                section(tr("Рабочий день"), const WorkdaySettings()),
                 section(
-                  'Проекты',
+                  tr("Проекты"),
                   Column(
                     children: [
                       for (final project in repo.snapshot.projects)
@@ -520,23 +591,25 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                           title: Text(project.title),
                           onTap: () => projectDialog(project: project),
                           trailing: IconButton(
-                            tooltip: 'Удалить проект',
+                            tooltip: tr("Удалить проект"),
                             onPressed: () => guard(context, () async {
                               final yes = await showDialog<bool>(
                                 context: context,
                                 builder: (c) => AlertDialog(
-                                  title: const Text('Удалить проект?'),
-                                  content: const Text(
-                                    'Задачи сохранятся и станут задачами без проекта.',
+                                  title: Text(tr("Удалить проект?")),
+                                  content: Text(
+                                    tr(
+                                      "Задачи сохранятся и станут задачами без проекта.",
+                                    ),
                                   ),
                                   actions: [
                                     TextButton(
                                       onPressed: () => Navigator.pop(c, false),
-                                      child: const Text('Отмена'),
+                                      child: Text(tr("Отмена")),
                                     ),
                                     FilledButton(
                                       onPressed: () => Navigator.pop(c, true),
-                                      child: const Text('Удалить'),
+                                      child: Text(tr("Удалить")),
                                     ),
                                   ],
                                 ),
@@ -556,35 +629,43 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                         child: TextButton.icon(
                           onPressed: projectDialog,
                           icon: const Icon(Icons.add_rounded),
-                          label: const Text('Создать проект'),
+                          label: Text(tr("Создать проект")),
                         ),
                       ),
                     ],
                   ),
                 ),
                 section(
-                  'Уведомления на этом устройстве',
+                  tr("Уведомления на этом устройстве"),
                   Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        'Разрешите уведомления на каждом устройстве. Ближайшие 60 напоминаний о синхронизированных задачах сохраняются в системе и работают без интернета. При открытии приложения список обновляется.',
+                        tr(
+                          "Разрешите уведомления на каждом устройстве. Ближайшие 60 напоминаний о синхронизированных задачах сохраняются в системе и работают без интернета. При открытии приложения список обновляется.",
+                        ),
                         style: TextStyle(color: context.palette.muted),
                       ),
                       if (Platform.isLinux)
-                        const Padding(
+                        Padding(
                           padding: EdgeInsets.only(top: 12),
                           child: Text(
-                            'Для доставки после закрытия приложения установите фоновую службу из пакета Linux.',
+                            tr(
+                              "Для доставки после закрытия приложения установите фоновую службу из пакета Linux.",
+                            ),
                           ),
                         ),
                       const SizedBox(height: 12),
                       Text(
                         notifications.permissionGranted == false
-                            ? 'Уведомления выключены. Разрешите их в системных настройках для Yggvion.'
+                            ? tr(
+                                "Уведомления выключены. Разрешите их в системных настройках для Yggvion.",
+                              )
                             : notifications.permissionGranted == true
-                            ? 'Разрешены · запланировано ${notifications.scheduledCount}'
-                            : 'Проверьте разрешение на этом устройстве',
+                            ? tr("Разрешены · запланировано {0}", [
+                                notifications.scheduledCount,
+                              ])
+                            : tr("Проверьте разрешение на этом устройстве"),
                         style: TextStyle(
                           color: notifications.permissionGranted == false
                               ? context.palette.pink
@@ -610,7 +691,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                         onPressed: () =>
                             guard(context, notifications.openSettings),
                         icon: const Icon(Icons.notifications_active_outlined),
-                        label: const Text('Разрешить уведомления'),
+                        label: Text(tr("Разрешить уведомления")),
                       ),
                       const SizedBox(height: 10),
                       TextButton.icon(
@@ -618,28 +699,28 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                           await notifications.testNotification();
                           if (context.mounted) {
                             ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(
+                              SnackBar(
                                 content: Text(
-                                  'Тестовое уведомление через 10 секунд',
+                                  tr("Тестовое уведомление через 10 секунд"),
                                 ),
                               ),
                             );
                           }
                         }),
                         icon: const Icon(Icons.notification_add_outlined),
-                        label: const Text('Проверить уведомление'),
+                        label: Text(tr("Проверить уведомление")),
                       ),
                     ],
                   ),
                 ),
                 section(
-                  'Подключение',
+                  tr("Подключение"),
                   Column(
                     children: [
                       ListTile(
                         leading: const Icon(Icons.sync_rounded),
-                        title: const Text('Синхронизация'),
-                        subtitle: Text(repo.syncStatus),
+                        title: Text(tr("Синхронизация")),
+                        subtitle: Text(tr(repo.syncStatus)),
                         trailing: const Icon(Icons.chevron_right_rounded),
                         onTap: () => Navigator.push(
                           context,
@@ -650,9 +731,9 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                       ),
                       ListTile(
                         leading: const Icon(Icons.lock_outline_rounded),
-                        title: const Text('Шифрование'),
-                        subtitle: const Text(
-                          'Пароль для синхронизации и резервных копий',
+                        title: Text(tr("Шифрование")),
+                        subtitle: Text(
+                          tr("Пароль для синхронизации и резервных копий"),
                         ),
                         trailing: const Icon(Icons.chevron_right_rounded),
                         onTap: () => Navigator.push(
@@ -664,7 +745,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                       ),
                       ListTile(
                         leading: const Icon(Icons.backup_outlined),
-                        title: const Text('Резервное копирование'),
+                        title: Text(tr("Резервное копирование")),
                         trailing: const Icon(Icons.chevron_right_rounded),
                         onTap: () => Navigator.push(
                           context,
@@ -677,13 +758,13 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                   ),
                 ),
                 section(
-                  'Перенос данных',
+                  tr("Перенос данных"),
                   Align(
                     alignment: Alignment.centerLeft,
                     child: OutlinedButton.icon(
                       onPressed: importFile,
                       icon: const Icon(Icons.file_download_outlined),
-                      label: const Text('Импорт Google Calendar (.ics)'),
+                      label: Text(tr("Импорт Google Calendar (.ics)")),
                     ),
                   ),
                 ),
@@ -693,7 +774,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                       repo.now(),
                     ).isNotEmpty)
                   section(
-                    'Конфликты между устройствами',
+                    tr("Конфликты между устройствами"),
                     const ConflictsPanel(),
                   ),
               ],
@@ -709,29 +790,29 @@ class ConflictsPanel extends ConsumerWidget {
   const ConflictsPanel({super.key});
 
   String describe(Map record, Snapshot snapshot) {
-    if (record['deleted'] == true) return 'Запись удалена';
+    if (record['deleted'] == true) return tr("Запись удалена");
     final data = record['data'] as Map;
-    const labels = {
-      'title': 'Название',
-      'description': 'Описание',
-      'content': 'Текст',
-      'status': 'Статус',
-      'project_id': 'Проект',
-      'task_id': 'Задача',
-      'start': 'Начало',
-      'end': 'Конец',
-      'at': 'Напомнить',
-      'timezone': 'Часовой пояс',
-      'all_day': 'На весь день',
-      'default_minutes': 'Блок по умолчанию, мин',
-      'reminders': 'Напоминания, мин до начала',
-      'task_color': 'Акцентный цвет',
-      'search_typos': 'Допуск опечаток',
+    final labels = {
+      'title': tr("Название"),
+      'description': tr("Описание"),
+      'content': tr("Текст"),
+      'status': tr("Статус"),
+      'project_id': tr("Проект"),
+      'task_id': tr("Задача"),
+      'start': tr("Начало"),
+      'end': tr("Конец"),
+      'at': tr("Напомнить"),
+      'timezone': tr("Часовой пояс"),
+      'all_day': tr("На весь день"),
+      'default_minutes': tr("Блок по умолчанию, мин"),
+      'reminders': tr("Напоминания, мин до начала"),
+      'task_color': tr("Акцентный цвет"),
+      'search_typos': tr("Допуск опечаток"),
     };
     return labels.entries
         .where((e) => data.containsKey(e.key))
         .map((e) {
-          var value = '${data[e.key] ?? 'сейчас'}';
+          var value = '${data[e.key] ?? tr("сейчас")}';
           if (['start', 'end', 'at'].contains(e.key) && data[e.key] != null) {
             value = DateFormat(
               'dd.MM.yyyy HH:mm',
@@ -739,11 +820,11 @@ class ConflictsPanel extends ConsumerWidget {
           } else if (e.key == 'status') {
             value = TaskStatus.parse(value).label;
           } else if (e.key == 'project_id') {
-            value = snapshot.project(value)?.title ?? 'Без проекта';
+            value = snapshot.project(value)?.title ?? tr("Без проекта");
           } else if (e.key == 'task_id') {
-            value = snapshot.task(value)?.title ?? 'Удалённая задача';
+            value = snapshot.task(value)?.title ?? tr("Удалённая задача");
           } else if (e.key == 'all_day') {
-            value = data[e.key] == true ? 'Да' : 'Нет';
+            value = data[e.key] == true ? tr("Да") : tr("Нет");
           } else if (e.key == 'task_color') {
             final color = data[e.key] as int? ?? AppSettings.defaultAccentColor;
             final index = Palette.projects.indexWhere(
@@ -773,14 +854,22 @@ class ConflictsPanel extends ConsumerWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text(
-                    'Пересекающееся потраченное время',
+                  Text(
+                    tr("Пересекающееся потраченное время"),
                     style: TextStyle(fontWeight: FontWeight.w600),
                   ),
                   const SizedBox(height: 8),
                   for (final s in conflict.sessions)
                     Text(
-                      'Устройство ${conflict.devices.toList().indexOf(s.deviceId) + 1}${s.deviceId == repo.deviceId ? ' (это)' : ''} · ${repo.snapshot.task(s.taskId)?.title ?? 'Задача'}\n${DateFormat('dd.MM HH:mm').format(s.start.toLocal())} — ${s.end == null ? 'сейчас' : DateFormat('HH:mm').format(s.end!.toLocal())}',
+                      tr("Устройство {0}{1} · {2}\n{3} — {4}", [
+                        conflict.devices.toList().indexOf(s.deviceId) + 1,
+                        s.deviceId == repo.deviceId ? tr(" (это)") : '',
+                        repo.snapshot.task(s.taskId)?.title ?? tr("Задача"),
+                        DateFormat('dd.MM HH:mm').format(s.start.toLocal()),
+                        s.end == null
+                            ? tr("сейчас")
+                            : DateFormat('HH:mm').format(s.end!.toLocal()),
+                      ]),
                       style: TextStyle(
                         fontSize: 12,
                         color: context.palette.muted,
@@ -798,7 +887,9 @@ class ConflictsPanel extends ConsumerWidget {
                             () => repo.resolveSessions(conflict, device),
                           ),
                           child: Text(
-                            'Устройство ${conflict.devices.toList().indexOf(device) + 1}',
+                            tr("Устройство {0}", [
+                              conflict.devices.toList().indexOf(device) + 1,
+                            ]),
                           ),
                         ),
                       FilledButton.tonal(
@@ -806,7 +897,7 @@ class ConflictsPanel extends ConsumerWidget {
                           context,
                           () => repo.resolveSessions(conflict, null),
                         ),
-                        child: const Text('Объединить'),
+                        child: Text(tr("Объединить")),
                       ),
                     ],
                   ),
@@ -828,19 +919,25 @@ class ConflictsPanel extends ConsumerWidget {
                       children: [
                         Text(
                           (c['local'] as Map)['data']['title'] as String? ??
-                              'Изменения записи',
+                              tr("Изменения записи"),
                           style: const TextStyle(fontWeight: FontWeight.w600),
                         ),
                         const SizedBox(height: 10),
                         ExpansionTile(
                           tilePadding: EdgeInsets.zero,
-                          title: const Text(
-                            'Сравнить версии',
+                          title: Text(
+                            tr("Сравнить версии"),
                             style: TextStyle(fontSize: 13),
                           ),
                           children: [
                             SelectableText(
-                              'На этом устройстве\n\n${describe(c['local'] as Map, repo.snapshot)}\n\nСинхронизированная версия\n\n${describe(c['remote'] as Map, repo.snapshot)}',
+                              tr(
+                                "На этом устройстве\n\n{0}\n\nСинхронизированная версия\n\n{1}",
+                                [
+                                  describe(c['local'] as Map, repo.snapshot),
+                                  describe(c['remote'] as Map, repo.snapshot),
+                                ],
+                              ),
                               style: const TextStyle(fontSize: 12),
                             ),
                           ],
@@ -857,7 +954,7 @@ class ConflictsPanel extends ConsumerWidget {
                                   keepLocal: true,
                                 ),
                               ),
-                              child: const Text('Оставить мою'),
+                              child: Text(tr("Оставить мою")),
                             ),
                             TextButton(
                               onPressed: () => guard(
@@ -867,7 +964,7 @@ class ConflictsPanel extends ConsumerWidget {
                                   keepLocal: false,
                                 ),
                               ),
-                              child: const Text('С сервера'),
+                              child: Text(tr("С сервера")),
                             ),
                             if ((c['local'] as Map)['kind'] == 'note')
                               FilledButton.tonal(
@@ -879,7 +976,7 @@ class ConflictsPanel extends ConsumerWidget {
                                     keepBoth: true,
                                   ),
                                 ),
-                                child: const Text('Сохранить обе'),
+                                child: Text(tr("Сохранить обе")),
                               ),
                           ],
                         ),

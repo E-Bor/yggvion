@@ -70,11 +70,18 @@ void main() {
           tester.widget<Text>(find.text('Задача проекта')).style!.color,
           projectColor,
         );
-        final today = find.descendant(
-          of: find.byType(CalendarToolbar),
-          matching: find.text('Сегодня'),
-        );
-        expect(DefaultTextStyle.of(tester.element(today)).style.color, rose);
+        if (mobile) {
+          expect(
+            tester.widget<Icon>(find.byIcon(Icons.today_outlined)).color,
+            rose,
+          );
+        } else {
+          final today = find.descendant(
+            of: find.byType(CalendarToolbar),
+            matching: find.text('Сегодня'),
+          );
+          expect(DefaultTextStyle.of(tester.element(today)).style.color, rose);
+        }
         if (!mobile) {
           expect(
             tester

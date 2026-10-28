@@ -1,10 +1,11 @@
+import '../l10n/strings.dart';
 import 'package:flutter/material.dart';
 import 'theme.dart';
 
 Future<void> showShortcutHelp(BuildContext context) => showDialog<void>(
   context: context,
   builder: (c) => AlertDialog(
-    title: const Text('Горячие клавиши'),
+    title: Text(tr("Горячие клавиши")),
     content: SizedBox(
       width: 470,
       child: SingleChildScrollView(
@@ -14,25 +15,25 @@ Future<void> showShortcutHelp(BuildContext context) => showDialog<void>(
             Padding(
               padding: EdgeInsets.only(bottom: 16),
               child: Text(
-                'На Mac — ⌘, на Windows и Linux — Ctrl.',
+                tr("На Mac — ⌘, на Windows и Linux — Ctrl."),
                 style: TextStyle(color: context.palette.muted),
               ),
             ),
             for (final item in [
-              ('Поиск по всему пространству', '⌘ / Ctrl + F'),
-              ('Поиск · альтернативная комбинация', '⌘ / Ctrl + K'),
-              ('Новая задача', '⌘ / Ctrl + N'),
-              ('Новая заметка', '⌘ / Ctrl + Shift + N'),
-              ('Сегодня', '⌘ / Ctrl + 1'),
-              ('Планировщик', '⌘ / Ctrl + 2'),
-              ('Канбан', '⌘ / Ctrl + 3'),
-              ('Заметки', '⌘ / Ctrl + 4'),
-              ('Настройки', '⌘ / Ctrl + 5 или ,'),
-              ('Пауза / продолжить таймер', '⌘ / Ctrl + Shift + Space'),
-              ('Сохранить задачу из названия', 'Enter'),
-              ('Перейти в описание задачи', '⌘ / Ctrl + Enter'),
-              ('Закрыть окно / отменить выбор', 'Esc'),
-              ('Эта справка', 'F1'),
+              (tr("Поиск по всему пространству"), '⌘ / Ctrl + F'),
+              (tr("Поиск · альтернативная комбинация"), '⌘ / Ctrl + K'),
+              (tr("Новая задача"), '⌘ / Ctrl + N'),
+              (tr("Новая заметка"), '⌘ / Ctrl + Shift + N'),
+              (tr("Сегодня"), '⌘ / Ctrl + 1'),
+              (tr("Планировщик"), '⌘ / Ctrl + 2'),
+              (tr("Канбан"), '⌘ / Ctrl + 3'),
+              (tr("Заметки"), '⌘ / Ctrl + 4'),
+              (tr("Настройки"), tr("⌘ / Ctrl + 5 или ,")),
+              (tr("Пауза / продолжить таймер"), '⌘ / Ctrl + Shift + Space'),
+              (tr("Сохранить задачу из названия"), 'Enter'),
+              (tr("Перейти в описание задачи"), '⌘ / Ctrl + Enter'),
+              (tr("Закрыть окно / отменить выбор"), 'Esc'),
+              (tr("Эта справка"), 'F1'),
             ])
               Padding(
                 padding: const EdgeInsets.symmetric(vertical: 8),
@@ -57,10 +58,7 @@ Future<void> showShortcutHelp(BuildContext context) => showDialog<void>(
       ),
     ),
     actions: [
-      TextButton(
-        onPressed: () => Navigator.pop(c),
-        child: const Text('Готово'),
-      ),
+      TextButton(onPressed: () => Navigator.pop(c), child: Text(tr("Готово"))),
     ],
   ),
 );

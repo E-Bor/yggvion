@@ -1,3 +1,4 @@
+import '../l10n/strings.dart';
 import 'package:timezone/timezone.dart' as tz;
 import 'models.dart';
 import 'workday.dart';
@@ -395,8 +396,8 @@ class StatisticsReport {
             (projectActual[id]?.isNotEmpty ?? false))
           ProjectStatistics(
             id.isEmpty
-                ? 'Без проекта'
-                : snapshot.project(id)?.title ?? 'Удалённый проект',
+                ? tr("Без проекта")
+                : snapshot.project(id)?.title ?? tr("Удалённый проект"),
             snapshot.project(id)?.color ?? snapshot.settings.accentColor,
             sumRanges(projectPlans[id] ?? []),
             sumRanges(unionRanges(projectActual[id] ?? [])),

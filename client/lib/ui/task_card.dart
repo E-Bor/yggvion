@@ -1,3 +1,4 @@
+import '../l10n/strings.dart';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -88,22 +89,19 @@ class TaskCard extends ConsumerWidget {
   }
 
   List<PopupMenuEntry<String>> menu() => [
-    const PopupMenuItem(value: 'edit', child: Text('Редактировать')),
+    PopupMenuItem(value: 'edit', child: Text(tr("Редактировать"))),
     const PopupMenuDivider(),
     if (!task.done)
-      const PopupMenuItem(
+      PopupMenuItem(
         value: 'review',
-        child: Text('Готово → создать проверку'),
+        child: Text(tr("Готово → создать проверку")),
       ),
-    const PopupMenuItem(
-      value: 'time',
-      child: Text('Добавить потраченное время'),
-    ),
+    PopupMenuItem(value: 'time', child: Text(tr("Добавить потраченное время"))),
     const PopupMenuDivider(),
     for (final s in TaskStatus.values)
       PopupMenuItem(value: 'status:${s.wire}', child: Text(s.label)),
     const PopupMenuDivider(),
-    const PopupMenuItem(value: 'delete', child: Text('Удалить')),
+    PopupMenuItem(value: 'delete', child: Text(tr("Удалить"))),
   ];
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -249,7 +247,9 @@ class TaskCard extends ConsumerWidget {
                   height: 32,
                   child: IconButton(
                     padding: EdgeInsets.zero,
-                    tooltip: running ? 'Остановить таймер' : 'Начать работу',
+                    tooltip: running
+                        ? tr("Остановить таймер")
+                        : tr("Начать работу"),
                     onPressed: task.done
                         ? null
                         : () => guard(context, () => repo.toggleTimer(task)),
@@ -268,7 +268,7 @@ class TaskCard extends ConsumerWidget {
                     height: 32,
                     child: PopupMenuButton<String>(
                       key: ValueKey('task-menu-${task.id}'),
-                      tooltip: 'Действия с задачей',
+                      tooltip: tr("Действия с задачей"),
                       padding: EdgeInsets.zero,
                       iconSize: 17,
                       onSelected: (v) => action(context, ref, v),

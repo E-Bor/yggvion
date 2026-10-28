@@ -1,3 +1,4 @@
+import '../l10n/strings.dart';
 import 'package:rrule/rrule.dart';
 import 'package:timezone/timezone.dart' as tz;
 import 'package:uuid/uuid.dart';
@@ -79,7 +80,7 @@ class RecurrenceService {
   Future<void> changeRuleFrom(Task task, String rule, {String? blockId}) async {
     if (rule.isNotEmpty) parse(rule);
     final blocks = repo.snapshot.taskBlocks(task.id);
-    if (blocks.isEmpty) throw StateError('Сначала запланируйте задачу');
+    if (blocks.isEmpty) throw StateError(tr("Сначала запланируйте задачу"));
     final block =
         blocks.where((b) => b.id == blockId).firstOrNull ?? blocks.first;
     if (task.seriesId.isEmpty) {
@@ -87,7 +88,7 @@ class RecurrenceService {
       return;
     }
     final old = await repo.db.entity(task.seriesId);
-    if (old == null || old.deleted) throw StateError('Серия уже удалена');
+    if (old == null || old.deleted) throw StateError(tr("Серия уже удалена"));
     final cutoff = parseTime(task.occurrence);
     final changes = <Entity>[
       old.change({

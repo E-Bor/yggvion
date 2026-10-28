@@ -1,3 +1,4 @@
+import '../l10n/strings.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -185,7 +186,7 @@ class _WikiAutocompleteState extends ConsumerState<WikiAutocomplete> {
                       Padding(
                         padding: EdgeInsets.fromLTRB(12, 9, 12, 5),
                         child: Text(
-                          'Ссылка на заметку',
+                          tr("Ссылка на заметку"),
                           style: TextStyle(
                             fontSize: 11,
                             color: context.palette.muted,
@@ -193,10 +194,10 @@ class _WikiAutocompleteState extends ConsumerState<WikiAutocomplete> {
                         ),
                       ),
                       if (notes.isEmpty)
-                        const Padding(
+                        Padding(
                           padding: EdgeInsets.all(12),
                           child: Text(
-                            'Заметок не найдено',
+                            tr("Заметок не найдено"),
                             style: TextStyle(fontSize: 13),
                           ),
                         )

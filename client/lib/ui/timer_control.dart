@@ -1,3 +1,4 @@
+import '../l10n/strings.dart';
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -50,8 +51,8 @@ class _TimerControlState extends ConsumerState<TimerControl> {
     final time =
         '${part(duration.inHours)}:${part(duration.inMinutes % 60)}:${part(duration.inSeconds % 60)}';
     final tooltip = task == null
-        ? 'Включите таймер задачи в календаре'
-        : '${running ? 'Остановить' : 'Продолжить'}: ${task.title} · ⌘⇧Space / Ctrl+Shift+Space';
+        ? tr("Включите таймер задачи в календаре")
+        : '${running ? tr("Остановить") : tr("Продолжить")}: ${task.title} · ⌘⇧Space / Ctrl+Shift+Space';
     final enabled = task != null && !task.done;
     return Tooltip(
       message: tooltip,

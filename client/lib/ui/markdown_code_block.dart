@@ -1,3 +1,4 @@
+import '../l10n/strings.dart';
 import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -104,7 +105,7 @@ class _MarkdownCodeBlockState extends State<MarkdownCodeBlock> {
                 child: Text(
                   widget.language?.isNotEmpty == true
                       ? widget.language!
-                      : 'Код',
+                      : tr("Код"),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(fontSize: 11, color: context.palette.muted),
@@ -140,7 +141,9 @@ class _MarkdownCodeBlockState extends State<MarkdownCodeBlock> {
                       duration: const Duration(milliseconds: 120),
                       opacity: showCopy ? 1 : 0,
                       child: IconButton(
-                        tooltip: copied ? 'Скопировано' : 'Скопировать код',
+                        tooltip: copied
+                            ? tr("Скопировано")
+                            : tr("Скопировать код"),
                         onPressed: copy,
                         icon: Icon(
                           copied ? Icons.check_rounded : Icons.copy_rounded,

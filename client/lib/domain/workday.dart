@@ -1,3 +1,4 @@
+import '../l10n/strings.dart';
 import 'package:timezone/timezone.dart' as tz;
 import 'models.dart';
 
@@ -24,12 +25,12 @@ class WorkdayPattern {
         end - start < 5 ||
         end > start + 1440 ||
         days.any((day) => day < 1 || day > 7)) {
-      throw const FormatException('Некорректный режим рабочего дня');
+      throw FormatException(tr("Некорректный режим рабочего дня"));
     }
     if (until != null) {
       final date = DateTime.tryParse(until!);
       if (date == null || dayKey(date) != until) {
-        throw const FormatException('Некорректная дата смены рабочего режима');
+        throw FormatException(tr("Некорректная дата смены рабочего режима"));
       }
     }
   }
@@ -64,7 +65,7 @@ class WorkdayHistory {
       pattern.validate();
       final until = pattern.until;
       if (until == null || (last != null && until.compareTo(last) <= 0)) {
-        throw const FormatException('Некорректная история рабочего режима');
+        throw FormatException(tr("Некорректная история рабочего режима"));
       }
       last = until;
     }
@@ -122,7 +123,7 @@ class WorkdayRecord {
   void validate() {
     final date = DateTime.tryParse(day);
     if (date == null || dayKey(date) != day || entity.id != 'workday-$day') {
-      throw const FormatException('Некорректная дата рабочего дня');
+      throw FormatException(tr("Некорректная дата рабочего дня"));
     }
     for (final range in [
       TimeRange(plannedStart, plannedEnd),
@@ -130,7 +131,7 @@ class WorkdayRecord {
     ]) {
       if (range.end.difference(range.start) < const Duration(minutes: 5) ||
           range.end.difference(range.start) > const Duration(hours: 25)) {
-        throw const FormatException('Некорректные границы рабочего дня');
+        throw FormatException(tr("Некорректные границы рабочего дня"));
       }
     }
   }

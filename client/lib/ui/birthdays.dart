@@ -1,3 +1,4 @@
+import '../l10n/strings.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
@@ -38,12 +39,14 @@ class BirthdayPage extends ConsumerWidget {
               Padding(
                 padding: EdgeInsets.fromLTRB(0, 16, 0, 6),
                 child: Text(
-                  'Близкие люди — в календаре. Возраст посчитается автоматически.',
+                  tr(
+                    "Близкие люди — в календаре. Возраст посчитается автоматически.",
+                  ),
                   style: TextStyle(color: context.palette.muted, height: 1.5),
                 ),
               ),
               Text(
-                'Напоминание в день рождения · 09:00 · ${zone.name}',
+                tr("Напоминание в день рождения · 09:00 · {0}", [zone.name]),
                 style: TextStyle(
                   color: context.palette.accent(birthdayColor),
                   fontSize: 12,
@@ -53,10 +56,12 @@ class BirthdayPage extends ConsumerWidget {
               const SizedBox(height: 24),
               Expanded(
                 child: list.isEmpty
-                    ? const EmptyState(
+                    ? EmptyState(
                         icon: Icons.cake_outlined,
-                        title: 'Важные даты всегда рядом',
-                        subtitle: 'Нажмите + и укажите имя и дату рождения.',
+                        title: tr("Важные даты всегда рядом"),
+                        subtitle: tr(
+                          "Нажмите + и укажите имя и дату рождения.",
+                        ),
                       )
                     : ListView.separated(
                         key: const ValueKey('birthday-people'),
@@ -98,7 +103,7 @@ class BirthdayPage extends ConsumerWidget {
                               overflow: TextOverflow.ellipsis,
                             ),
                             subtitle: Text(
-                              '${isToday ? 'Сегодня' : DateFormat('d MMMM', 'ru').format(next)} · ${ageLabel(next.year - birthday.date.year)}',
+                              '${isToday ? tr("Сегодня") : DateFormat('d MMMM', AppLocale.language).format(next)} · ${ageLabel(next.year - birthday.date.year)}',
                               style: TextStyle(
                                 color: isToday
                                     ? context.palette.accent(birthdayColor)
@@ -165,7 +170,7 @@ class _BirthdayEditorState extends ConsumerState<BirthdayEditor> {
     if (saving) return;
     final birth = parsedDate();
     if (birth == null || name.text.trim().isEmpty) {
-      setState(() => error = 'Введите имя и дату рождения: ДД.ММ.ГГГГ');
+      setState(() => error = tr("Введите имя и дату рождения: ДД.ММ.ГГГГ"));
       return;
     }
     setState(() {
@@ -192,16 +197,16 @@ class _BirthdayEditorState extends ConsumerState<BirthdayEditor> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (c) => AlertDialog(
-        title: const Text('Удалить день рождения?'),
-        content: const Text('Ежегодные записи и напоминания будут удалены.'),
+        title: Text(tr("Удалить день рождения?")),
+        content: Text(tr("Ежегодные записи и напоминания будут удалены.")),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(c, false),
-            child: const Text('Отмена'),
+            child: Text(tr("Отмена")),
           ),
           FilledButton(
             onPressed: () => Navigator.pop(c, true),
-            child: const Text('Удалить'),
+            child: Text(tr("Удалить")),
           ),
         ],
       ),
@@ -226,7 +231,7 @@ class _BirthdayEditorState extends ConsumerState<BirthdayEditor> {
             color: context.palette.accent(birthdayColor),
           ),
           const SizedBox(width: 12),
-          const Expanded(child: Text('День рождения')),
+          Expanded(child: Text(tr("День рождения"))),
         ],
       ),
       content: SizedBox(
@@ -243,7 +248,7 @@ class _BirthdayEditorState extends ConsumerState<BirthdayEditor> {
                 textCapitalization: TextCapitalization.words,
                 textInputAction: TextInputAction.next,
                 onChanged: (_) => setState(() {}),
-                decoration: const InputDecoration(labelText: 'Имя'),
+                decoration: InputDecoration(labelText: tr("Имя")),
               ),
               const SizedBox(height: 18),
               TextField(
@@ -253,10 +258,10 @@ class _BirthdayEditorState extends ConsumerState<BirthdayEditor> {
                 onChanged: (_) => setState(() {}),
                 onSubmitted: (_) => save(),
                 decoration: InputDecoration(
-                  labelText: 'Дата рождения',
-                  hintText: 'ДД.ММ.ГГГГ',
+                  labelText: tr("Дата рождения"),
+                  hintText: tr("ДД.ММ.ГГГГ"),
                   suffixIcon: IconButton(
-                    tooltip: 'Выбрать дату',
+                    tooltip: tr("Выбрать дату"),
                     icon: const Icon(Icons.calendar_month_outlined, size: 19),
                     onPressed: () async {
                       final picked = await showDatePicker(
@@ -296,7 +301,7 @@ class _BirthdayEditorState extends ConsumerState<BirthdayEditor> {
                   children: [
                     Text(
                       name.text.trim().isEmpty
-                          ? 'Каждый год — важный день'
+                          ? tr("Каждый год — важный день")
                           : name.text.trim(),
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
@@ -310,7 +315,13 @@ class _BirthdayEditorState extends ConsumerState<BirthdayEditor> {
                         !birth.isAfter(today)) ...[
                       const SizedBox(height: 5),
                       Text(
-                        '${DateFormat('d MMMM', 'ru').format(birth)} · ${ageLabel(today.year - birth.year)} в этом году',
+                        tr("{0} · {1} в этом году", [
+                          DateFormat(
+                            'd MMMM',
+                            AppLocale.language,
+                          ).format(birth),
+                          ageLabel(today.year - birth.year),
+                        ]),
                         style: TextStyle(
                           fontSize: 12,
                           color: context.palette.muted,
@@ -318,12 +329,12 @@ class _BirthdayEditorState extends ConsumerState<BirthdayEditor> {
                       ),
                     ],
                     const SizedBox(height: 12),
-                    const Text(
-                      'Напомним в день рождения',
+                    Text(
+                      tr("Напомним в день рождения"),
                       style: TextStyle(fontSize: 12, height: 1.5),
                     ),
                     Text(
-                      'В 09:00 · ${repo.snapshot.settings.timezone}',
+                      tr("В 09:00 · {0}", [repo.snapshot.settings.timezone]),
                       style: TextStyle(
                         fontSize: 11,
                         color: context.palette.muted,
@@ -331,7 +342,7 @@ class _BirthdayEditorState extends ConsumerState<BirthdayEditor> {
                     ),
                     if (birth?.month == 2 && birth?.day == 29)
                       Text(
-                        'В невисокосный год — 28 февраля',
+                        tr("В невисокосный год — 28 февраля"),
                         style: TextStyle(
                           fontSize: 11,
                           color: context.palette.muted,
@@ -358,16 +369,16 @@ class _BirthdayEditorState extends ConsumerState<BirthdayEditor> {
         if (widget.birthday != null)
           TextButton(
             onPressed: saving ? null : remove,
-            child: const Text('Удалить'),
+            child: Text(tr("Удалить")),
           ),
         TextButton(
           onPressed: saving ? null : () => Navigator.pop(context),
-          child: const Text('Отмена'),
+          child: Text(tr("Отмена")),
         ),
         FilledButton(
           key: const ValueKey('save-birthday'),
           onPressed: saving ? null : save,
-          child: const Text('Готово'),
+          child: Text(tr("Готово")),
         ),
       ],
     );
@@ -431,7 +442,9 @@ class BirthdayChip extends ConsumerWidget {
                   child: IconButton(
                     key: ValueKey('birthday-complete-${task.id}'),
                     padding: EdgeInsets.zero,
-                    tooltip: task.done ? 'Вернуть отметку' : 'Поздравил',
+                    tooltip: task.done
+                        ? tr("Вернуть отметку")
+                        : tr("Поздравил"),
                     onPressed: () => guard(
                       context,
                       () => repo.status(
@@ -486,7 +499,7 @@ Future<void> showBirthday(BuildContext parentContext, Task task) =>
                   CheckboxListTile(
                     contentPadding: EdgeInsets.zero,
                     value: current.done,
-                    title: const Text('Поздравил'),
+                    title: Text(tr("Поздравил")),
                     onChanged: (_) => guard(
                       context,
                       () => repo.status(
@@ -504,11 +517,11 @@ Future<void> showBirthday(BuildContext parentContext, Task task) =>
                     Navigator.pop(c);
                     await editBirthday(parentContext, birthday: birthday);
                   },
-                  child: const Text('Изменить'),
+                  child: Text(tr("Изменить")),
                 ),
               TextButton(
                 onPressed: () => Navigator.pop(c),
-                child: const Text('Закрыть'),
+                child: Text(tr("Закрыть")),
               ),
             ],
           );

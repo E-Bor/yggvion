@@ -12,7 +12,9 @@ private extension TrackingAttributes.ContentState {
 
   func duration(_ seconds: Double) -> String {
     let minutes = Int(max(0, seconds) / 60)
-    return minutes >= 60 ? "\(minutes / 60) ч \(minutes % 60) мин" : "\(minutes) мин"
+    return minutes >= 60
+      ? "\(minutes / 60) \(label("hour", "ч")) \(minutes % 60) \(label("minute", "мин"))"
+      : "\(minutes) \(label("minute", "мин"))"
   }
 }
 
@@ -48,14 +50,15 @@ private struct TrackingControls: View {
             .background(context.state.color, in: Circle())
         }
         .buttonStyle(.plain)
-        .accessibilityLabel(context.state.running ? "Приостановить таймер" : "Продолжить таймер")
+        .accessibilityLabel(context.state.running
+          ? context.state.label("pause", "Пауза") : context.state.label("resume", "Продолжить"))
         Button(intent: TrackingIntent(taskId: context.attributes.taskId,
           revision: context.state.revision, action: "stop")) {
           Image(systemName: "stop.fill").font(.system(size: 13, weight: .semibold))
             .frame(width: 44, height: 44).foregroundStyle(.white.opacity(0.85))
             .background(.white.opacity(0.09), in: Circle())
         }
-        .buttonStyle(.plain).accessibilityLabel("Остановить и убрать таймер")
+        .buttonStyle(.plain).accessibilityLabel(context.state.label("stop", "Остановить"))
       }
     }
   }
@@ -109,7 +112,7 @@ private struct TrackingProgress: View {
           }.background(.white.opacity(0.12))
         }
       }
-    }.frame(height: 4).clipShape(Capsule()).accessibilityLabel("Факт относительно плана")
+    }.frame(height: 4).clipShape(Capsule()).accessibilityLabel(state.label("progress", "Факт относительно плана"))
   }
 }
 
@@ -122,7 +125,7 @@ private struct TrackingCard: View {
         VStack(alignment: .leading, spacing: 5) {
           HStack(spacing: 5) {
             Image(systemName: state.running ? "timer" : "pause.circle")
-            Text(state.running ? "YGGVION · В РАБОТЕ" : "YGGVION · ПАУЗА")
+            Text("YGGVION · \(state.running ? state.label("running", "В работе") : state.label("pause", "Пауза"))")
               .tracking(1.2)
           }.font(.system(size: 10, weight: .semibold)).foregroundStyle(state.color)
           Text(state.title).font(.system(size: 15, weight: .semibold))
@@ -139,7 +142,8 @@ private struct TrackingCard: View {
           Text("/ \(state.duration(state.plannedSeconds))")
             .foregroundStyle(.white.opacity(0.5))
           Spacer()
-          Text("ФАКТ / ПЛАН").font(.system(size: 9, weight: .medium)).tracking(1)
+          Text("\(state.label("actual", "Факт")) / \(state.label("planned", "План"))")
+            .font(.system(size: 9, weight: .medium)).tracking(1).lineLimit(1).minimumScaleFactor(0.7)
             .foregroundStyle(.white.opacity(0.45))
         }.font(.system(size: 12, weight: .medium))
       }
@@ -171,7 +175,7 @@ struct TrackingWidget: Widget {
             VStack(alignment: .leading, spacing: 4) {
               Text(context.state.title).font(.subheadline.weight(.semibold)).lineLimit(2)
                 .foregroundStyle(.white)
-              Text("План · \(context.state.duration(context.state.plannedSeconds))")
+              Text("\(context.state.label("planned", "План")) · \(context.state.duration(context.state.plannedSeconds))")
                 .font(.caption).foregroundStyle(.white.opacity(0.6))
             }
             Spacer(minLength: 8)

@@ -1,3 +1,4 @@
+import '../l10n/strings.dart';
 import 'dart:async';
 import 'dart:math' as math;
 import 'package:flutter/foundation.dart';
@@ -11,6 +12,7 @@ import 'providers.dart';
 import 'theme.dart';
 
 typedef _ReportInput = ({
+  String language,
   Snapshot snapshot,
   List<TimeRange> activity,
   List<TimeRange> historyActivity,
@@ -22,21 +24,24 @@ typedef _ReportInput = ({
 
 ({StatisticsReport period, ActivityHistory history}) _calculate(
   _ReportInput input,
-) => (
-  period: StatisticsReport.calculate(
-    input.snapshot,
-    input.activity,
-    input.start,
-    input.end,
-    input.now,
-    location: input.location,
-  ),
-  history: ActivityHistory.calculate(
-    input.historyActivity,
-    input.now,
-    location: input.location,
-  ),
-);
+) {
+  AppLocale.use(input.language);
+  return (
+    period: StatisticsReport.calculate(
+      input.snapshot,
+      input.activity,
+      input.start,
+      input.end,
+      input.now,
+      location: input.location,
+    ),
+    history: ActivityHistory.calculate(
+      input.historyActivity,
+      input.now,
+      location: input.location,
+    ),
+  );
+}
 
 class StatisticsPage extends ConsumerStatefulWidget {
   const StatisticsPage({super.key});
@@ -101,6 +106,7 @@ class _StatisticsPageState extends ConsumerState<StatisticsPage> {
           ? await repo.db.activity(start, end)
           : historyActivity;
       final next = await compute(_calculate, (
+        language: repo.language,
         snapshot: snapshot,
         activity: activity,
         historyActivity: historyActivity,
@@ -117,7 +123,9 @@ class _StatisticsPageState extends ConsumerState<StatisticsPage> {
       });
     } catch (e) {
       if (mounted && request == generation) {
-        setState(() => error = 'Не удалось рассчитать статистику: $e');
+        setState(
+          () => error = tr("Не удалось рассчитать статистику: {0}", [e]),
+        );
       }
     } finally {
       if (mounted && request == generation) setState(() => busy = false);
@@ -138,10 +146,10 @@ class _StatisticsPageState extends ConsumerState<StatisticsPage> {
     final usageError = ref.watch(activityProvider)?.error;
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Статистика'),
+        title: Text(tr("Статистика")),
         actions: [
           IconButton(
-            tooltip: 'Обновить статистику',
+            tooltip: tr("Обновить статистику"),
             onPressed: busy ? null : load,
             icon: const Icon(Icons.refresh_rounded),
           ),
@@ -166,8 +174,8 @@ class _StatisticsPageState extends ConsumerState<StatisticsPage> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      const Text(
-                        'Время в деталях',
+                      Text(
+                        tr("Время в деталях"),
                         style: TextStyle(
                           fontSize: 28,
                           fontWeight: FontWeight.w600,
@@ -176,7 +184,7 @@ class _StatisticsPageState extends ConsumerState<StatisticsPage> {
                       ),
                       const SizedBox(height: 6),
                       Text(
-                        'Как соотносятся планы и учтённое время',
+                        tr("Как соотносятся планы и учтённое время"),
                         style: TextStyle(color: context.palette.muted),
                       ),
                       const SizedBox(height: 24),
@@ -196,8 +204,8 @@ class _StatisticsPageState extends ConsumerState<StatisticsPage> {
                                   showCheckmark: false,
                                   label: Text(
                                     period == 0
-                                        ? 'За всё время'
-                                        : '$period дней',
+                                        ? tr("За всё время")
+                                        : tr("{0} дней", [period]),
                                   ),
                                   selected: days == period,
                                   onSelected: (_) {
@@ -212,7 +220,7 @@ class _StatisticsPageState extends ConsumerState<StatisticsPage> {
                             mainAxisSize: MainAxisSize.min,
                             children: [
                               IconButton(
-                                tooltip: 'Предыдущий период',
+                                tooltip: tr("Предыдущий период"),
                                 onPressed: days == 0
                                     ? null
                                     : () {
@@ -224,8 +232,8 @@ class _StatisticsPageState extends ConsumerState<StatisticsPage> {
                               Flexible(
                                 child: Text(
                                   data == null
-                                      ? 'Загрузка…'
-                                      : '${DateFormat('d MMM', 'ru').format(data.days.first.date)} — ${DateFormat('d MMM y', 'ru').format(data.days.last.date)}',
+                                      ? tr("Загрузка…")
+                                      : '${DateFormat('d MMM', AppLocale.language).format(data.days.first.date)} — ${DateFormat('d MMM y', AppLocale.language).format(data.days.last.date)}',
                                   style: const TextStyle(
                                     fontSize: 13,
                                     fontWeight: FontWeight.w500,
@@ -233,7 +241,7 @@ class _StatisticsPageState extends ConsumerState<StatisticsPage> {
                                 ),
                               ),
                               IconButton(
-                                tooltip: 'Следующий период',
+                                tooltip: tr("Следующий период"),
                                 onPressed: offset == 0 || days == 0
                                     ? null
                                     : () {
@@ -259,7 +267,7 @@ class _StatisticsPageState extends ConsumerState<StatisticsPage> {
                                 ),
                                 TextButton(
                                   onPressed: load,
-                                  child: const Text('Повторить'),
+                                  child: Text(tr("Повторить")),
                                 ),
                               ],
                             ),
@@ -269,12 +277,18 @@ class _StatisticsPageState extends ConsumerState<StatisticsPage> {
                         _Totals(data: data),
                         const SizedBox(height: 18),
                         _StatCard(
-                          title: 'План и факт',
+                          title: tr("План и факт"),
                           infoId: 'plan-fact',
-                          info:
-                              'План — сумма длительностей календарных блоков в выбранном периоде, включая невыполненный план. Факт — таймер и ручной учёт до текущего момента; пересечения считаются один раз. Пунктир показывает план, акцентная линия — факт. Здесь интервалы делятся по календарным датам в часовом поясе приложения. Дни рождения и удалённые задачи исключены. На длинных периодах точка объединяет несколько дней.',
-                          subtitle:
-                              '${_chartStep(data.days.length) == 1 ? 'По дням' : 'По ${_chartStep(data.days.length)} дней'} · выберите точку для деталей',
+                          info: tr(
+                            "План — сумма длительностей календарных блоков в выбранном периоде, включая невыполненный план. Факт — таймер и ручной учёт до текущего момента; пересечения считаются один раз. Пунктир показывает план, акцентная линия — факт. Здесь интервалы делятся по календарным датам в часовом поясе приложения. Дни рождения и удалённые задачи исключены. На длинных периодах точка объединяет несколько дней.",
+                          ),
+                          subtitle: tr("{0} · выберите точку для деталей", [
+                            _chartStep(data.days.length) == 1
+                                ? tr("По дням")
+                                : tr("По {0} дней", [
+                                    _chartStep(data.days.length),
+                                  ]),
+                          ]),
                           child: _TimeChart(
                             key: ValueKey('work-$days-$offset'),
                             days: data.days,
@@ -284,7 +298,10 @@ class _StatisticsPageState extends ConsumerState<StatisticsPage> {
                           Padding(
                             padding: const EdgeInsets.fromLTRB(4, 12, 4, 0),
                             child: Text(
-                              '${formatDuration(data.overlap)} записаны одновременно в разных задачах. В общем факте пересечения считаются один раз; в проектах и задачах показан их собственный учёт.',
+                              tr(
+                                "{0} записаны одновременно в разных задачах. В общем факте пересечения считаются один раз; в проектах и задачах показан их собственный учёт.",
+                                [formatDuration(data.overlap)],
+                              ),
                               style: TextStyle(
                                 color: context.palette.pink,
                                 fontSize: 12,
@@ -301,12 +318,14 @@ class _StatisticsPageState extends ConsumerState<StatisticsPage> {
                         _ProjectCard(projects: data.projects),
                         const SizedBox(height: 18),
                         _StatCard(
-                          title: 'Работа в течение дня',
+                          title: tr("Работа в течение дня"),
                           infoId: 'workday',
-                          info:
-                              'Часы — объединённое время таймера и ручного учёта внутри границ рабочего дня. Доля = эти часы / длительность рабочего дня × 100%; за период делятся суммы. Ночь после полуночи относится к дате начала рабочего дня, даже на границе выбранного периода. Будущее время не учитывается. Границы берутся из режима, действующего на дату рабочего дня; перемещение метки в календаре корректирует выбранный день. При пересечении соседних рабочих дней общий интервал относится к более раннему дню. Вне рабочего дня — учёт за календарные даты периода, не попавший ни в один рабочий интервал. Поэтому итог может отличаться от календарного графика плана и факта.',
-                          subtitle:
-                              'Таймтрек внутри рабочего дня · часы и доля времени',
+                          info: tr(
+                            "Часы — объединённое время таймера и ручного учёта внутри границ рабочего дня. Доля = эти часы / длительность рабочего дня × 100%; за период делятся суммы. Ночь после полуночи относится к дате начала рабочего дня, даже на границе выбранного периода. Будущее время не учитывается. Границы берутся из режима, действующего на дату рабочего дня; перемещение метки в календаре корректирует выбранный день. При пересечении соседних рабочих дней общий интервал относится к более раннему дню. Вне рабочего дня — учёт за календарные даты периода, не попавший ни в один рабочий интервал. Поэтому итог может отличаться от календарного графика плана и факта.",
+                          ),
+                          subtitle: tr(
+                            "Таймтрек внутри рабочего дня · часы и доля времени",
+                          ),
                           child: _WorkdayChart(
                             key: ValueKey('workday-utilization-$days-$offset'),
                             data: data,
@@ -314,12 +333,14 @@ class _StatisticsPageState extends ConsumerState<StatisticsPage> {
                         ),
                         const SizedBox(height: 18),
                         _StatCard(
-                          title: 'Начало и конец дня',
+                          title: tr("Начало и конец дня"),
                           infoId: 'boundaries',
-                          info:
-                              'Точки показывают начало и конец каждого рабочего дня по режиму на его дату или ручным корректировкам в календаре. Подтверждение не требуется. Средние считаются отдельно по каждой границе, когда её время наступило. Будущие моменты и нерабочие дни без заданных границ исключены. Ночная граница относится к дате начала рабочего дня: +1 означает следующие сутки. Для среднего 01:00 +1 учитывается как 25:00, поэтому среднее между 23:00 и 01:00 +1 — 00:00 +1. На длинных периодах точки показывают среднее по рабочим дням группы. Пропуски не заменяются нулями.',
-                          subtitle:
-                              'Все рабочие дни · среднее за выбранный период',
+                          info: tr(
+                            "Точки показывают начало и конец каждого рабочего дня по режиму на его дату или ручным корректировкам в календаре. Подтверждение не требуется. Средние считаются отдельно по каждой границе, когда её время наступило. Будущие моменты и нерабочие дни без заданных границ исключены. Ночная граница относится к дате начала рабочего дня: +1 означает следующие сутки. Для среднего 01:00 +1 учитывается как 25:00, поэтому среднее между 23:00 и 01:00 +1 — 00:00 +1. На длинных периодах точки показывают среднее по рабочим дням группы. Пропуски не заменяются нулями.",
+                          ),
+                          subtitle: tr(
+                            "Все рабочие дни · среднее за выбранный период",
+                          ),
                           child: _WorkdayChart(
                             key: ValueKey('workday-boundaries-$days-$offset'),
                             data: data,
@@ -328,12 +349,32 @@ class _StatisticsPageState extends ConsumerState<StatisticsPage> {
                         ),
                         const SizedBox(height: 18),
                         _StatCard(
-                          title: 'Использование приложения',
+                          title: tr("Использование приложения"),
                           infoId: 'usage',
-                          info:
-                              'Активное время считается только в открытом активном окне на этом устройстве. После двух минут без действий учёт приостанавливается. Фоновый таймер задач в эту метрику не входит. Линия показывает активное время по календарным датам; на длинных периодах дни объединяются. Сеансы — интервалы активности, начавшиеся в выбранном периоде. Эти данные хранятся локально и не суммируются между устройствами.',
-                          subtitle:
-                              'Только это устройство${firstActivity == null ? '' : ' · с ${DateFormat('d MMM y', 'ru').format(tz.TZDateTime.from(firstActivity!, tz.getLocation(ref.read(appProvider).snapshot.settings.timezone)))}'}',
+                          info: tr(
+                            "Активное время считается только в открытом активном окне на этом устройстве. После двух минут без действий учёт приостанавливается. Фоновый таймер задач в эту метрику не входит. Линия показывает активное время по календарным датам; на длинных периодах дни объединяются. Сеансы — интервалы активности, начавшиеся в выбранном периоде. Эти данные хранятся локально и не суммируются между устройствами.",
+                          ),
+                          subtitle: tr("Только это устройство{0}", [
+                            firstActivity == null
+                                ? ''
+                                : tr(" · с {0}", [
+                                    DateFormat(
+                                      'd MMM y',
+                                      AppLocale.language,
+                                    ).format(
+                                      tz.TZDateTime.from(
+                                        firstActivity!,
+                                        tz.getLocation(
+                                          ref
+                                              .read(appProvider)
+                                              .snapshot
+                                              .settings
+                                              .timezone,
+                                        ),
+                                      ),
+                                    ),
+                                  ]),
+                          ]),
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.stretch,
                             children: [
@@ -342,11 +383,11 @@ class _StatisticsPageState extends ConsumerState<StatisticsPage> {
                                 runSpacing: 16,
                                 children: [
                                   _SmallTotal(
-                                    label: 'Активное время',
+                                    label: tr("Активное время"),
                                     value: formatDuration(data.application),
                                   ),
                                   _SmallTotal(
-                                    label: 'Сеансов использования',
+                                    label: tr("Сеансов использования"),
                                     value: '${data.applicationSessions}',
                                   ),
                                 ],
@@ -369,7 +410,9 @@ class _StatisticsPageState extends ConsumerState<StatisticsPage> {
                               ),
                               const SizedBox(height: 8),
                               Text(
-                                'Время в активном окне. После 2 минут без действий учёт приостанавливается. Рабочий таймер считается отдельно.',
+                                tr(
+                                  "Время в активном окне. После 2 минут без действий учёт приостанавливается. Рабочий таймер считается отдельно.",
+                                ),
                                 style: TextStyle(
                                   color: context.palette.muted,
                                   fontSize: 12,
@@ -384,12 +427,14 @@ class _StatisticsPageState extends ConsumerState<StatisticsPage> {
                           RepaintBoundary(
                             key: const ValueKey('activity-calendar'),
                             child: _StatCard(
-                              title: 'Календарь активности',
+                              title: tr("Календарь активности"),
                               infoId: 'activity',
-                              info:
-                                  'Показаны последние 365 дней независимо от периода остальных графиков. Яркость акцента отражает активное использование приложения на этом устройстве: нет активности; меньше 5 минут; от 5 до 20; от 20 до 60; от часа. Дни до начала учёта не считаются пропусками. Серия — последовательные дни с активностью; сегодняшняя серия сохраняется от вчерашнего дня до конца сегодня. Фоновый таймер задач не влияет на яркость.',
-                              subtitle:
-                                  'Последние 365 дней · только это устройство',
+                              info: tr(
+                                "Показаны последние 365 дней независимо от периода остальных графиков. Яркость акцента отражает активное использование приложения на этом устройстве: нет активности; меньше 5 минут; от 5 до 20; от 20 до 60; от часа. Дни до начала учёта не считаются пропусками. Серия — последовательные дни с активностью; сегодняшняя серия сохраняется от вчерашнего дня до конца сегодня. Фоновый таймер задач не влияет на яркость.",
+                              ),
+                              subtitle: tr(
+                                "Последние 365 дней · только это устройство",
+                              ),
                               child: _ActivityCalendar(
                                 history: history!,
                                 firstActivity: firstActivity,
@@ -399,7 +444,10 @@ class _StatisticsPageState extends ConsumerState<StatisticsPage> {
                         ],
                         const SizedBox(height: 16),
                         Text(
-                          'Сейчас в пространстве: ${data.tasks} задач · ${data.notes} заметок',
+                          tr("Сейчас в пространстве: {0} задач · {1} заметок", [
+                            data.tasks,
+                            data.notes,
+                          ]),
                           textAlign: TextAlign.center,
                           style: TextStyle(
                             color: context.palette.muted,
@@ -436,27 +484,30 @@ class _Totals extends StatelessWidget {
           : (100 * data.completedTasks / data.plannedTasks).round();
       final values = [
         (
-          label: 'Фактическое время',
+          label: tr("Фактическое время"),
           value: formatDuration(data.actual),
-          detail: 'Без двойного учёта',
+          detail: tr("Без двойного учёта"),
           icon: Icons.timelapse_rounded,
         ),
         (
-          label: 'Запланировано',
+          label: tr("Запланировано"),
           value: formatDuration(data.planned),
-          detail: 'В выбранном периоде',
+          detail: tr("В выбранном периоде"),
           icon: Icons.calendar_today_outlined,
         ),
         (
-          label: 'Закрыто из плана',
+          label: tr("Закрыто из плана"),
           value: completion == null ? '—' : '$completion%',
-          detail: '${data.completedTasks} из ${data.plannedTasks} задач',
+          detail: tr("{0} из {1} задач", [
+            data.completedTasks,
+            data.plannedTasks,
+          ]),
           icon: Icons.task_alt_rounded,
         ),
         (
-          label: 'Дней с учётом',
+          label: tr("Дней с учётом"),
           value: '${data.activeDays}',
-          detail: 'Из ${data.days.length} дней',
+          detail: tr("Из {0} дней", [data.days.length]),
           icon: Icons.bar_chart_rounded,
         ),
       ];
@@ -636,19 +687,21 @@ class _TimeChartState extends State<_TimeChart> {
     );
     final picked = groups[selectedIndex];
     String label(DateTime start, DateTime end) => start == end
-        ? DateFormat('d MMM', 'ru').format(start)
-        : '${DateFormat('d MMM', 'ru').format(start)} — ${DateFormat('d MMM', 'ru').format(end)}';
-    String axis(double hours) =>
-        NumberFormat('0.#', 'ru').format(minutes ? hours * 60 : hours);
+        ? DateFormat('d MMM', AppLocale.language).format(start)
+        : '${DateFormat('d MMM', AppLocale.language).format(start)} — ${DateFormat('d MMM', AppLocale.language).format(end)}';
+    String axis(double hours) => NumberFormat(
+      '0.#',
+      AppLocale.language,
+    ).format(minutes ? hours * 60 : hours);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         if (!widget.application) ...[
           Row(
             children: [
-              _Legend(color: context.palette.muted, text: 'План'),
+              _Legend(color: context.palette.muted, text: tr("План")),
               const SizedBox(width: 20),
-              _Legend(color: accent, text: 'Факт'),
+              _Legend(color: accent, text: tr("Факт")),
             ],
           ),
           const SizedBox(height: 18),
@@ -664,7 +717,7 @@ class _TimeChartState extends State<_TimeChart> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   for (final text in [
-                    '${axis(ceiling)} ${minutes ? 'мин' : 'ч'}',
+                    '${axis(ceiling)} ${minutes ? tr("мин") : tr("ч")}',
                     axis(ceiling / 2),
                     '0',
                   ])
@@ -729,10 +782,10 @@ class _TimeChartState extends State<_TimeChart> {
                                     Expanded(
                                       child: Tooltip(
                                         message:
-                                            '${label(groups[i].start, groups[i].end)}\n${widget.application ? 'Активно' : 'Факт'}: ${formatDuration(groups[i].fact)}${widget.application ? '' : '\nПлан: ${formatDuration(groups[i].plan)}'}',
+                                            '${label(groups[i].start, groups[i].end)}\n${widget.application ? tr("Активно") : tr("Факт")}: ${formatDuration(groups[i].fact)}${widget.application ? '' : tr("\nПлан: {0}", [formatDuration(groups[i].plan)])}',
                                         child: Semantics(
                                           label:
-                                              '${label(groups[i].start, groups[i].end)}, ${widget.application ? 'активность' : 'факт'} ${formatDuration(groups[i].fact)}${widget.application ? '' : ', план ${formatDuration(groups[i].plan)}'}',
+                                              '${label(groups[i].start, groups[i].end)}, ${widget.application ? tr("активность") : tr("факт")} ${formatDuration(groups[i].fact)}${widget.application ? '' : tr(", план {0}", [formatDuration(groups[i].plan)])}',
                                           button: true,
                                           selected: selectedIndex == i,
                                           child: InkWell(
@@ -797,11 +850,11 @@ class _TimeChartState extends State<_TimeChart> {
             ),
             if (!widget.application)
               Text(
-                'План ${formatDuration(picked.plan)}',
+                tr("План {0}", [formatDuration(picked.plan)]),
                 style: TextStyle(fontSize: 12, color: context.palette.muted),
               ),
             Text(
-              '${widget.application ? 'Активно' : 'Факт'} ${formatDuration(picked.fact)}',
+              '${widget.application ? tr("Активно") : tr("Факт")} ${formatDuration(picked.fact)}',
               style: TextStyle(fontSize: 12, color: accent),
             ),
           ],
@@ -810,7 +863,7 @@ class _TimeChartState extends State<_TimeChart> {
           Padding(
             padding: const EdgeInsets.only(top: 12),
             child: Text(
-              'За этот период пока нет данных.',
+              tr("За этот период пока нет данных."),
               style: TextStyle(fontSize: 12, color: context.palette.muted),
             ),
           ),
@@ -1017,7 +1070,7 @@ class _WorkdayChartState extends State<_WorkdayChart> {
         finish: mean(slice.map((d) => d.endMinutes).nonNulls),
       ));
     }
-    if (groups.isEmpty) return const Text('Пока нет данных.');
+    if (groups.isEmpty) return Text(tr("Пока нет данных."));
     final plan = widget.boundaries
         ? [for (final g in groups) g.begin == null ? null : g.begin! / 60]
         : <double?>[];
@@ -1050,26 +1103,32 @@ class _WorkdayChartState extends State<_WorkdayChart> {
           );
     final index = (selected ?? groups.length - 1).clamp(0, groups.length - 1);
     final picked = groups[index];
-    final number = NumberFormat('0.#', 'ru');
+    final number = NumberFormat('0.#', AppLocale.language);
     String percent(double? value) =>
         value == null ? '—' : '${number.format(value)}%';
     String label(DateTime start, DateTime end) => start == end
-        ? DateFormat('d MMM', 'ru').format(start)
-        : '${DateFormat('d MMM', 'ru').format(start)} — ${DateFormat('d MMM', 'ru').format(end)}';
+        ? DateFormat('d MMM', AppLocale.language).format(start)
+        : '${DateFormat('d MMM', AppLocale.language).format(start)} — ${DateFormat('d MMM', AppLocale.language).format(end)}';
     String detail(int i) {
       final g = groups[i];
       if (widget.boundaries) {
-        return 'Начало ${time(g.begin)} · конец ${time(g.finish)}';
+        return tr("Начало {0} · конец {1}", [time(g.begin), time(g.finish)]);
       }
       final ratio = g.available == Duration.zero
           ? null
           : g.worked.inMicroseconds / g.available.inMicroseconds * 100;
-      return '${formatDuration(g.worked)} · ${percent(ratio)} рабочего дня${g.outside > Duration.zero ? ' · вне границ ${formatDuration(g.outside)}' : ''}';
+      return tr("{0} · {1} рабочего дня{2}", [
+        formatDuration(g.worked),
+        percent(ratio),
+        g.outside > Duration.zero
+            ? tr(" · вне границ {0}", [formatDuration(g.outside)])
+            : '',
+      ]);
     }
 
     String axis(double v) => widget.boundaries
         ? time(v * 60)
-        : '${number.format(v)}${percentages ? '%' : ' ч'}';
+        : '${number.format(v)}${percentages ? '%' : tr(" ч")}';
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -1079,25 +1138,25 @@ class _WorkdayChartState extends State<_WorkdayChart> {
           children: [
             if (widget.boundaries) ...[
               _SmallTotal(
-                label: 'Среднее начало',
+                label: tr("Среднее начало"),
                 value: time(data.meanWorkdayStart),
               ),
               _SmallTotal(
-                label: 'Среднее завершение',
+                label: tr("Среднее завершение"),
                 value: time(data.meanWorkdayEnd),
               ),
             ] else ...[
               _SmallTotal(
-                label: 'Работа в границах дня',
+                label: tr("Работа в границах дня"),
                 value: formatDuration(data.workdayActual),
               ),
               _SmallTotal(
-                label: 'Доля рабочего времени',
+                label: tr("Доля рабочего времени"),
                 value: percent(data.workdayPercent),
               ),
               if (data.outsideWorkday > Duration.zero)
                 _SmallTotal(
-                  label: 'Вне рабочего дня',
+                  label: tr("Вне рабочего дня"),
                   value: formatDuration(data.outsideWorkday),
                 ),
             ],
@@ -1109,8 +1168,8 @@ class _WorkdayChartState extends State<_WorkdayChart> {
             spacing: 20,
             runSpacing: 8,
             children: [
-              _Legend(color: context.palette.muted, text: 'Начало'),
-              _Legend(color: context.accentColor, text: 'Конец'),
+              _Legend(color: context.palette.muted, text: tr("Начало")),
+              _Legend(color: context.accentColor, text: tr("Конец")),
             ],
           )
         else
@@ -1119,9 +1178,9 @@ class _WorkdayChartState extends State<_WorkdayChart> {
             child: SegmentedButton<bool>(
               key: const ValueKey('workday-chart-unit'),
               showSelectedIcon: false,
-              segments: const [
-                ButtonSegment(value: true, label: Text('Доля дня')),
-                ButtonSegment(value: false, label: Text('Часы')),
+              segments: [
+                ButtonSegment(value: true, label: Text(tr("Доля дня"))),
+                ButtonSegment(value: false, label: Text(tr("Часы"))),
               ],
               selected: {percentages},
               onSelectionChanged: (v) => setState(() => percentages = v.single),
@@ -1238,7 +1297,10 @@ class _WorkdayChartState extends State<_WorkdayChart> {
             children: [
               for (final i in {0, groups.length ~/ 2, groups.length - 1})
                 Text(
-                  DateFormat('d MMM', 'ru').format(groups[i].start),
+                  DateFormat(
+                    'd MMM',
+                    AppLocale.language,
+                  ).format(groups[i].start),
                   style: TextStyle(fontSize: 10, color: context.palette.muted),
                 ),
             ],
@@ -1262,8 +1324,17 @@ class _WorkdayChartState extends State<_WorkdayChart> {
         const SizedBox(height: 12),
         Text(
           widget.boundaries
-              ? 'Границы учитываются автоматически, когда наступает их время. ${step == 1 ? 'Точки показывают каждый рабочий день.' : 'Точки — среднее за $step дней.'}'
-              : 'Пересечения таймеров считаются один раз. Сегодня учитывается только прошедшая часть дня. Учитываются история режима и ручные изменения в календаре.',
+              ? tr(
+                  "Границы учитываются автоматически, когда наступает их время. {0}",
+                  [
+                    step == 1
+                        ? tr("Точки показывают каждый рабочий день.")
+                        : tr("Точки — среднее за {0} дней.", [step]),
+                  ],
+                )
+              : tr(
+                  "Пересечения таймеров считаются один раз. Сегодня учитывается только прошедшая часть дня. Учитываются история режима и ручные изменения в календаре.",
+                ),
           style: TextStyle(
             fontSize: 11,
             height: 1.5,
@@ -1309,7 +1380,7 @@ class _ActivityCalendarState extends State<_ActivityCalendar> {
   String duration(DailyActivity day) {
     if (day.duration == Duration.zero) {
       final first = widget.firstActivity;
-      if (first == null) return 'Пока нет данных';
+      if (first == null) return tr("Пока нет данных");
       final date = day.date as tz.TZDateTime;
       final next = tz.TZDateTime(
         date.location,
@@ -1317,10 +1388,12 @@ class _ActivityCalendarState extends State<_ActivityCalendar> {
         date.month,
         date.day + 1,
       );
-      return first.isBefore(next) ? 'Нет активности' : 'Учёт ещё не велся';
+      return first.isBefore(next)
+          ? tr("Нет активности")
+          : tr("Учёт ещё не велся");
     }
     return day.duration < const Duration(minutes: 1)
-        ? 'Меньше минуты'
+        ? tr("Меньше минуты")
         : formatDuration(day.duration);
   }
 
@@ -1339,15 +1412,15 @@ class _ActivityCalendarState extends State<_ActivityCalendar> {
         if (i == 0 || days[i].date.day == 1)
           (
             week: (offset + i) ~/ 7,
-            label: DateFormat('LLL', 'ru').format(days[i].date),
+            label: DateFormat('LLL', AppLocale.language).format(days[i].date),
           ),
     ];
-    const levels = [
-      'Нет активности',
-      'До 5 минут',
-      'От 5 до 20 минут',
-      'От 20 до 60 минут',
-      'От часа',
+    final levels = [
+      tr("Нет активности"),
+      tr("До 5 минут"),
+      tr("От 5 до 20 минут"),
+      tr("От 20 до 60 минут"),
+      tr("От часа"),
     ];
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1357,15 +1430,15 @@ class _ActivityCalendarState extends State<_ActivityCalendar> {
           runSpacing: 16,
           children: [
             _SmallTotal(
-              label: 'Дней с активностью',
+              label: tr("Дней с активностью"),
               value: '${history.activeDays}',
             ),
             _SmallTotal(
-              label: 'Текущая серия, дней',
+              label: tr("Текущая серия, дней"),
               value: '${history.currentStreak}',
             ),
             _SmallTotal(
-              label: 'Лучшая серия, дней',
+              label: tr("Лучшая серия, дней"),
               value: '${history.longestStreak}',
             ),
           ],
@@ -1392,7 +1465,8 @@ class _ActivityCalendarState extends State<_ActivityCalendar> {
                           child: Align(
                             alignment: Alignment.centerLeft,
                             child: Text(
-                              {0: 'Пн', 2: 'Ср', 4: 'Пт'}[row] ?? '',
+                              {0: tr("Пн"), 2: tr("Ср"), 4: tr("Пт")}[row] ??
+                                  '',
                               style: TextStyle(
                                 fontSize: 10,
                                 color: context.palette.muted,
@@ -1480,14 +1554,14 @@ class _ActivityCalendarState extends State<_ActivityCalendar> {
           runSpacing: 12,
           children: [
             Text(
-              'Нажмите на день',
+              tr("Нажмите на день"),
               style: TextStyle(fontSize: 11, color: context.palette.muted),
             ),
             Row(
               mainAxisSize: MainAxisSize.min,
               children: [
                 Text(
-                  'Меньше',
+                  tr("Меньше"),
                   style: TextStyle(fontSize: 10, color: context.palette.muted),
                 ),
                 const SizedBox(width: 6),
@@ -1506,7 +1580,7 @@ class _ActivityCalendarState extends State<_ActivityCalendar> {
                   ),
                 const SizedBox(width: 6),
                 Text(
-                  'Больше',
+                  tr("Больше"),
                   style: TextStyle(fontSize: 10, color: context.palette.muted),
                 ),
               ],
@@ -1536,7 +1610,10 @@ class _ActivityCalendarState extends State<_ActivityCalendar> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        DateFormat('EEE, d MMMM y', 'ru').format(picked.date),
+                        DateFormat(
+                          'EEE, d MMMM y',
+                          AppLocale.language,
+                        ).format(picked.date),
                         style: const TextStyle(fontSize: 12),
                       ),
                       const SizedBox(height: 4),
@@ -1556,7 +1633,9 @@ class _ActivityCalendarState extends State<_ActivityCalendar> {
         ),
         const SizedBox(height: 12),
         Text(
-          'Яркость: до 5 · 5–20 · 20–60 · от 60 минут в день. Учитывается активное время на этом устройстве.',
+          tr(
+            "Яркость: до 5 · 5–20 · 20–60 · от 60 минут в день. Учитывается активное время на этом устройстве.",
+          ),
           style: TextStyle(
             fontSize: 11,
             height: 1.5,
@@ -1574,7 +1653,7 @@ class _ActivityCalendarState extends State<_ActivityCalendar> {
     double step,
   ) {
     final label =
-        '${DateFormat('EEEE, d MMMM y', 'ru').format(day.date)} · ${duration(day)}';
+        '${DateFormat('EEEE, d MMMM y', AppLocale.language).format(day.date)} · ${duration(day)}';
     final selected = day.date == picked.date;
     return Tooltip(
       message: label,
@@ -1648,14 +1727,15 @@ class _ProjectCardState extends State<_ProjectCard> {
       (n, p) => math.max(n, p.actual.inSeconds),
     );
     return _StatCard(
-      title: 'Куда уходит время',
+      title: tr("Куда уходит время"),
       infoId: 'projects',
-      info:
-          'Фактическое время объединяется отдельно внутри каждого проекта за выбранный период. Полная полоска соответствует проекту с наибольшим фактом; остальные показаны относительно него. Под полоской — сумма запланированных блоков проекта. Без проекта — задачи без выбранного проекта. Пересекающиеся интервалы разных проектов входят в каждый из них, поэтому сумма проектов может превышать общий факт.',
-      subtitle: 'Фактическое время по проектам за период',
+      info: tr(
+        "Фактическое время объединяется отдельно внутри каждого проекта за выбранный период. Полная полоска соответствует проекту с наибольшим фактом; остальные показаны относительно него. Под полоской — сумма запланированных блоков проекта. Без проекта — задачи без выбранного проекта. Пересекающиеся интервалы разных проектов входят в каждый из них, поэтому сумма проектов может превышать общий факт.",
+      ),
+      subtitle: tr("Фактическое время по проектам за период"),
       child: widget.projects.isEmpty
           ? Text(
-              'Проекты появятся вместе с планом или учётом времени.',
+              tr("Проекты появятся вместе с планом или учётом времени."),
               style: TextStyle(color: context.palette.muted, height: 1.5),
             )
           : Column(
@@ -1707,15 +1787,18 @@ class _ProjectCardState extends State<_ProjectCard> {
                             minHeight: 5,
                             backgroundColor: context.palette.raised,
                             color: context.palette.accent(Color(project.color)),
-                            semanticsLabel:
-                                '${project.title}: ${formatDuration(project.actual)}, план ${formatDuration(project.planned)}',
+                            semanticsLabel: tr("{0}: {1}, план {2}", [
+                              project.title,
+                              formatDuration(project.actual),
+                              formatDuration(project.planned),
+                            ]),
                           ),
                         ),
                         const SizedBox(height: 5),
                         Align(
                           alignment: Alignment.centerRight,
                           child: Text(
-                            'План ${formatDuration(project.planned)}',
+                            tr("План {0}", [formatDuration(project.planned)]),
                             style: TextStyle(
                               color: context.palette.muted,
                               fontSize: 11,
@@ -1730,8 +1813,8 @@ class _ProjectCardState extends State<_ProjectCard> {
                     onPressed: () => setState(() => all = !all),
                     child: Text(
                       all
-                          ? 'Свернуть'
-                          : 'Все проекты (${widget.projects.length})',
+                          ? tr("Свернуть")
+                          : tr("Все проекты ({0})", [widget.projects.length]),
                     ),
                   ),
               ],
@@ -1747,42 +1830,49 @@ class _EstimateCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final number = NumberFormat('0.#', 'ru');
+    final number = NumberFormat('0.#', AppLocale.language);
     String percent(double? value) =>
         value == null ? '—' : '${number.format(value)}%';
     final metrics = [
       (
         key: 'estimate-mean-error',
-        label: 'Средняя ошибка',
+        label: tr("Средняя ошибка"),
         value: percent(statistics.meanErrorPercent),
-        detail: 'Задач в расчёте: ${statistics.measuredTasks}',
+        detail: tr("Задач в расчёте: {0}", [statistics.measuredTasks]),
       ),
       (
         key: 'estimate-outside-tolerance',
-        label: 'Ошибка больше 10%',
-        value:
-            '${statistics.outsideToleranceTasks} из ${statistics.measuredTasks}',
-        detail: 'Недооценка и переоценка',
+        label: tr("Ошибка больше 10%"),
+        value: tr("{0} из {1}", [
+          statistics.outsideToleranceTasks,
+          statistics.measuredTasks,
+        ]),
+        detail: tr("Недооценка и переоценка"),
       ),
       (
         key: 'estimate-underestimated',
-        label: 'Средняя недооценка',
+        label: tr("Средняя недооценка"),
         value: percent(statistics.meanUnderestimatePercent),
-        detail: 'Факт дольше плана · задач: ${statistics.underestimatedTasks}',
+        detail: tr("Факт дольше плана · задач: {0}", [
+          statistics.underestimatedTasks,
+        ]),
       ),
       (
         key: 'estimate-overestimated',
-        label: 'Средняя переоценка',
+        label: tr("Средняя переоценка"),
         value: percent(statistics.meanOverestimatePercent),
-        detail: 'Факт короче плана · задач: ${statistics.overestimatedTasks}',
+        detail: tr("Факт короче плана · задач: {0}", [
+          statistics.overestimatedTasks,
+        ]),
       ),
     ];
     return _StatCard(
-      title: 'Ошибка эстимейта',
+      title: tr("Ошибка эстимейта"),
       infoId: 'estimate',
-      info:
-          'Для завершённых задач с планом в периоде сравниваются полный план задачи и всё её учтённое время. Ошибка = |факт − план| / план × 100%. Средняя ошибка даёт каждой задаче одинаковый вес. Счётчик учитывает ошибку строго больше 10% до округления. Средняя недооценка считается только там, где факт больше плана; переоценка — где он меньше. Эти ошибки не компенсируют друг друга. Задачи без учёта времени или положительного плана исключены; прочерк означает отсутствие данных.',
-      subtitle: 'Завершённые задачи с планом в периоде · задача целиком',
+      info: tr(
+        "Для завершённых задач с планом в периоде сравниваются полный план задачи и всё её учтённое время. Ошибка = |факт − план| / план × 100%. Средняя ошибка даёт каждой задаче одинаковый вес. Счётчик учитывает ошибку строго больше 10% до округления. Средняя недооценка считается только там, где факт больше плана; переоценка — где он меньше. Эти ошибки не компенсируют друг друга. Задачи без учёта времени или положительного плана исключены; прочерк означает отсутствие данных.",
+      ),
+      subtitle: tr("Завершённые задачи с планом в периоде · задача целиком"),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -1864,7 +1954,9 @@ class _EstimateCard extends StatelessWidget {
             ),
             const SizedBox(height: 14),
             Text(
-              'Проценты от плана каждой задачи. Недооценка и переоценка не компенсируют друг друга.',
+              tr(
+                "Проценты от плана каждой задачи. Недооценка и переоценка не компенсируют друг друга.",
+              ),
               style: TextStyle(
                 fontSize: 11,
                 height: 1.5,
@@ -1873,14 +1965,19 @@ class _EstimateCard extends StatelessWidget {
             ),
           ] else
             Text(
-              'Завершите запланированную задачу и запишите потраченное время, чтобы сравнить оценку с фактом.',
+              tr(
+                "Завершите запланированную задачу и запишите потраченное время, чтобы сравнить оценку с фактом.",
+              ),
               style: TextStyle(color: context.palette.muted, height: 1.5),
             ),
           if (statistics.missingTimeTasks > 0)
             Padding(
               padding: const EdgeInsets.only(top: 12),
               child: Text(
-                'Без учёта времени: ${statistics.missingTimeTasks}. Эти задачи не включены в проценты.',
+                tr(
+                  "Без учёта времени: {0}. Эти задачи не включены в проценты.",
+                  [statistics.missingTimeTasks],
+                ),
                 style: TextStyle(
                   fontSize: 12,
                   height: 1.5,
@@ -1894,11 +1991,11 @@ class _EstimateCard extends StatelessWidget {
               key: const ValueKey('estimate-task-details'),
               tilePadding: EdgeInsets.zero,
               childrenPadding: const EdgeInsets.only(top: 8),
-              title: const Text('По задачам', style: TextStyle(fontSize: 13)),
+              title: Text(tr("По задачам"), style: TextStyle(fontSize: 13)),
               subtitle: Text(
                 estimates.length > 8
-                    ? '8 задач с наибольшей ошибкой'
-                    : 'План, факт и отклонение',
+                    ? tr("8 задач с наибольшей ошибкой")
+                    : tr("План, факт и отклонение"),
                 style: TextStyle(fontSize: 11, color: context.palette.muted),
               ),
               children: [
@@ -1920,7 +2017,7 @@ class _EstimateCard extends StatelessWidget {
                           runSpacing: 4,
                           children: [
                             Text(
-                              'План ${formatDuration(item.planned)}',
+                              tr("План {0}", [formatDuration(item.planned)]),
                               style: TextStyle(
                                 fontSize: 11,
                                 color: context.palette.muted,
@@ -1928,8 +2025,10 @@ class _EstimateCard extends StatelessWidget {
                             ),
                             Text(
                               item.errorPercent == null
-                                  ? 'Нет учёта времени'
-                                  : 'Факт ${formatDuration(item.actual)}',
+                                  ? tr("Нет учёта времени")
+                                  : tr("Факт {0}", [
+                                      formatDuration(item.actual),
+                                    ]),
                               style: TextStyle(
                                 fontSize: 11,
                                 color: context.palette.muted,
@@ -1938,8 +2037,8 @@ class _EstimateCard extends StatelessWidget {
                             if (item.errorPercent case final error?)
                               Text(
                                 error == 0
-                                    ? 'Точно по плану'
-                                    : '${error > 0 ? 'Недооценка' : 'Переоценка'} ${percent(error.abs())}',
+                                    ? tr("Точно по плану")
+                                    : '${error > 0 ? tr("Недооценка") : tr("Переоценка")} ${percent(error.abs())}',
                                 style: TextStyle(
                                   fontSize: 11,
                                   color: context.accentColor,
@@ -1981,7 +2080,7 @@ class _StatisticsExplanation extends StatelessWidget {
         Icons.info_outline_rounded,
         size: 18,
         color: context.palette.muted,
-        semanticLabel: 'О расчёте: $title',
+        semanticLabel: tr("О расчёте: {0}", [title]),
       ),
     ),
   );

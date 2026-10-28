@@ -1,3 +1,4 @@
+import '../l10n/strings.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -67,7 +68,7 @@ Future<bool> confirmServerAction(
   BuildContext context,
   String title,
   String message, {
-  String action = 'Продолжить',
+  String? action,
 }) async =>
     await showDialog<bool>(
       context: context,
@@ -77,11 +78,11 @@ Future<bool> confirmServerAction(
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
-            child: const Text('Отмена'),
+            child: Text(tr("Отмена")),
           ),
           FilledButton(
             onPressed: () => Navigator.pop(context, true),
-            child: Text(action),
+            child: Text(action ?? tr("Продолжить")),
           ),
         ],
       ),
@@ -141,7 +142,7 @@ class _SynchronizationPageState extends ConsumerState<SynchronizationPage> {
           if (mounted) {
             setState(() {
               reachable = false;
-              error = 'Нет ответа от сервера. Локальные данные доступны.';
+              error = tr("Нет ответа от сервера. Локальные данные доступны.");
             });
           }
         }
@@ -158,8 +159,9 @@ class _SynchronizationPageState extends ConsumerState<SynchronizationPage> {
         } catch (_) {
           if (mounted) {
             setState(
-              () => metricsError =
-                  'Метрики недоступны. Проверьте связь и обновите сервер.',
+              () => metricsError = tr(
+                "Метрики недоступны. Проверьте связь и обновите сервер.",
+              ),
             );
           }
         }
@@ -171,9 +173,11 @@ class _SynchronizationPageState extends ConsumerState<SynchronizationPage> {
   Future<void> forget() async {
     if (!await confirmServerAction(
           context,
-          'Забыть сервер?',
-          'Устройство перейдёт в локальный режим. Заметки, задачи и файлы останутся здесь. На сервере ничего не удалится, остальные устройства продолжат синхронизацию.',
-          action: 'Забыть сервер',
+          tr("Забыть сервер?"),
+          tr(
+            "Устройство перейдёт в локальный режим. Заметки, задачи и файлы останутся здесь. На сервере ничего не удалится, остальные устройства продолжат синхронизацию.",
+          ),
+          action: tr("Забыть сервер"),
         ) ||
         !mounted) {
       return;
@@ -208,10 +212,10 @@ class _SynchronizationPageState extends ConsumerState<SynchronizationPage> {
 
   Widget metricsCard() {
     String bytes(int n) => n >= 1073741824
-        ? '${(n / 1073741824).toStringAsFixed(1)} ГБ'
-        : '${(n / 1048576).toStringAsFixed(0)} МБ';
+        ? tr("{0} ГБ", [(n / 1073741824).toStringAsFixed(1)])
+        : tr("{0} МБ", [(n / 1048576).toStringAsFixed(0)]);
     final m = metrics;
-    return settingsCard('Состояние VPS', [
+    return settingsCard(tr("Состояние VPS"), [
       Row(
         children: [
           Icon(
@@ -227,14 +231,14 @@ class _SynchronizationPageState extends ConsumerState<SynchronizationPage> {
           Expanded(
             child: Text(
               reachable == true
-                  ? 'Сервер доступен'
+                  ? tr("Сервер доступен")
                   : reachable == false
-                  ? 'Нет подключения'
-                  : 'Проверяем подключение…',
+                  ? tr("Нет подключения")
+                  : tr("Проверяем подключение…"),
             ),
           ),
           IconButton(
-            tooltip: 'Обновить метрики',
+            tooltip: tr("Обновить метрики"),
             onPressed: refreshing ? null : refresh,
             icon: const Icon(Icons.refresh_rounded),
           ),
@@ -253,21 +257,23 @@ class _SynchronizationPageState extends ConsumerState<SynchronizationPage> {
         ListTile(
           contentPadding: EdgeInsets.zero,
           leading: const Icon(Icons.memory_rounded),
-          title: const Text('Память VPS'),
+          title: Text(tr("Память VPS")),
           subtitle: Text('Yggvion: ${bytes(m.processMemory)}'),
           trailing: Text('${bytes(m.memoryUsed)} / ${bytes(m.memoryTotal)}'),
         ),
         ListTile(
           contentPadding: EdgeInsets.zero,
           leading: const Icon(Icons.storage_rounded),
-          title: const Text('Диск VPS'),
-          subtitle: Text('Свободно ${bytes(m.diskAvailable)}'),
+          title: Text(tr("Диск VPS")),
+          subtitle: Text(tr("Свободно {0}", [bytes(m.diskAvailable)])),
           trailing: Text(
             '${bytes(m.diskTotal - m.diskAvailable)} / ${bytes(m.diskTotal)}',
           ),
         ),
         Text(
-          'Снимок ${DateFormat('HH:mm:ss').format(m.sampledAt.toLocal())} · обновление при открытии экрана',
+          tr("Снимок {0} · обновление при открытии экрана", [
+            DateFormat('HH:mm:ss').format(m.sampledAt.toLocal()),
+          ]),
           style: TextStyle(fontSize: 12, color: context.palette.muted),
         ),
       ],
@@ -299,7 +305,7 @@ class _SynchronizationPageState extends ConsumerState<SynchronizationPage> {
     await showDialog<void>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Подключить устройство'),
+        title: Text(tr("Подключить устройство")),
         content: SizedBox(
           width: 320,
           child: Column(
@@ -311,8 +317,10 @@ class _SynchronizationPageState extends ConsumerState<SynchronizationPage> {
                 child: QrImageView(data: invitation, size: 270),
               ),
               const SizedBox(height: 16),
-              const Text(
-                'Откройте «Синхронизация» на другом устройстве и отсканируйте код. Одно подключение · 10 минут.',
+              Text(
+                tr(
+                  "Откройте «Синхронизация» на другом устройстве и отсканируйте код. Одно подключение · 10 минут.",
+                ),
               ),
             ],
           ),
@@ -320,11 +328,11 @@ class _SynchronizationPageState extends ConsumerState<SynchronizationPage> {
         actions: [
           TextButton(
             onPressed: () => Clipboard.setData(ClipboardData(text: invitation)),
-            child: const Text('Скопировать ссылку'),
+            child: Text(tr("Скопировать ссылку")),
           ),
           FilledButton(
             onPressed: () => Navigator.pop(context),
-            child: const Text('Готово'),
+            child: Text(tr("Готово")),
           ),
         ],
       ),
@@ -342,23 +350,25 @@ class _SynchronizationPageState extends ConsumerState<SynchronizationPage> {
   Widget build(BuildContext context) {
     final repo = ref.watch(appProvider), sync = ref.read(syncProvider);
     return SettingsDetail(
-      title: 'Синхронизация',
+      title: tr("Синхронизация"),
       children: [
         settingsCard(
           sync.connected
-              ? 'Ваш сервер'
-              : 'Ваше пространство на всех устройствах',
+              ? tr("Ваш сервер")
+              : tr("Ваше пространство на всех устройствах"),
           [
             Text(
               sync.connected
                   ? sync.url!
-                  : 'Изменения сохраняются на устройстве сразу. VPS объединяет их, когда появляется интернет.',
+                  : tr(
+                      "Изменения сохраняются на устройстве сразу. VPS объединяет их, когда появляется интернет.",
+                    ),
               style: TextStyle(color: context.palette.muted, height: 1.5),
             ),
             if (sync.connected) ...[
               const SizedBox(height: 12),
               Text(
-                repo.syncStatus,
+                tr(repo.syncStatus),
                 style: TextStyle(color: context.accentColor),
               ),
               if (repo.syncError != null) Text(repo.syncError!),
@@ -370,11 +380,11 @@ class _SynchronizationPageState extends ConsumerState<SynchronizationPage> {
                   FilledButton.icon(
                     onPressed: busy ? null : () => action(invite),
                     icon: const Icon(Icons.qr_code_rounded),
-                    label: const Text('Подключить устройство'),
+                    label: Text(tr("Подключить устройство")),
                   ),
                   OutlinedButton(
                     onPressed: busy ? null : () => action(sync.sync),
-                    child: const Text('Синхронизировать'),
+                    child: Text(tr("Синхронизировать")),
                   ),
                 ],
               ),
@@ -382,14 +392,16 @@ class _SynchronizationPageState extends ConsumerState<SynchronizationPage> {
           ],
         ),
         if (sync.connected && widget.invitation != null)
-          settingsCard('Сервер уже подключён', [
-            const Text(
-              'Чтобы использовать приглашение другого сервера, сначала нажмите «Забыть сервер». Локальные данные сохранятся.',
+          settingsCard(tr("Сервер уже подключён"), [
+            Text(
+              tr(
+                "Чтобы использовать приглашение другого сервера, сначала нажмите «Забыть сервер». Локальные данные сохранятся.",
+              ),
             ),
           ]),
         if (sync.connected) metricsCard(),
         if (sync.connected)
-          settingsCard('Устройства', [
+          settingsCard(tr("Устройства"), [
             if (error != null) Text(error!),
             for (final device in devices)
               ListTile(
@@ -397,21 +409,24 @@ class _SynchronizationPageState extends ConsumerState<SynchronizationPage> {
                 leading: const Icon(Icons.devices_rounded),
                 title: Text(device['name'] as String),
                 subtitle: device['id'] == repo.deviceId
-                    ? const Text('Это устройство')
+                    ? Text(tr("Это устройство"))
                     : null,
                 trailing: device['id'] == repo.deviceId
                     ? null
                     : IconButton(
-                        tooltip: 'Отозвать доступ',
+                        tooltip: tr("Отозвать доступ"),
                         icon: const Icon(Icons.link_off_rounded),
                         onPressed: busy
                             ? null
                             : () => action(() async {
                                 if (await confirmServerAction(
                                   context,
-                                  'Отозвать доступ?',
-                                  '${device['name']} больше не сможет синхронизироваться.',
-                                  action: 'Отозвать',
+                                  tr("Отозвать доступ?"),
+                                  tr(
+                                    "{0} больше не сможет синхронизироваться.",
+                                    [device['name']],
+                                  ),
+                                  action: tr("Отозвать"),
                                 )) {
                                   await sync.revoke(device['id'] as String);
                                 }
@@ -420,9 +435,11 @@ class _SynchronizationPageState extends ConsumerState<SynchronizationPage> {
               ),
           ]),
         if (sync.connected)
-          settingsCard('Управление сервером', [
+          settingsCard(tr("Управление сервером"), [
             Text(
-              'Обновление сохраняет данные. Очистка полностью удаляет Yggvion с VPS. «Забыть» отключает только это устройство.',
+              tr(
+                "Обновление сохраняет данные. Очистка полностью удаляет Yggvion с VPS. «Забыть» отключает только это устройство.",
+              ),
               style: TextStyle(color: context.palette.muted, height: 1.5),
             ),
             const SizedBox(height: 12),
@@ -433,27 +450,29 @@ class _SynchronizationPageState extends ConsumerState<SynchronizationPage> {
                 OutlinedButton.icon(
                   onPressed: busy ? null : () => manage(ServerOperation.update),
                   icon: const Icon(Icons.system_update_alt_rounded),
-                  label: const Text('Обновить серверную часть'),
+                  label: Text(tr("Обновить серверную часть")),
                 ),
                 TextButton.icon(
                   onPressed: busy
                       ? null
                       : () => manage(ServerOperation.uninstall),
                   icon: const Icon(Icons.delete_outline_rounded),
-                  label: const Text('Очистить сервер'),
+                  label: Text(tr("Очистить сервер")),
                 ),
                 TextButton.icon(
                   onPressed: busy ? null : forget,
                   icon: const Icon(Icons.link_off_rounded),
-                  label: const Text('Забыть сервер'),
+                  label: Text(tr("Забыть сервер")),
                 ),
               ],
             ),
           ]),
         if (!sync.connected)
-          settingsCard('Установить на VPS', [
+          settingsCard(tr("Установить на VPS"), [
             Text(
-              'Ubuntu / Debian · x86_64 или ARM64\nSSH нужен только для установки и обновления. Домен не требуется.',
+              tr(
+                "Ubuntu / Debian · x86_64 или ARM64\nSSH нужен только для установки и обновления. Домен не требуется.",
+              ),
               style: TextStyle(color: context.palette.muted, height: 1.5),
             ),
             const SizedBox(height: 16),
@@ -469,22 +488,22 @@ class _SynchronizationPageState extends ConsumerState<SynchronizationPage> {
                         ),
                       ).then((_) => refresh()),
                 icon: const Icon(Icons.dns_outlined),
-                label: const Text('Настроить VPS'),
+                label: Text(tr("Настроить VPS")),
               ),
             ),
           ]),
         if (!sync.connected)
-          settingsCard('Подключиться по приглашению', [
+          settingsCard(tr("Подключиться по приглашению"), [
             TextField(
               controller: name,
-              decoration: const InputDecoration(labelText: 'Это устройство'),
+              decoration: InputDecoration(labelText: tr("Это устройство")),
             ),
             const SizedBox(height: 12),
             TextField(
               controller: link,
               maxLines: 3,
-              decoration: const InputDecoration(
-                labelText: 'Ссылка приглашения',
+              decoration: InputDecoration(
+                labelText: tr("Ссылка приглашения"),
                 hintText: 'yggvion://connect…',
               ),
             ),
@@ -499,20 +518,20 @@ class _SynchronizationPageState extends ConsumerState<SynchronizationPage> {
                           await sync.pairInvitation(link.text, name.text);
                           link.clear();
                         }),
-                  child: const Text('Подключиться'),
+                  child: Text(tr("Подключиться")),
                 ),
                 if (Platform.isIOS || Platform.isAndroid || Platform.isMacOS)
                   TextButton.icon(
                     onPressed: busy ? null : scan,
                     icon: const Icon(Icons.qr_code_scanner_rounded),
-                    label: const Text('Сканировать QR'),
+                    label: Text(tr("Сканировать QR")),
                   ),
               ],
             ),
           ]),
         if (repo.conflictCount > 0 ||
             sessionConflicts(repo.snapshot.sessions, repo.now()).isNotEmpty)
-          settingsCard('Конфликты', [const ConflictsPanel()]),
+          settingsCard(tr("Конфликты"), [const ConflictsPanel()]),
       ],
     );
   }
@@ -528,7 +547,7 @@ class _InvitationScannerState extends State<InvitationScanner> {
   bool done = false;
   @override
   Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(title: const Text('Код подключения')),
+    appBar: AppBar(title: Text(tr("Код подключения"))),
     body: MobileScanner(
       onDetect: (capture) {
         if (done) return;
@@ -602,12 +621,14 @@ class _InstallServerPageState extends ConsumerState<InstallServerPage> {
         context: context,
         builder: (dialog) => StatefulBuilder(
           builder: (dialog, set) => AlertDialog(
-            title: const Text('Очистить сервер?'),
+            title: Text(tr("Очистить сервер?")),
             content: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
                 Text(
-                  'Yggvion, его база, вложения, сертификаты, настройки и резервные копии на VPS будут удалены. Данные на устройствах и внешние копии останутся. Введите IP сервера для подтверждения.',
+                  tr(
+                    "Yggvion, его база, вложения, сертификаты, настройки и резервные копии на VPS будут удалены. Данные на устройствах и внешние копии останутся. Введите IP сервера для подтверждения.",
+                  ),
                 ),
                 const SizedBox(height: 16),
                 TextField(
@@ -620,7 +641,7 @@ class _InstallServerPageState extends ConsumerState<InstallServerPage> {
             actions: [
               TextButton(
                 onPressed: () => Navigator.pop(dialog, false),
-                child: const Text('Отмена'),
+                child: Text(tr("Отмена")),
               ),
               FilledButton(
                 onPressed:
@@ -628,7 +649,7 @@ class _InstallServerPageState extends ConsumerState<InstallServerPage> {
                         host.text.trim().isNotEmpty
                     ? () => Navigator.pop(dialog, true)
                     : null,
-                child: const Text('Очистить сервер'),
+                child: Text(tr("Очистить сервер")),
               ),
             ],
           ),
@@ -654,9 +675,19 @@ class _InstallServerPageState extends ConsumerState<InstallServerPage> {
             mounted &&
             await confirmServerAction(
               context,
-              changed ? 'SSH-ключ сервера изменился' : 'Проверьте сервер',
-              '${host.text}\n\n$fingerprint\n\nСверьте отпечаток с панелью VPS. ${changed ? 'При неожиданной смене ключа отмените подключение.' : 'После подтверждения ключ будет сохранён на этом устройстве.'}',
-              action: 'Доверять этому ключу',
+              changed
+                  ? tr("SSH-ключ сервера изменился")
+                  : tr("Проверьте сервер"),
+              tr("{0}\n\n{1}\n\nСверьте отпечаток с панелью VPS. {2}", [
+                host.text,
+                fingerprint,
+                changed
+                    ? tr("При неожиданной смене ключа отмените подключение.")
+                    : tr(
+                        "После подтверждения ключ будет сохранён на этом устройстве.",
+                      ),
+              ]),
+              action: tr("Доверять этому ключу"),
             ),
         onStatus: (value) {
           if (mounted) setState(() => status = value);
@@ -681,23 +712,27 @@ class _InstallServerPageState extends ConsumerState<InstallServerPage> {
   @override
   Widget build(BuildContext context) => SettingsDetail(
     title: switch (widget.operation) {
-      ServerOperation.install => 'Настроить VPS',
-      ServerOperation.update => 'Обновить сервер',
-      ServerOperation.uninstall => 'Очистить сервер',
+      ServerOperation.install => tr("Настроить VPS"),
+      ServerOperation.update => tr("Обновить сервер"),
+      ServerOperation.uninstall => tr("Очистить сервер"),
     },
     children: [
-      settingsCard('Подключение по SSH', [
+      settingsCard(tr("Подключение по SSH"), [
         Text(
           widget.operation == ServerOperation.install
-              ? 'Приложение установит отдельный сервис Yggvion, настроит HTTPS и резервные копии. Данные SSH не сохраняются.'
-              : 'Операция выполняется через SSH. Пароль и ключ не сохраняются.',
+              ? tr(
+                  "Приложение установит отдельный сервис Yggvion, настроит HTTPS и резервные копии. Данные SSH не сохраняются.",
+                )
+              : tr(
+                  "Операция выполняется через SSH. Пароль и ключ не сохраняются.",
+                ),
           style: TextStyle(color: context.palette.muted, height: 1.5),
         ),
         const SizedBox(height: 20),
         for (final item in [
-          (host, 'IP-адрес VPS'),
-          (sshPort, 'SSH-порт'),
-          (user, 'Пользователь'),
+          (host, tr("IP-адрес VPS")),
+          (sshPort, tr("SSH-порт")),
+          (user, tr("Пользователь")),
         ])
           Padding(
             padding: const EdgeInsets.only(bottom: 12),
@@ -716,7 +751,7 @@ class _InstallServerPageState extends ConsumerState<InstallServerPage> {
           obscureText: true,
           enableSuggestions: false,
           autocorrect: false,
-          decoration: const InputDecoration(labelText: 'Пароль SSH / sudo'),
+          decoration: InputDecoration(labelText: tr("Пароль SSH / sudo")),
         ),
         const SizedBox(height: 12),
         OutlinedButton.icon(
@@ -729,7 +764,7 @@ class _InstallServerPageState extends ConsumerState<InstallServerPage> {
                   if (result == null) return;
                   final file = result.files.single;
                   if (file.size > 128 * 1024) {
-                    throw StateError('Это не файл SSH-ключа');
+                    throw StateError(tr("Это не файл SSH-ключа"));
                   }
                   final bytes =
                       file.bytes ?? await File(file.path!).readAsBytes();
@@ -741,14 +776,14 @@ class _InstallServerPageState extends ConsumerState<InstallServerPage> {
                   }
                 }),
           icon: const Icon(Icons.key_rounded),
-          label: Text(keyName ?? 'Использовать SSH-ключ'),
+          label: Text(keyName ?? tr("Использовать SSH-ключ")),
         ),
         if (privateKey != null)
           TextField(
             controller: passphrase,
             obscureText: true,
-            decoration: const InputDecoration(
-              labelText: 'Пароль ключа, если задан',
+            decoration: InputDecoration(
+              labelText: tr("Пароль ключа, если задан"),
             ),
           ),
         const SizedBox(height: 12),
@@ -756,7 +791,7 @@ class _InstallServerPageState extends ConsumerState<InstallServerPage> {
           controller: httpsPort,
           enabled: !busy,
           readOnly: widget.operation != ServerOperation.install,
-          decoration: const InputDecoration(labelText: 'HTTPS-порт'),
+          decoration: InputDecoration(labelText: tr("HTTPS-порт")),
         ),
         const SizedBox(height: 20),
         if (busy) const LinearProgressIndicator(),
@@ -768,15 +803,15 @@ class _InstallServerPageState extends ConsumerState<InstallServerPage> {
         FilledButton(
           onPressed: busy ? null : install,
           child: Text(switch (widget.operation) {
-            ServerOperation.install => 'Установить и подключить',
-            ServerOperation.update => 'Обновить сервер',
-            ServerOperation.uninstall => 'Очистить сервер',
+            ServerOperation.install => tr("Установить и подключить"),
+            ServerOperation.update => tr("Обновить сервер"),
+            ServerOperation.uninstall => tr("Очистить сервер"),
           }),
         ),
         if (busy)
           TextButton(
             onPressed: installer.cancel,
-            child: const Text('Отменить подключение'),
+            child: Text(tr("Отменить подключение")),
           ),
       ]),
     ],
@@ -829,8 +864,9 @@ class _BackupsPageState extends ConsumerState<BackupsPage> {
     } on Object {
       if (mounted) {
         setState(
-          () => error =
-              'Не удалось загрузить резервные копии. Проверьте подключение и версию сервера.',
+          () => error = tr(
+            "Не удалось загрузить резервные копии. Проверьте подключение и версию сервера.",
+          ),
         );
       }
     } finally {
@@ -866,7 +902,7 @@ class _BackupsPageState extends ConsumerState<BackupsPage> {
     final path = mobile
         ? '${(await getTemporaryDirectory()).path}/$id.yggbackup'
         : await FilePicker.platform.saveFile(
-            dialogTitle: 'Сохранить резервную копию',
+            dialogTitle: tr("Сохранить резервную копию"),
             fileName: '$id.yggbackup',
           );
     if (path == null) return;
@@ -889,7 +925,7 @@ class _BackupsPageState extends ConsumerState<BackupsPage> {
       await SharePlus.instance.share(
         ShareParams(
           files: [XFile(path)],
-          text: 'Зашифрованная резервная копия Yggvion',
+          text: tr("Зашифрованная резервная копия Yggvion"),
         ),
       );
     }
@@ -902,7 +938,7 @@ class _BackupsPageState extends ConsumerState<BackupsPage> {
     );
     if (picked == null || !mounted) return;
     final path = picked.files.single.path;
-    if (path == null) throw StateError('Не удалось открыть выбранный файл');
+    if (path == null) throw StateError(tr("Не удалось открыть выбранный файл"));
     final file = File(path);
     final sync = ref.read(syncProvider);
     transfer = CancelToken();
@@ -933,14 +969,14 @@ class _BackupsPageState extends ConsumerState<BackupsPage> {
     await showDialog<void>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Данные до восстановления'),
+        title: Text(tr("Данные до восстановления")),
         content: SizedBox(
           width: 520,
           height: 300,
           child: ListView(
             children: [
               if (rows.isEmpty)
-                const Text('Восстановлений на этом устройстве пока не было.'),
+                Text(tr("Восстановлений на этом устройстве пока не было.")),
               for (final row in rows)
                 ListTile(
                   title: Text(row.created),
@@ -959,7 +995,7 @@ class _BackupsPageState extends ConsumerState<BackupsPage> {
                         await File(path).writeAsBytes(bytes);
                       }
                     }),
-                    child: const Text('Экспорт'),
+                    child: Text(tr("Экспорт")),
                   ),
                 ),
             ],
@@ -968,7 +1004,7 @@ class _BackupsPageState extends ConsumerState<BackupsPage> {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: const Text('Готово'),
+            child: Text(tr("Готово")),
           ),
         ],
       ),
@@ -982,26 +1018,30 @@ class _BackupsPageState extends ConsumerState<BackupsPage> {
     final status = data?['status'] as Map?;
     final running = busy || status?['running'] == true;
     final operation = switch (status?['operation']) {
-      'create' || 'scheduled' => 'Создаём резервную копию…',
-      'restore' => 'Восстанавливаем данные…',
-      'import' => 'Проверяем импортированный архив…',
-      'fetch_remote' => 'Загружаем копию из внешнего хранилища…',
-      'delete' => 'Удаляем копию…',
-      _ => 'Сервер обрабатывает копию…',
+      'create' || 'scheduled' => tr("Создаём резервную копию…"),
+      'restore' => tr("Восстанавливаем данные…"),
+      'import' => tr("Проверяем импортированный архив…"),
+      'fetch_remote' => tr("Загружаем копию из внешнего хранилища…"),
+      'delete' => tr("Удаляем копию…"),
+      _ => tr("Сервер обрабатывает копию…"),
     };
     return SettingsDetail(
-      title: 'Резервное копирование',
+      title: tr("Резервное копирование"),
       children: [
-        settingsCard('Копии на этом устройстве', [const LocalBackupsPanel()]),
-        settingsCard('Серверные копии', [
+        settingsCard(tr("Копии на этом устройстве"), [
+          const LocalBackupsPanel(),
+        ]),
+        settingsCard(tr("Серверные копии"), [
           Text(
-            'Зашифрованные копии включают задачи, заметки, проекты, учёт времени и вложения, уже дошедшие до сервера. Незагруженные изменения остаются на устройствах.',
+            tr(
+              "Зашифрованные копии включают задачи, заметки, проекты, учёт времени и вложения, уже дошедшие до сервера. Незагруженные изменения остаются на устройствах.",
+            ),
             style: TextStyle(color: context.palette.muted, height: 1.5),
           ),
           if (!connected)
-            const Padding(
+            Padding(
               padding: EdgeInsets.only(top: 16),
-              child: Text('Подключите VPS в разделе «Синхронизация».'),
+              child: Text(tr("Подключите VPS в разделе «Синхронизация».")),
             ),
           if (error != null) Text(error!),
           if (status?['error'] != null) Text(status!['error'] as String),
@@ -1009,7 +1049,7 @@ class _BackupsPageState extends ConsumerState<BackupsPage> {
             const SizedBox(height: 16),
             LinearProgressIndicator(value: progress),
             const SizedBox(height: 8),
-            Text(busy ? 'Передача данных…' : operation),
+            Text(busy ? tr("Передача данных…") : operation),
           ],
           const SizedBox(height: 16),
           Wrap(
@@ -1020,23 +1060,23 @@ class _BackupsPageState extends ConsumerState<BackupsPage> {
                 onPressed: !connected || running
                     ? null
                     : () => action(importBackup),
-                child: const Text('Импортировать'),
+                child: Text(tr("Импортировать")),
               ),
             ],
           ),
         ]),
         if (config != null)
-          settingsCard('Расписание на сервере', [
+          settingsCard(tr("Расписание на сервере"), [
             DropdownButtonFormField<int>(
               initialValue: config['every_hours'] as int,
-              decoration: const InputDecoration(labelText: 'Частота'),
+              decoration: InputDecoration(labelText: tr("Частота")),
               items: [
                 for (final entry in {
-                  0: 'Выключено',
-                  6: 'Каждые 6 часов',
-                  12: 'Каждые 12 часов',
-                  24: 'Ежедневно',
-                  168: 'Еженедельно',
+                  0: tr("Выключено"),
+                  6: tr("Каждые 6 часов"),
+                  12: tr("Каждые 12 часов"),
+                  24: tr("Ежедневно"),
+                  168: tr("Еженедельно"),
                 }.entries)
                   DropdownMenuItem(value: entry.key, child: Text(entry.value)),
               ],
@@ -1048,11 +1088,14 @@ class _BackupsPageState extends ConsumerState<BackupsPage> {
             ),
             const SizedBox(height: 16),
             Text(
-              'Храним ${config['keep_daily']} ежедневных и ${config['keep_weekly']} еженедельных копий. Импортированные и страховочные копии сохраняются до удаления.',
+              tr(
+                "Храним {0} ежедневных и {1} еженедельных копий. Импортированные и страховочные копии сохраняются до удаления.",
+                [config['keep_daily'], config['keep_weekly']],
+              ),
             ),
             for (final entry in {
-              'keep_daily': 'Ежедневных',
-              'keep_weekly': 'Еженедельных',
+              'keep_daily': tr("Ежедневных"),
+              'keep_weekly': tr("Еженедельных"),
             }.entries)
               Row(
                 children: [
@@ -1085,30 +1128,35 @@ class _BackupsPageState extends ConsumerState<BackupsPage> {
                 ],
               ),
           ]),
-        settingsCard('Копии на VPS', [
+        settingsCard(tr("Копии на VPS"), [
           if ((data?['backups'] as List? ?? []).isEmpty)
-            const Text('Копии появятся здесь после первого сохранения.'),
+            Text(tr("Копии появятся здесь после первого сохранения.")),
           for (final raw in data?['backups'] as List? ?? [])
             Builder(
               builder: (context) {
                 final entry = raw as Map;
                 final id = entry['id'] as String;
                 final reason = switch (entry['reason']) {
-                  'scheduled' => 'По расписанию',
-                  'before_restore' => 'Перед восстановлением',
-                  'before_update' => 'Перед обновлением сервера',
-                  'import' => 'Импортированная',
-                  _ => 'Ручная копия',
+                  'scheduled' => tr("По расписанию"),
+                  'before_restore' => tr("Перед восстановлением"),
+                  'before_update' => tr("Перед обновлением сервера"),
+                  'import' => tr("Импортированная"),
+                  _ => tr("Ручная копия"),
                 };
                 return ListTile(
                   contentPadding: EdgeInsets.zero,
                   title: Text(
-                    DateFormat('d MMM yyyy · HH:mm', 'ru').format(
+                    DateFormat('d MMM yyyy · HH:mm', AppLocale.language).format(
                       DateTime.parse(entry['created'] as String).toLocal(),
                     ),
                   ),
                   subtitle: Text(
-                    '$reason · ${entry['records']} записей · ${entry['files']} файлов · ${((entry['bytes'] as num) / 1048576).toStringAsFixed(1)} МБ',
+                    tr("{0} · {1} записей · {2} файлов · {3} МБ", [
+                      reason,
+                      entry['records'],
+                      entry['files'],
+                      ((entry['bytes'] as num) / 1048576).toStringAsFixed(1),
+                    ]),
                   ),
                   trailing: PopupMenuButton<String>(
                     enabled: !running,
@@ -1120,12 +1168,16 @@ class _BackupsPageState extends ConsumerState<BackupsPage> {
                       if (!await confirmServerAction(
                         context,
                         value == 'restore'
-                            ? 'Восстановить эту копию?'
-                            : 'Удалить копию?',
+                            ? tr("Восстановить эту копию?")
+                            : tr("Удалить копию?"),
                         value == 'restore'
-                            ? 'Сервер сначала создаст страховочную копию. Данные календаря и заметок будут заменены. Устройства сохранят свои прежние данные для ручного экспорта и получат восстановленную версию.'
-                            : 'Эта копия будет удалена с VPS.',
-                        action: value == 'restore' ? 'Восстановить' : 'Удалить',
+                            ? tr(
+                                "Сервер сначала создаст страховочную копию. Данные календаря и заметок будут заменены. Устройства сохранят свои прежние данные для ручного экспорта и получат восстановленную версию.",
+                              )
+                            : tr("Эта копия будет удалена с VPS."),
+                        action: value == 'restore'
+                            ? tr("Восстановить")
+                            : tr("Удалить"),
                       )) {
                         return;
                       }
@@ -1139,13 +1191,19 @@ class _BackupsPageState extends ConsumerState<BackupsPage> {
                                 : null,
                           );
                     }),
-                    itemBuilder: (_) => const [
-                      PopupMenuItem(value: 'download', child: Text('Скачать')),
+                    itemBuilder: (_) => [
+                      PopupMenuItem(
+                        value: 'download',
+                        child: Text(tr("Скачать")),
+                      ),
                       PopupMenuItem(
                         value: 'restore',
-                        child: Text('Восстановить'),
+                        child: Text(tr("Восстановить")),
                       ),
-                      PopupMenuItem(value: 'delete', child: Text('Удалить')),
+                      PopupMenuItem(
+                        value: 'delete',
+                        child: Text(tr("Удалить")),
+                      ),
                     ],
                   ),
                 );
@@ -1154,16 +1212,16 @@ class _BackupsPageState extends ConsumerState<BackupsPage> {
         ]),
         TextButton(
           onPressed: () => guard(context, localRecovery),
-          child: const Text('Локальные данные до восстановления'),
+          child: Text(tr("Локальные данные до восстановления")),
         ),
         if (connected && data != null)
           ListTile(
             leading: const Icon(Icons.cloud_upload_outlined),
-            title: const Text('Вторая копия вне VPS'),
+            title: Text(tr("Вторая копия вне VPS")),
             subtitle: Text(
               (data!['remote'] as Map?)?['kind'] == 'disabled'
-                  ? 'Dropbox, S3 или SFTP · защита при потере сервера'
-                  : 'Автоматическая отправка зашифрованных архивов',
+                  ? tr("Dropbox, S3 или SFTP · защита при потере сервера")
+                  : tr("Автоматическая отправка зашифрованных архивов"),
             ),
             trailing: const Icon(Icons.chevron_right_rounded),
             onTap: () => Navigator.push(
@@ -1233,8 +1291,9 @@ class _RemoteBackupsPageState extends ConsumerState<RemoteBackupsPage> {
     } on Object {
       if (mounted) {
         setState(
-          () => error =
-              'Не удалось подключиться к хранилищу. Проверьте адрес, права и SSH-отпечаток.',
+          () => error = tr(
+            "Не удалось подключиться к хранилищу. Проверьте адрес, права и SSH-отпечаток.",
+          ),
         );
       }
     } finally {
@@ -1256,9 +1315,11 @@ class _RemoteBackupsPageState extends ConsumerState<RemoteBackupsPage> {
           copies = [];
         });
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
+          SnackBar(
             content: Text(
-              'Dropbox подключён. Новые серверные копии будут отправляться автоматически.',
+              tr(
+                "Dropbox подключён. Новые серверные копии будут отправляться автоматически.",
+              ),
             ),
           ),
         );
@@ -1268,8 +1329,9 @@ class _RemoteBackupsPageState extends ConsumerState<RemoteBackupsPage> {
     } on Object {
       if (mounted) {
         setState(
-          () => error =
-              'Не удалось подключить Dropbox. Проверьте связь с VPS и разрешения, затем повторите вход.',
+          () => error = tr(
+            "Не удалось подключить Dropbox. Проверьте связь с VPS и разрешения, затем повторите вход.",
+          ),
         );
       }
     } finally {
@@ -1296,9 +1358,11 @@ class _RemoteBackupsPageState extends ConsumerState<RemoteBackupsPage> {
     fields['private_key']!.clear();
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
+        SnackBar(
           content: Text(
-            'Хранилище проверено. Новые копии будут отправляться автоматически.',
+            tr(
+              "Хранилище проверено. Новые копии будут отправляться автоматически.",
+            ),
           ),
         ),
       );
@@ -1322,9 +1386,9 @@ class _RemoteBackupsPageState extends ConsumerState<RemoteBackupsPage> {
         .request('POST', '/api/v1/backups/remote/$id/fetch');
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
+        SnackBar(
           content: Text(
-            'Загрузка начата. Результат появится в списке копий на VPS.',
+            tr("Загрузка начата. Результат появится в списке копий на VPS."),
           ),
         ),
       );
@@ -1333,21 +1397,23 @@ class _RemoteBackupsPageState extends ConsumerState<RemoteBackupsPage> {
 
   @override
   Widget build(BuildContext context) => SettingsDetail(
-    title: 'Вторая копия вне VPS',
+    title: tr("Вторая копия вне VPS"),
     children: [
-      settingsCard('Автоматическое хранение', [
+      settingsCard(tr("Автоматическое хранение"), [
         Text(
-          'Личные данные в копиях защищены вашим паролем шифрования. Копии вне VPS сохраняются до удаления в самом хранилище.',
+          tr(
+            "Личные данные в копиях защищены вашим паролем шифрования. Копии вне VPS сохраняются до удаления в самом хранилище.",
+          ),
           style: TextStyle(color: context.palette.muted, height: 1.5),
         ),
         const SizedBox(height: 20),
         DropdownButtonFormField<String>(
           initialValue: kind,
-          decoration: const InputDecoration(labelText: 'Хранилище'),
-          items: const [
-            DropdownMenuItem(value: 'disabled', child: Text('Выключено')),
+          decoration: InputDecoration(labelText: tr("Хранилище")),
+          items: [
+            DropdownMenuItem(value: 'disabled', child: Text(tr("Выключено"))),
             DropdownMenuItem(value: 'dropbox', child: Text('Dropbox')),
-            DropdownMenuItem(value: 's3', child: Text('S3-совместимое')),
+            DropdownMenuItem(value: 's3', child: Text(tr("S3-совместимое"))),
             DropdownMenuItem(value: 'sftp', child: Text('SFTP')),
           ],
           onChanged: busy
@@ -1360,39 +1426,43 @@ class _RemoteBackupsPageState extends ConsumerState<RemoteBackupsPage> {
           const SizedBox(height: 16),
           Text(
             dropboxConnected
-                ? 'Dropbox подключён. Архивы отправляются с VPS в папку приложения, даже когда Yggvion закрыт.'
-                : 'Войдите в браузере и разрешите доступ к папке приложения в Dropbox. Остальные файлы останутся недоступны Yggvion.',
+                ? tr(
+                    "Dropbox подключён. Архивы отправляются с VPS в папку приложения, даже когда Yggvion закрыт.",
+                  )
+                : tr(
+                    "Войдите в браузере и разрешите доступ к папке приложения в Dropbox. Остальные файлы останутся недоступны Yggvion.",
+                  ),
             style: TextStyle(color: context.palette.muted, height: 1.5),
           ),
           if (!dropbox.configured && !dropboxConnected)
-            const Padding(
+            Padding(
               padding: EdgeInsets.only(top: 12),
               child: Text(
-                'Подключение Dropbox ещё не настроено в этой сборке.',
+                tr("Подключение Dropbox ещё не настроено в этой сборке."),
               ),
             ),
           if (busy)
             TextButton(
               onPressed: dropbox.cancel,
-              child: const Text('Отменить вход'),
+              child: Text(tr("Отменить вход")),
             ),
         ],
         if (kind == 's3' || kind == 'sftp') ...[
           for (final field in <String, String>{
             'endpoint': kind == 's3'
-                ? 'HTTPS endpoint без пути'
-                : 'SFTP адрес:порт',
+                ? tr("HTTPS endpoint без пути")
+                : tr("SFTP адрес:порт"),
             if (kind == 's3') 'bucket': 'Bucket',
-            if (kind == 's3') 'region': 'Регион (если нужен)',
+            if (kind == 's3') 'region': tr("Регион (если нужен)"),
             'prefix': kind == 's3'
-                ? 'Префикс, например yggvion'
-                : 'Абсолютный путь на SFTP',
-            'username': kind == 's3' ? 'Access key' : 'Пользователь',
+                ? tr("Префикс, например yggvion")
+                : tr("Абсолютный путь на SFTP"),
+            'username': kind == 's3' ? 'Access key' : tr("Пользователь"),
             'secret': kind == 's3'
                 ? 'Secret key'
-                : 'Пароль (или SSH-ключ ниже)',
-            if (kind == 'sftp') 'private_key': 'Приватный SSH-ключ',
-            if (kind == 'sftp') 'fingerprint': 'Отпечаток сервера SHA256:…',
+                : tr("Пароль (или SSH-ключ ниже)"),
+            if (kind == 'sftp') 'private_key': tr("Приватный SSH-ключ"),
+            if (kind == 'sftp') 'fingerprint': tr("Отпечаток сервера SHA256:…"),
           }.entries)
             Padding(
               padding: const EdgeInsets.only(top: 12),
@@ -1407,7 +1477,9 @@ class _RemoteBackupsPageState extends ConsumerState<RemoteBackupsPage> {
             ),
           const SizedBox(height: 12),
           Text(
-            'Пустое поле секрета сохраняет ранее заданное значение для того же адреса и пользователя.',
+            tr(
+              "Пустое поле секрета сохраняет ранее заданное значение для того же адреса и пользователя.",
+            ),
             style: TextStyle(color: context.palette.muted, fontSize: 12),
           ),
         ],
@@ -1427,21 +1499,21 @@ class _RemoteBackupsPageState extends ConsumerState<RemoteBackupsPage> {
           child: Text(
             kind == 'dropbox'
                 ? (dropboxConnected
-                      ? 'Сменить аккаунт Dropbox'
-                      : 'Подключить Dropbox')
+                      ? tr("Сменить аккаунт Dropbox")
+                      : tr("Подключить Dropbox"))
                 : kind == 'disabled'
-                ? 'Выключить внешние копии'
-                : 'Проверить и подключить',
+                ? tr("Выключить внешние копии")
+                : tr("Проверить и подключить"),
           ),
         ),
       ]),
       if (kind != 'disabled' && (kind != 'dropbox' || dropboxConnected))
-        settingsCard('Копии во внешнем хранилище', [
+        settingsCard(tr("Копии во внешнем хранилище"), [
           Align(
             alignment: Alignment.centerLeft,
             child: OutlinedButton(
               onPressed: busy ? null : () => action(list),
-              child: const Text('Показать копии'),
+              child: Text(tr("Показать копии")),
             ),
           ),
           for (final copy in copies)
@@ -1449,14 +1521,17 @@ class _RemoteBackupsPageState extends ConsumerState<RemoteBackupsPage> {
               title: Text(
                 DateFormat(
                   'd MMM yyyy · HH:mm',
-                  'ru',
+                  AppLocale.language,
                 ).format(DateTime.parse(copy['created'] as String).toLocal()),
               ),
               subtitle: Text(
-                '${copy['records']} записей · ${copy['files']} файлов',
+                tr("{0} записей · {1} файлов", [
+                  copy['records'],
+                  copy['files'],
+                ]),
               ),
               trailing: IconButton(
-                tooltip: 'Вернуть на VPS',
+                tooltip: tr("Вернуть на VPS"),
                 onPressed: busy
                     ? null
                     : () => action(() => fetch(copy['id'] as String)),

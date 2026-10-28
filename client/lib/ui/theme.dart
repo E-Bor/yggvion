@@ -1,5 +1,16 @@
+import '../l10n/strings.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import '../domain/models.dart';
+
+bool usesMobileLayout(BuildContext context) {
+  final view = View.of(context);
+  final phone =
+      (defaultTargetPlatform == TargetPlatform.iOS ||
+          defaultTargetPlatform == TargetPlatform.android) &&
+      view.physicalSize.width / view.devicePixelRatio < 1000;
+  return phone || MediaQuery.sizeOf(context).width < 1000;
+}
 
 abstract final class Palette {
   static const background = Color(0xff111419),
@@ -21,15 +32,15 @@ abstract final class Palette {
     Color(0xffd7a58d),
     Color(0xffa8b3c5),
   ];
-  static const projectNames = [
-    'Голубой',
-    'Лаванда',
-    'Песочный',
-    'Шалфей',
-    'Розовый',
-    'Бирюзовый',
-    'Терракота',
-    'Серый',
+  static List<String> get projectNames => [
+    tr("Голубой"),
+    tr("Лаванда"),
+    tr("Песочный"),
+    tr("Шалфей"),
+    tr("Розовый"),
+    tr("Бирюзовый"),
+    tr("Терракота"),
+    tr("Серый"),
   ];
 
   // Opaque surfaces keep grid lines and overlapping cards from showing through.
@@ -389,33 +400,35 @@ class EmptyState extends StatelessWidget {
   final Widget? action;
   @override
   Widget build(BuildContext context) => Center(
-    child: Padding(
-      padding: const EdgeInsets.all(24),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            padding: const EdgeInsets.all(18),
-            decoration: BoxDecoration(
-              color: context.accentColor.withValues(alpha: .08),
-              borderRadius: BorderRadius.circular(24),
+    child: SingleChildScrollView(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(18),
+              decoration: BoxDecoration(
+                color: context.accentColor.withValues(alpha: .08),
+                borderRadius: BorderRadius.circular(24),
+              ),
+              child: Icon(icon, size: 30, color: context.accentColor),
             ),
-            child: Icon(icon, size: 30, color: context.accentColor),
-          ),
-          const SizedBox(height: 20),
-          Text(
-            title,
-            style: Theme.of(context).textTheme.titleMedium,
-            textAlign: TextAlign.center,
-          ),
-          const SizedBox(height: 8),
-          Text(
-            subtitle,
-            style: TextStyle(color: context.palette.muted, height: 1.6),
-            textAlign: TextAlign.center,
-          ),
-          if (action != null) ...[const SizedBox(height: 20), action!],
-        ],
+            const SizedBox(height: 20),
+            Text(
+              title,
+              style: Theme.of(context).textTheme.titleMedium,
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 8),
+            Text(
+              subtitle,
+              style: TextStyle(color: context.palette.muted, height: 1.6),
+              textAlign: TextAlign.center,
+            ),
+            if (action != null) ...[const SizedBox(height: 20), action!],
+          ],
+        ),
       ),
     ),
   );

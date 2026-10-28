@@ -1,3 +1,4 @@
+import '../l10n/strings.dart';
 import 'dart:io';
 import 'package:dio/dio.dart';
 
@@ -32,16 +33,16 @@ Future<void> downloadLimitedFile(
       // Cancel an unread stream as well as the underlying HTTP request.
       cancellation.cancel();
       await body.stream.listen(null).cancel();
-      throw const FormatException(
-        'Скачиваемое вложение превышает допустимый размер',
+      throw FormatException(
+        tr("Скачиваемое вложение превышает допустимый размер"),
       );
     }
     output = await target.open(mode: FileMode.write);
     var received = 0;
     await for (final chunk in body.stream) {
       if (chunk.length > maximumBytes - received) {
-        throw const FormatException(
-          'Скачиваемое вложение превышает допустимый размер',
+        throw FormatException(
+          tr("Скачиваемое вложение превышает допустимый размер"),
         );
       }
       await output.writeFrom(chunk);

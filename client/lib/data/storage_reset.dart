@@ -1,3 +1,4 @@
+import '../l10n/strings.dart';
 import 'dart:io';
 import 'package:path/path.dart' as p;
 
@@ -21,7 +22,7 @@ class StorageReset {
     if (type != FileSystemEntityType.directory &&
         type != FileSystemEntityType.notFound) {
       throw FileSystemException(
-        'Папка хранилища не должна быть ссылкой',
+        tr("Папка хранилища не должна быть ссылкой"),
         root.path,
       );
     }
@@ -29,7 +30,7 @@ class StorageReset {
     final markerType = await FileSystemEntity.type(marker, followLinks: false);
     if (markerType != FileSystemEntityType.file &&
         markerType != FileSystemEntityType.notFound) {
-      throw FileSystemException('Некорректный маркер очистки', marker);
+      throw FileSystemException(tr("Некорректный маркер очистки"), marker);
     }
   }
 
@@ -58,7 +59,10 @@ class StorageReset {
         case FileSystemEntityType.notFound:
           break;
         default:
-          throw FileSystemException('Не удалось удалить файл хранилища', path);
+          throw FileSystemException(
+            tr("Не удалось удалить файл хранилища"),
+            path,
+          );
       }
     }
     await marker.delete();
