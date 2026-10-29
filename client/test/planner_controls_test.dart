@@ -153,7 +153,21 @@ void main() {
               inInclusiveRange(0, 4 * scale),
             );
             expect(control.overlaps(eventRect), isFalse);
-            expect(control.overlaps(noteRect), isFalse);
+            // The controls have rounded corners; their visible shapes must
+            // stay separate even when the bounding boxes meet.
+            final overlap = Path.combine(
+              PathOperation.intersect,
+              Path()..addRRect(
+                RRect.fromRectAndRadius(
+                  control,
+                  Radius.circular(control.height / 2),
+                ),
+              ),
+              Path()..addRRect(
+                RRect.fromRectAndRadius(noteRect, Radius.circular(20 * scale)),
+              ),
+            );
+            expect(overlap.getBounds().isEmpty, isTrue);
             await tester.tap(find.byTooltip('Календарь'));
             await settle(tester);
             expect(tester.getRect(event), eventRect);

@@ -511,9 +511,11 @@ class _WorkspaceState extends ConsumerState<Workspace>
                       MediaQuery.viewInsetsOf(context).bottom > 0)
               ? null
               : Padding(
-                  // Use the same anchor on every tab and leave the entire
-                  // planner strip available for taps.
-                  padding: const EdgeInsets.only(bottom: plannerModeHeight),
+                  // Keep the normal FAB inset on every tab. Narrow layouts need
+                  // a little extra room above the centered planner switcher.
+                  padding: EdgeInsets.only(
+                    bottom: MediaQuery.sizeOf(context).width < 384 ? 20 : 0,
+                  ),
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     crossAxisAlignment: CrossAxisAlignment.end,
