@@ -1,6 +1,14 @@
 // Source language is Russian. Values: English, Spanish, German, Chinese, Hindi.
 // Parameters use {0}, {1}, …; user content is never translated.
 const messages = <String, List<String>>{
+  "Перейти": ["Go to", "Ir", "Anzeigen", "前往", "देखें"],
+  "Действия события": [
+    "Event actions",
+    "Acciones del evento",
+    "Terminaktionen",
+    "日程操作",
+    "इवेंट की कार्रवाइयाँ",
+  ],
   "К выполнению": ["To do", "Por hacer", "Offen", "待办", "करना है"],
   "В работе": ["In progress", "En curso", "In Arbeit", "进行中", "जारी है"],
   "Ожидание": ["Waiting", "En espera", "Wartend", "等待中", "प्रतीक्षा में"],

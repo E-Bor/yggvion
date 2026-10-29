@@ -145,8 +145,6 @@ void main() {
       await tester.tap(find.text('Планировщик').last);
       await settle(tester);
       if (mobile) {
-        await tester.tap(find.byKey(const ValueKey('planner-mode')));
-        await settle(tester);
         await tester.tap(find.text('Календарь').last);
         await settle(tester);
       }
@@ -170,8 +168,6 @@ void main() {
       await tester.tap(find.text('Планировщик').last);
       await settle(tester);
       if (mobile && dropdown.evaluate().isEmpty) {
-        await tester.tap(find.byKey(const ValueKey('planner-mode')));
-        await settle(tester);
         await tester.tap(find.text('Календарь').last);
         await settle(tester);
       }
@@ -282,7 +278,8 @@ void main() {
         isNotNull,
       );
       await command(tester, LogicalKeyboardKey.digit2);
-      expect(find.text('Без расписания'), findsOneWidget);
+      expect(find.text('Без расписания'), findsNothing);
+      expect(find.widgetWithText(TextField, 'Найти задачу'), findsOneWidget);
       await command(tester, LogicalKeyboardKey.digit3);
       expect(find.byType(DragTarget<Task>), findsNWidgets(4));
       await command(tester, LogicalKeyboardKey.digit4);
@@ -1355,6 +1352,7 @@ void main() {
       await tester.ensureVisible(
         find.byKey(const ValueKey('color-choice-1')).first,
       );
+      await settle(tester);
       await tester.tap(find.byKey(const ValueKey('color-choice-1')).first);
       expect(find.text('Сохранить настройки'), findsNothing);
       await settle(tester);

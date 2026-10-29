@@ -15,6 +15,7 @@ import 'server_settings.dart';
 import 'encryption_settings.dart';
 import 'statistics.dart';
 import 'workday_settings.dart';
+import 'calendar_zoom.dart';
 
 class SettingsPage extends ConsumerStatefulWidget {
   const SettingsPage({super.key, required this.onOpenBirthdays});
@@ -407,6 +408,8 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                   Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
+                      const CalendarZoomSetting(),
+                      const SizedBox(height: 20),
                       TextField(
                         key: const ValueKey('default-minutes'),
                         controller: minutes,

@@ -16,7 +16,6 @@ import '../domain/recurrence.dart';
 import 'providers.dart';
 import 'task_editor.dart';
 import 'theme.dart';
-import 'calendar_zoom.dart';
 import 'birthdays.dart';
 import 'month_planning.dart';
 
@@ -134,7 +133,6 @@ class CalendarToolbar extends StatelessWidget {
                   else
                     const Spacer(),
                   SizedBox(width: tiny ? 0 : 8),
-                  if (view != CalendarView.month) const CalendarZoomButton(),
                   PopupMenuButton<CalendarView>(
                     key: const ValueKey('calendar-view-picker'),
                     tooltip: tr("Вид календаря"),
@@ -222,6 +220,13 @@ class CalendarToolbar extends StatelessWidget {
   );
 }
 
+/// A fresh request reveals the event again, even on the same date.
+class CalendarFocus {
+  CalendarFocus(this.blockId, this.time);
+  final String blockId;
+  final DateTime time;
+}
+
 class CalendarPane extends ConsumerStatefulWidget {
   const CalendarPane({
     super.key,
@@ -236,6 +241,7 @@ class CalendarPane extends ConsumerStatefulWidget {
     this.entries = const [],
     this.onEntriesChanged,
     this.initialTime,
+    this.focus,
     this.planningPreview = false,
     this.selectionMinutes,
   });
@@ -250,6 +256,7 @@ class CalendarPane extends ConsumerStatefulWidget {
   final List<TimeBlock> entries;
   final ValueChanged<List<TimeBlock>>? onEntriesChanged;
   final DateTime? initialTime;
+  final CalendarFocus? focus;
 
   /// A local, single-block planning draft. Existing events remain read-only.
   final bool planningPreview;
@@ -455,19 +462,10 @@ class _CalendarPaneState extends ConsumerState<CalendarPane>
   void initState() {
     super.initState();
     edgeTicker = createTicker(scrollAtEdge);
-    date = _midnight(widget.initialDate ?? _clock);
+    date = _midnight(widget.focus?.time ?? widget.initialDate ?? _clock);
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (scroll.hasClients) {
-        scroll.jumpTo(
-          math.min(
-            scroll.position.maxScrollExtent,
-            math.max(
-              0,
-              (_display(widget.initialTime ?? _clock).hour - 1) * hourHeight,
-            ),
-          ),
-        );
-      }
+      if (!mounted) return;
+      revealTime(widget.focus?.time ?? widget.initialTime ?? _clock);
       expand();
     });
   }
@@ -475,23 +473,41 @@ class _CalendarPaneState extends ConsumerState<CalendarPane>
   @override
   void didUpdateWidget(covariant CalendarPane old) {
     super.didUpdateWidget(old);
-    if (widget.initialDate != null && widget.initialDate != old.initialDate) {
-      date = _midnight(widget.initialDate!);
+    final focused = widget.focus != null && widget.focus != old.focus;
+    if (focused ||
+        (widget.initialDate != null && widget.initialDate != old.initialDate)) {
+      date = _midnight(focused ? widget.focus!.time : widget.initialDate!);
       expand();
     }
-    if (editingDrafts &&
-        widget.initialTime != null &&
-        widget.initialTime != old.initialTime) {
+    if (focused ||
+        (widget.initialTime != null && widget.initialTime != old.initialTime)) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted && scroll.hasClients) {
-          scroll.jumpTo(
-            ((_display(widget.initialTime!).hour - 1) * hourHeight).clamp(
-              0,
-              scroll.position.maxScrollExtent,
-            ),
-          );
-        }
+        if (mounted) revealTime(widget.focus?.time ?? widget.initialTime!);
       });
+    }
+  }
+
+  void revealTime(DateTime time) {
+    final at = _display(time);
+    if (scroll.hasClients) {
+      final offset = widget.focus == null
+          ? (at.hour - 1) * hourHeight
+          : (at.hour + at.minute / 60) * hourHeight - 32;
+      scroll.jumpTo(offset.clamp(0, scroll.position.maxScrollExtent));
+    }
+    if (widget.focus != null && horizontal.hasClients) {
+      final repo = ref.read(appProvider);
+      final view = widget.planner ? repo.plannerView : repo.calendarView;
+      final position = horizontal.position;
+      final width =
+          (position.maxScrollExtent + position.viewportDimension - gutter) /
+          view.days;
+      horizontal.jumpTo(
+        (_dayIndex(at, firstDay(view)) * width).clamp(
+          0,
+          position.maxScrollExtent,
+        ),
+      );
     }
   }
 
@@ -1032,7 +1048,11 @@ class _CalendarPaneState extends ConsumerState<CalendarPane>
                                 width: fullWidth,
                                 child: Column(
                                   children: [
-                                    if (!widget.planningPreview)
+                                    if (!widget.planningPreview &&
+                                        !(widget.planner &&
+                                            mobile &&
+                                            view == CalendarView.day &&
+                                            constraints.maxHeight < 160))
                                       SizedBox(
                                         height: 59,
                                         child: Row(
@@ -1807,7 +1827,13 @@ class _CalendarPaneState extends ConsumerState<CalendarPane>
               : CalendarBlock(
                   block: b,
                   day: day,
+                  highlighted: b.id == widget.focus?.blockId,
                   planning: widget.planningPreview,
+                  showMenuButton:
+                      widget.planner &&
+                      mobile &&
+                      !enteringTime &&
+                      !widget.planningPreview,
                   onDragStart: (kind, global) =>
                       beginDrag(b, kind, global, width, count, first),
                   onDragUpdate: updateInteraction,
@@ -2138,19 +2164,37 @@ class _CalendarPaneState extends ConsumerState<CalendarPane>
                               ),
                               borderRadius: BorderRadius.circular(5),
                             ),
-                            child: Text(
-                              task.title,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(
-                                fontSize: 10,
-                                decoration: task.done
-                                    ? TextDecoration.lineThrough
-                                    : null,
-                                color: context.palette.accent(
-                                  Color(repo.snapshot.taskColor(task)),
+                            child: Row(
+                              children: [
+                                Expanded(
+                                  child: Text(
+                                    task.title,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: TextStyle(
+                                      fontSize: 10,
+                                      decoration: task.done
+                                          ? TextDecoration.lineThrough
+                                          : null,
+                                      color: context.palette.accent(
+                                        Color(repo.snapshot.taskColor(task)),
+                                      ),
+                                    ),
+                                  ),
                                 ),
-                              ),
+                                if (widget.planner && mobile)
+                                  SizedBox(
+                                    width: 20,
+                                    height: 20,
+                                    child: CalendarEventMenuButton(
+                                      block: b,
+                                      includeQuickActions: true,
+                                      color: context.palette.accent(
+                                        Color(repo.snapshot.taskColor(task)),
+                                      ),
+                                    ),
+                                  ),
+                              ],
                             ),
                           ),
                         );
@@ -2227,19 +2271,43 @@ Future<void> showCalendarBlockMenu(
   BuildContext context,
   WidgetRef ref,
   TimeBlock block,
-  Offset position,
-) async {
+  Offset position, {
+  bool includeQuickActions = false,
+}) async {
   final task = ref.read(appProvider).snapshot.task(block.taskId);
   if (task == null) return;
   final choice = await showMenu<String>(
     context: context,
     position: menuPosition(context, position),
     items: [
+      if (includeQuickActions) ...[
+        PopupMenuItem(
+          value: 'complete',
+          child: Text(task.done ? tr("Вернуть в работу") : tr("Завершить")),
+        ),
+        if (!task.done)
+          PopupMenuItem(
+            value: 'timer',
+            child: Text(
+              ref
+                      .read(appProvider)
+                      .snapshot
+                      .sessions
+                      .any(
+                        (s) => s.taskId == task.id && s.running && !s.discarded,
+                      )
+                  ? tr("Остановить")
+                  : tr("Начать работу"),
+            ),
+          ),
+        const PopupMenuDivider(),
+      ],
       PopupMenuItem(value: 'task', child: Text(tr("Открыть задачу"))),
       PopupMenuItem(
         value: 'edit',
         child: Text(tr("Изменить время и напоминания")),
       ),
+      PopupMenuItem(value: 'unschedule', child: Text(tr("Убрать из плана"))),
       PopupMenuItem(value: 'add', child: Text(tr("Добавить блок"))),
       PopupMenuItem(value: 'split', child: Text(tr("Разделить блок"))),
       if (!task.done)
@@ -2248,7 +2316,6 @@ Future<void> showCalendarBlockMenu(
           child: Text(tr("Готово → создать проверку")),
         ),
       const PopupMenuDivider(),
-      PopupMenuItem(value: 'unschedule', child: Text(tr("Убрать из плана"))),
       PopupMenuItem(value: 'delete', child: Text(tr("Удалить задачу"))),
     ],
   );
@@ -2256,6 +2323,10 @@ Future<void> showCalendarBlockMenu(
   await guard(context, () async {
     final repo = ref.read(appProvider);
     switch (choice) {
+      case 'complete':
+        await repo.status(task, task.done ? TaskStatus.todo : TaskStatus.done);
+      case 'timer':
+        await repo.toggleCalendarTimer(task);
       case 'task':
         await openTask(context, task: task, blockId: block.id);
       case 'edit':
@@ -2298,6 +2369,38 @@ Future<void> showCalendarBlockMenu(
   });
 }
 
+class CalendarEventMenuButton extends ConsumerWidget {
+  const CalendarEventMenuButton({
+    super.key,
+    required this.block,
+    required this.color,
+    this.includeQuickActions = false,
+  });
+  final TimeBlock block;
+  final Color color;
+  final bool includeQuickActions;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) => IconButton(
+    key: ValueKey('calendar-menu-${block.id}'),
+    tooltip: tr("Действия события"),
+    padding: EdgeInsets.zero,
+    constraints: const BoxConstraints(),
+    visualDensity: VisualDensity.compact,
+    icon: Icon(Icons.more_horiz_rounded, size: 18, color: color),
+    onPressed: () {
+      final box = context.findRenderObject()! as RenderBox;
+      showCalendarBlockMenu(
+        context,
+        ref,
+        block,
+        box.localToGlobal(Offset(0, box.size.height)),
+        includeQuickActions: includeQuickActions,
+      );
+    },
+  );
+}
+
 class CalendarBlock extends ConsumerStatefulWidget {
   const CalendarBlock({
     super.key,
@@ -2309,6 +2412,8 @@ class CalendarBlock extends ConsumerStatefulWidget {
     required this.onDragCancel,
     this.onDelete,
     this.planning = false,
+    this.showMenuButton = false,
+    this.highlighted = false,
   });
   final TimeBlock block;
   final DateTime day;
@@ -2317,6 +2422,8 @@ class CalendarBlock extends ConsumerStatefulWidget {
   final VoidCallback onDragEnd, onDragCancel;
   final VoidCallback? onDelete;
   final bool planning;
+  final bool showMenuButton;
+  final bool highlighted;
   @override
   ConsumerState<CalendarBlock> createState() => _CalendarBlockState();
 }
@@ -2521,14 +2628,16 @@ class _CalendarBlockState extends ConsumerState<CalendarBlock> {
                   color: context.palette.taskSurface(
                     color,
                     subdued: task.done || widget.block.historical,
-                    selected: editing || widget.planning,
+                    selected: editing || widget.planning || widget.highlighted,
                   ),
                   borderRadius: BorderRadius.circular(8),
                   border: Border.all(
-                    color: editing || widget.planning
+                    color: editing || widget.planning || widget.highlighted
                         ? color
                         : color.withValues(alpha: .28),
-                    width: editing || widget.planning ? 1.5 : .7,
+                    width: editing || widget.planning || widget.highlighted
+                        ? 1.5
+                        : .7,
                   ),
                   boxShadow: editing
                       ? [
@@ -2543,6 +2652,21 @@ class _CalendarBlockState extends ConsumerState<CalendarBlock> {
                 child: LayoutBuilder(
                   builder: (context, c) {
                     final small = c.maxHeight < 55;
+                    final showMenu =
+                        widget.showMenuButton &&
+                        widget.onDelete == null &&
+                        !widget.planning;
+                    final showControls =
+                        widget.onDelete == null &&
+                        !widget.planning &&
+                        c.maxWidth >= (showMenu ? 88 : 60);
+                    final controlsWidth = widget.planning
+                        ? 0.0
+                        : widget.onDelete != null
+                        ? 29.0
+                        : (showControls ? (task.done ? 25.0 : 50.0) : 0.0) +
+                              (showMenu ? 25.0 : 0.0) +
+                              4;
                     final zone = tz.getLocation(
                       repo.snapshot.settings.timezone,
                     );
@@ -2608,9 +2732,7 @@ class _CalendarBlockState extends ConsumerState<CalendarBlock> {
                                         ),
                                       ),
                                     ),
-                                  if (widget.onDelete == null &&
-                                      !widget.planning &&
-                                      c.maxWidth >= 60) ...[
+                                  if (showControls) ...[
                                     SizedBox(
                                       width: 25,
                                       height: math.min(24, c.maxHeight),
@@ -2669,6 +2791,19 @@ class _CalendarBlockState extends ConsumerState<CalendarBlock> {
                                         ),
                                       ),
                                   ],
+                                  if (showMenu)
+                                    SizedBox(
+                                      width: math.min(
+                                        25,
+                                        math.max(0, c.maxWidth - 13),
+                                      ),
+                                      height: math.min(24, c.maxHeight),
+                                      child: CalendarEventMenuButton(
+                                        block: widget.block,
+                                        color: color,
+                                        includeQuickActions: !showControls,
+                                      ),
+                                    ),
                                 ],
                               ),
                               if (!small && c.maxHeight > 75)
@@ -2690,26 +2825,14 @@ class _CalendarBlockState extends ConsumerState<CalendarBlock> {
                               true,
                               color,
                               height,
-                              widget.planning
-                                  ? 0
-                                  : widget.onDelete != null
-                                  ? 29
-                                  : c.maxWidth >= 60
-                                  ? (task.done ? 29 : 54)
-                                  : 0,
+                              math.min(c.maxWidth, controlsWidth),
                             ),
                           if (!widget.block.end.isAfter(dayEnd))
                             handle(
                               false,
                               color,
                               height,
-                              widget.planning
-                                  ? 0
-                                  : widget.onDelete != null
-                                  ? 29
-                                  : c.maxWidth >= 60
-                                  ? (task.done ? 29 : 54)
-                                  : 0,
+                              math.min(c.maxWidth, controlsWidth),
                             ),
                         ],
                       ],

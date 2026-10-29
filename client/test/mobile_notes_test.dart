@@ -179,7 +179,8 @@ void main() {
         expect(find.byType(CalendarPane), findsNothing);
         expect(find.text('Канбан'), findsWidgets);
       } else if (name == 'planner') {
-        expect(find.text('Без расписания'), findsOneWidget);
+        expect(find.text('Без расписания'), findsNothing);
+        expect(find.byKey(const ValueKey('planner-mode')), findsOneWidget);
         expect(find.text('Новая задача'), findsNothing);
         await tester.tap(find.byKey(const ValueKey('create-event')));
         await settle(tester);

@@ -203,7 +203,8 @@ void main() {
       expect(tester.takeException(), isNull);
       await tester.tap(find.text('Планировщик').last);
       await tester.pumpAndSettle();
-      expect(find.text('Без расписания'), findsOneWidget);
+      expect(find.text('Без расписания'), findsNothing);
+      expect(find.widgetWithText(TextField, 'Найти задачу'), findsOneWidget);
       expect(tester.takeException(), isNull);
       await tester.tap(find.text('Заметки').last);
       await tester.pumpAndSettle();

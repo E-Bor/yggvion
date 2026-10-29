@@ -11,10 +11,12 @@ class Dashboard extends ConsumerStatefulWidget {
     super.key,
     required this.projectId,
     this.date,
+    this.focus,
     this.onDateChanged,
   });
   final String projectId;
   final DateTime? date;
+  final CalendarFocus? focus;
   final ValueChanged<DateTime>? onDateChanged;
   @override
   ConsumerState<Dashboard> createState() => _DashboardState();
@@ -51,6 +53,7 @@ class _DashboardState extends ConsumerState<Dashboard> {
             child: CalendarPane(
               projectId: widget.projectId,
               initialDate: widget.date,
+              focus: widget.focus,
               onDateChanged: widget.onDateChanged,
               showToolbar: false,
             ),

@@ -116,15 +116,24 @@ void main() {
             find.byKey(const ValueKey('calendar-scroll')),
           )
           .controller!;
-      await tester.tap(find.byKey(const ValueKey('calendar-zoom')));
+      expect(find.byKey(const ValueKey('calendar-zoom')), findsNothing);
+      await command(tester, LogicalKeyboardKey.digit5);
+      final fit = find.byKey(const ValueKey('calendar-zoom-fit'));
+      await tester.ensureVisible(fit);
       await settle(tester);
-      await tester.tap(find.text('Весь день'));
+      await tester.tap(fit);
       await settle(tester);
       expect(repo.calendarZoom, 0);
-      await tester.tap(find.text('Готово'));
-      await settle(tester);
+      await command(tester, LogicalKeyboardKey.digit1);
       expect(controller().position.maxScrollExtent, closeTo(0, 1));
-      await tester.runAsync(() => repo.setCalendarZoom(3));
+      await command(tester, LogicalKeyboardKey.digit5);
+      final zoom = find.byKey(const ValueKey('calendar-zoom-slider'));
+      await tester.ensureVisible(zoom);
+      await settle(tester);
+      await tester.tapAt(tester.getTopRight(zoom) + const Offset(-24, 24));
+      await settle(tester);
+      expect(repo.calendarZoom, 3);
+      await command(tester, LogicalKeyboardKey.digit1);
       await settle(tester);
       expect(controller().position.maxScrollExtent, greaterThan(4000));
       expect(await tester.runAsync(() => repo.db.meta('calendar_zoom')), '3.0');

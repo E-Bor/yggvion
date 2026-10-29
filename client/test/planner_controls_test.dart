@@ -10,6 +10,12 @@ void main() {
   setUpAll(() async {
     tz.initializeTimeZones();
     await initializeDateFormatting('ru');
+    await (FontLoader(
+      'Inter',
+    )..addFont(rootBundle.load('assets/fonts/Inter.ttf'))).load();
+    await (FontLoader(
+      'MaterialIcons',
+    )..addFont(rootBundle.load('fonts/MaterialIcons-Regular.otf'))).load();
   });
 
   testInteraction('planner menu edits the task while card click selects it', (
@@ -106,4 +112,70 @@ void main() {
       expect(tester.takeException(), isNull);
     },
   );
+
+  for (final scale in [1.0, 2.0]) {
+    testInteraction(
+      'phone creation buttons keep their position across tabs at $scale',
+      (tester) async {
+        await workspace(
+          tester,
+          mobile: true,
+          prepare: (repo) => repo.setInterfaceScale(scale),
+        );
+        tester.view.padding = const FakeViewPadding(bottom: 34);
+        tester.view.viewPadding = const FakeViewPadding(bottom: 34);
+        addTearDown(tester.view.resetPadding);
+        addTearDown(tester.view.resetViewPadding);
+        await settle(tester);
+        final event = find.byKey(const ValueKey('create-event'));
+        final note = find.byKey(const ValueKey('create-note'));
+        final eventRect = tester.getRect(event);
+        final noteRect = tester.getRect(note);
+        final navRect = tester.getRect(find.byType(NavigationBar));
+        for (final page in ['notes', 'planner', 'board', 'today']) {
+          await tester.tap(find.byKey(ValueKey('mobile-nav-$page')));
+          await settle(tester);
+          expect(tester.getRect(event), eventRect, reason: page);
+          expect(tester.getRect(note), noteRect, reason: page);
+          expect(
+            tester.getRect(find.byType(NavigationBar)),
+            navRect,
+            reason: page,
+          );
+          if (page == 'planner') {
+            final mode = find.byKey(const ValueKey('planner-mode'));
+            final control = tester.getRect(mode);
+            expect(control.width, lessThan(navRect.width * .85));
+            expect(control.center.dx, navRect.center.dx);
+            expect(control.height, lessThanOrEqualTo(36 * scale));
+            expect(
+              navRect.top - control.bottom,
+              inInclusiveRange(0, 4 * scale),
+            );
+            expect(control.overlaps(eventRect), isFalse);
+            expect(control.overlaps(noteRect), isFalse);
+            await tester.tap(find.byTooltip('Календарь'));
+            await settle(tester);
+            expect(tester.getRect(event), eventRect);
+            expect(tester.getRect(note), noteRect);
+            expect(tester.widget<SegmentedButton<bool>>(mode).selected, {
+              false,
+            });
+            if (scale == 1) {
+              await expectLater(
+                find.byType(MaterialApp),
+                matchesGoldenFile('goldens/planner_switcher_390.png'),
+              );
+            }
+            await tester.tap(find.byTooltip('Задачи'));
+            await settle(tester);
+            expect(tester.widget<SegmentedButton<bool>>(mode).selected, {true});
+          }
+          expect(event.hitTestable(), findsOneWidget);
+          expect(note.hitTestable(), findsOneWidget);
+          expect(tester.takeException(), isNull);
+        }
+      },
+    );
+  }
 }

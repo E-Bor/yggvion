@@ -89,6 +89,7 @@ class Workspace extends ConsumerStatefulWidget {
 
 class _WorkspaceState extends ConsumerState<Workspace>
     with WidgetsBindingObserver {
+  static const plannerModeHeight = 36.0;
   PageKind page = PageKind.today;
   String projectId = '', query = '';
   Task? selected;
@@ -96,6 +97,7 @@ class _WorkspaceState extends ConsumerState<Workspace>
   String? newNoteId;
   Future<void>? noteCleanup;
   DateTime? calendarDate, homeDate;
+  CalendarFocus? homeFocus;
   Timer? ticker;
   StreamSubscription<Uri>? invitationLinks;
   bool mobileTasks = true;
@@ -249,24 +251,35 @@ class _WorkspaceState extends ConsumerState<Workspace>
   }
 
   Future<void> search() async {
-    final result = await showDialog<Entity>(
+    final result = await showDialog<_SearchSelection>(
       context: context,
       builder: (_) => const SearchDialog(),
     );
     if (result == null || !mounted) return;
-    if (result.kind == 'note') {
+    final entity = result.entity;
+    if (result.block != null) {
+      final repo = ref.read(appProvider);
+      // The month overview can hide an event behind its overflow counter.
+      // Open its daily timeline so the selected block is actually visible.
+      if (repo.calendarView == CalendarView.month) {
+        await repo.setView(CalendarView.day);
+        if (!mounted) return;
+      }
+      final at = tz.TZDateTime.from(
+        result.block!.start,
+        tz.getLocation(repo.snapshot.settings.timezone),
+      );
+      go(PageKind.today);
       setState(() {
-        page = PageKind.notes;
-        selectedNote = result.id;
-        newNoteId = null;
+        projectId = '';
+        homeDate = at;
+        homeFocus = CalendarFocus(result.block!.id, at);
       });
-    } else if (result.kind == 'task') {
-      await openTask(context, task: Task(result));
-    } else if (result.kind == 'series') {
-      go(PageKind.planner);
-      setState(() {
-        calendarDate = parseTime(result.data['start']).toLocal();
-      });
+    } else if (entity.kind == 'note') {
+      go(PageKind.notes);
+      setState(() => selectedNote = entity.id);
+    } else if (entity.kind == 'task') {
+      await openTask(context, task: Task(entity));
     }
   }
 
@@ -293,7 +306,8 @@ class _WorkspaceState extends ConsumerState<Workspace>
     final repo = ref.watch(appProvider);
     ref.listen(openNoteProvider, (_, id) {
       if (id == null) return;
-      FocusManager.instance.primaryFocus?.unfocus();
+      final focus = FocusManager.instance.primaryFocus;
+      if (focus != null && focus is! FocusScopeNode) focus.unfocus();
       Navigator.of(context).popUntil((route) => route.isFirst);
       setState(() {
         page = PageKind.notes;
@@ -462,6 +476,8 @@ class _WorkspaceState extends ConsumerState<Workspace>
                           ),
                         },
                       ),
+                      if (!desktop && page == PageKind.planner)
+                        plannerSwitcher(),
                     ],
                   ),
                 ),
@@ -494,25 +510,31 @@ class _WorkspaceState extends ConsumerState<Workspace>
                   (page == PageKind.notes &&
                       MediaQuery.viewInsetsOf(context).bottom > 0)
               ? null
-              : Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  children: [
-                    _MobileCreateButton(
-                      key: const ValueKey('create-event'),
-                      label: tr("Событие"),
-                      icon: Icons.event_outlined,
-                      primary: true,
-                      onPressed: () => guard(context, () => openTask(context)),
-                    ),
-                    const SizedBox(height: 12),
-                    _MobileCreateButton(
-                      key: const ValueKey('create-note'),
-                      label: tr("Заметка"),
-                      icon: Icons.note_add_outlined,
-                      onPressed: () => guard(context, createNote),
-                    ),
-                  ],
+              : Padding(
+                  // Use the same anchor on every tab and leave the entire
+                  // planner strip available for taps.
+                  padding: const EdgeInsets.only(bottom: plannerModeHeight),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      _MobileCreateButton(
+                        key: const ValueKey('create-event'),
+                        label: tr("Событие"),
+                        icon: Icons.event_outlined,
+                        primary: true,
+                        onPressed: () =>
+                            guard(context, () => openTask(context)),
+                      ),
+                      const SizedBox(height: 12),
+                      _MobileCreateButton(
+                        key: const ValueKey('create-note'),
+                        label: tr("Заметка"),
+                        icon: Icons.note_add_outlined,
+                        onPressed: () => guard(context, createNote),
+                      ),
+                    ],
+                  ),
                 ),
         ),
       ),
@@ -533,7 +555,10 @@ class _WorkspaceState extends ConsumerState<Workspace>
         now: now,
         timezone: repo.snapshot.settings.timezone,
         showDate: desktop,
-        onDateChanged: (value) => setState(() => homeDate = value),
+        onDateChanged: (value) => setState(() {
+          homeDate = value;
+          homeFocus = null;
+        }),
         onViewChanged: (value) => guard(context, () => repo.setView(value)),
       );
       final title = home
@@ -684,20 +709,18 @@ class _WorkspaceState extends ConsumerState<Workspace>
                   : () => go(PageKind.today),
               icon: const Icon(Icons.arrow_back_rounded),
             ),
-          Expanded(
-            child: home && desktop
-                ? toolbar
-                : !desktop && page == PageKind.planner
-                ? plannerSwitcher(compact: constraints.maxWidth < 420)
-                : title,
-          ),
+          Expanded(child: home && desktop ? toolbar : title),
           if (!narrow) ...[const SizedBox(width: 8), ...actions],
         ],
       );
       return Container(
         key: const ValueKey('workspace-header'),
         height: narrow
-            ? (home ? 136 : 88)
+            ? (home
+                  ? 136
+                  : page == PageKind.planner
+                  ? 44
+                  : 88)
             : home && !desktop
             ? 108
             : desktop
@@ -706,7 +729,7 @@ class _WorkspaceState extends ConsumerState<Workspace>
         padding: EdgeInsets.symmetric(horizontal: desktop ? 24 : 12),
         child: Column(
           children: [
-            Expanded(child: heading),
+            if (!narrow || page != PageKind.planner) Expanded(child: heading),
             if (narrow)
               SizedBox(
                 height: 40,
@@ -1117,8 +1140,12 @@ class _WorkspaceState extends ConsumerState<Workspace>
         child: CalendarPane(
           projectId: projectId,
           initialDate: homeDate,
+          focus: homeFocus,
           showToolbar: false,
-          onDateChanged: (value) => setState(() => homeDate = value),
+          onDateChanged: (value) => setState(() {
+            homeDate = value;
+            homeFocus = null;
+          }),
         ),
       );
     }
@@ -1127,73 +1154,73 @@ class _WorkspaceState extends ConsumerState<Workspace>
       child: Dashboard(
         projectId: projectId,
         date: homeDate,
-        onDateChanged: (value) => setState(() => homeDate = value),
+        focus: homeFocus,
+        onDateChanged: (value) => setState(() {
+          homeDate = value;
+          homeFocus = null;
+        }),
       ),
     );
   }
 
-  Widget plannerSwitcher({required bool compact}) {
-    if (compact) {
-      return PopupMenuButton<bool>(
-        key: const ValueKey('planner-mode'),
-        tooltip: tr("Раздел планировщика"),
-        initialValue: mobileTasks,
-        onSelected: (value) => setState(() => mobileTasks = value),
-        itemBuilder: (_) => [
-          PopupMenuItem(value: true, child: Text(tr("Задачи"))),
-          PopupMenuItem(value: false, child: Text(tr("Календарь"))),
-        ],
-        child: Row(
-          children: [
-            Flexible(
-              child: Text(
-                mobileTasks ? tr("Задачи") : tr("Календарь"),
-                style: const TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
+  Widget plannerSwitcher() => SizedBox(
+    height: plannerModeHeight,
+    child: LayoutBuilder(
+      builder: (context, constraints) {
+        final compact = constraints.maxWidth < 270;
+        return Center(
+          child: SegmentedButton<bool>(
+            key: const ValueKey('planner-mode'),
+            showSelectedIcon: false,
+            style: SegmentedButton.styleFrom(
+              visualDensity: VisualDensity.compact,
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              minimumSize: const Size(0, plannerModeHeight),
+              shape: const StadiumBorder(),
+              textStyle: Theme.of(
+                context,
+              ).textTheme.labelLarge?.copyWith(fontSize: 12),
+              side: BorderSide(color: context.palette.border, width: .6),
             ),
-            const Icon(Icons.expand_more_rounded, size: 18),
-          ],
-        ),
-      );
-    }
-    return SegmentedButton<bool>(
-      key: const ValueKey('planner-mode'),
-      showSelectedIcon: false,
-      style: SegmentedButton.styleFrom(
-        visualDensity: VisualDensity.compact,
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-        minimumSize: Size.zero,
-        textStyle: Theme.of(
-          context,
-        ).textTheme.labelLarge?.copyWith(fontSize: 12),
-        side: BorderSide(color: context.palette.border, width: .6),
-      ),
-      segments: [
-        ButtonSegment(value: true, label: Text(tr("Задачи"))),
-        ButtonSegment(value: false, label: Text(tr("Календарь"))),
-      ],
-      selected: {mobileTasks},
-      onSelectionChanged: (value) => setState(() => mobileTasks = value.single),
-    );
-  }
+            segments: [
+              ButtonSegment(
+                value: true,
+                icon: const Icon(Icons.checklist_rounded, size: 18),
+                label: compact ? null : Text(tr("Задачи")),
+                tooltip: tr("Задачи"),
+              ),
+              ButtonSegment(
+                value: false,
+                icon: const Icon(Icons.calendar_today_outlined, size: 18),
+                label: compact ? null : Text(tr("Календарь")),
+                tooltip: tr("Календарь"),
+              ),
+            ],
+            selected: {mobileTasks},
+            onSelectionChanged: (value) => setState(() {
+              mobileTasks = value.single;
+              if (mobileTasks) selected = null;
+              final focus = FocusManager.instance.primaryFocus;
+              if (focus != null && focus is! FocusScopeNode) focus.unfocus();
+            }),
+          ),
+        );
+      },
+    ),
+  );
 
   Widget _planner(bool desktop) {
     final repo = ref.watch(appProvider);
     final currentSelection = selected == null
         ? null
         : repo.snapshot.task(selected!.id);
-    final matching = repo.snapshot.tasks.reversed
-        .where(
-          (t) =>
-              t.seriesId.isEmpty &&
-              repo.snapshot.unscheduled(t, repo.now()) &&
-              (projectId.isEmpty || t.projectId == projectId) &&
-              t.title.toLowerCase().contains(query.toLowerCase()),
-        )
-        .toList();
+    bool matches(Task task) =>
+        task.seriesId.isEmpty &&
+        repo.snapshot.unscheduled(task, repo.now()) &&
+        (projectId.isEmpty || task.projectId == projectId) &&
+        task.title.toLowerCase().contains(query.toLowerCase());
+    final matching = repo.snapshot.tasks.reversed.where(matches).toList();
     final tasks = [
       ...matching.where((t) => t.isProposed),
       ...matching.where((t) => !t.isProposed),
@@ -1203,39 +1230,13 @@ class _WorkspaceState extends ConsumerState<Workspace>
       children: [
         Padding(
           padding: const EdgeInsets.all(14),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      tr("Без расписания"),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        fontSize: 15,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Text(
-                    '${tasks.length}',
-                    style: TextStyle(color: context.palette.muted),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                onChanged: (v) => setState(() => query = v),
-                decoration: InputDecoration(
-                  hintText: tr("Найти задачу"),
-                  prefixIcon: Icon(Icons.search_rounded, size: 18),
-                  isDense: true,
-                ),
-              ),
-            ],
+          child: TextField(
+            onChanged: (v) => setState(() => query = v),
+            decoration: InputDecoration(
+              hintText: tr("Найти задачу"),
+              prefixIcon: const Icon(Icons.search_rounded, size: 18),
+              isDense: true,
+            ),
           ),
         ),
         const Divider(),
@@ -1252,6 +1253,10 @@ class _WorkspaceState extends ConsumerState<Workspace>
                   itemBuilder: (context, index) {
                     final task = tasks[index];
                     void choose() => setState(() {
+                      final focus = FocusManager.instance.primaryFocus;
+                      if (focus != null && focus is! FocusScopeNode) {
+                        focus.unfocus();
+                      }
                       selected = selected?.id == task.id ? null : task;
                       if (!desktop && selected != null) mobileTasks = false;
                     });
@@ -1315,8 +1320,8 @@ class _WorkspaceState extends ConsumerState<Workspace>
         if (currentSelection != null)
           Container(
             width: double.infinity,
-            padding: const EdgeInsets.all(12),
-            margin: const EdgeInsets.only(bottom: 10),
+            padding: EdgeInsets.all(desktop ? 12 : 8),
+            margin: EdgeInsets.only(bottom: desktop ? 10 : 6),
             decoration: BoxDecoration(
               color: context.accentColor.withValues(alpha: .09),
               borderRadius: BorderRadius.circular(10),
@@ -1332,11 +1337,19 @@ class _WorkspaceState extends ConsumerState<Workspace>
                 Expanded(
                   child: Text(
                     tr("Выберите время: {0}", [currentSelection.title]),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                     style: TextStyle(fontSize: 12, color: context.accentColor),
                   ),
                 ),
                 IconButton(
                   tooltip: tr("Отменить выбор"),
+                  visualDensity: VisualDensity.compact,
+                  constraints: const BoxConstraints.tightFor(
+                    width: 32,
+                    height: 32,
+                  ),
+                  padding: EdgeInsets.zero,
                   onPressed: () => setState(() => selected = null),
                   icon: const Icon(Icons.close_rounded, size: 16),
                 ),
@@ -1344,19 +1357,30 @@ class _WorkspaceState extends ConsumerState<Workspace>
             ),
           ),
         Expanded(
+          key: const ValueKey('planner-calendar-pane'),
           child: CalendarPane(
             projectId: projectId,
             initialDate: calendarDate,
             onDateChanged: (value) => setState(() => calendarDate = value),
             selectedTask: currentSelection,
             planner: true,
-            onPlaced: () => setState(() => selected = null),
+            onPlaced: () => setState(() {
+              selected = null;
+              if (!desktop) {
+                mobileTasks = repo.snapshot.tasks.any(matches);
+              }
+            }),
           ),
         ),
       ],
     );
     return Padding(
-      padding: EdgeInsets.fromLTRB(desktop ? 28 : 12, 0, desktop ? 28 : 12, 16),
+      padding: EdgeInsets.fromLTRB(
+        desktop ? 28 : 12,
+        0,
+        desktop ? 28 : 12,
+        desktop ? 16 : 0,
+      ),
       child: desktop
           ? LayoutBuilder(
               builder: (context, constraints) {
@@ -1395,9 +1419,13 @@ class _WorkspaceState extends ConsumerState<Workspace>
                 );
               },
             )
-          : mobileTasks
-          ? list
-          : calendar,
+          : IndexedStack(
+              index: mobileTasks ? 0 : 1,
+              children: [
+                list,
+                TickerMode(enabled: !mobileTasks, child: calendar),
+              ],
+            ),
     );
   }
 
@@ -1685,6 +1713,12 @@ class _MobileCreateButton extends StatelessWidget {
   );
 }
 
+class _SearchSelection {
+  const _SearchSelection(this.entity, {this.block});
+  final Entity entity;
+  final TimeBlock? block;
+}
+
 class SearchDialog extends ConsumerStatefulWidget {
   const SearchDialog({super.key});
   @override
@@ -1733,6 +1767,21 @@ class _SearchDialogState extends ConsumerState<SearchDialog> {
     });
   }
 
+  TimeBlock? calendarBlock(Entity entity) {
+    if (entity.kind != 'task') return null;
+    final repo = ref.read(appProvider);
+    final task = Task(entity);
+    if (task.isBirthday && task.done) return null;
+    final blocks = repo.snapshot.taskBlocks(entity.id)
+      ..sort((a, b) => a.start.compareTo(b.start));
+    if (blocks.isEmpty) return null;
+    final planned = blocks.where((b) => !b.historical).toList();
+    final candidates = planned.isEmpty ? blocks : planned;
+    // Prefer a running/upcoming block; otherwise reveal the most recent one.
+    return candidates.where((b) => b.end.isAfter(repo.now())).firstOrNull ??
+        candidates.last;
+  }
+
   String searchHint(int tolerance) {
     final words = searchWords(query);
     if (words.length == 1 && words.single.runes.length == 1) {
@@ -1753,6 +1802,10 @@ class _SearchDialogState extends ConsumerState<SearchDialog> {
 
   @override
   Widget build(BuildContext context) => Dialog(
+    insetPadding: EdgeInsets.symmetric(
+      horizontal: MediaQuery.sizeOf(context).width < 600 ? 12 : 40,
+      vertical: 24,
+    ),
     child: SizedBox(
       width: 660,
       height: 540,
@@ -1806,17 +1859,21 @@ class _SearchDialogState extends ConsumerState<SearchDialog> {
                     itemCount: results.length,
                     itemBuilder: (context, i) {
                       final e = results[i];
+                      final block = calendarBlock(e);
                       return ListTile(
+                        key: ValueKey('search-result-${e.id}'),
                         contentPadding: const EdgeInsets.symmetric(
                           horizontal: 24,
                           vertical: 6,
                         ),
-                        leading: Icon(
-                          e.kind == 'note'
-                              ? Icons.description_outlined
-                              : Icons.event_outlined,
-                          color: context.accentColor,
-                        ),
+                        leading: MediaQuery.sizeOf(context).width < 340
+                            ? null
+                            : Icon(
+                                e.kind == 'note'
+                                    ? Icons.description_outlined
+                                    : Icons.event_outlined,
+                                color: context.accentColor,
+                              ),
                         title: Text(
                           e.kind == 'note'
                               ? Note(e).displayLabel
@@ -1831,7 +1888,31 @@ class _SearchDialogState extends ConsumerState<SearchDialog> {
                           maxLines: 2,
                           overflow: TextOverflow.ellipsis,
                         ),
-                        onTap: () => Navigator.pop(context, e),
+                        trailing: block == null
+                            ? null
+                            : MediaQuery.sizeOf(context).width < 340
+                            ? IconButton(
+                                key: ValueKey('search-go-${e.id}'),
+                                tooltip: tr("Перейти"),
+                                icon: const Icon(
+                                  Icons.arrow_forward_rounded,
+                                  size: 20,
+                                ),
+                                onPressed: () => Navigator.pop(
+                                  context,
+                                  _SearchSelection(e, block: block),
+                                ),
+                              )
+                            : TextButton(
+                                key: ValueKey('search-go-${e.id}'),
+                                onPressed: () => Navigator.pop(
+                                  context,
+                                  _SearchSelection(e, block: block),
+                                ),
+                                child: Text(tr("Перейти")),
+                              ),
+                        onTap: () =>
+                            Navigator.pop(context, _SearchSelection(e)),
                       );
                     },
                   ),
