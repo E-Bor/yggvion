@@ -1,0 +1,79 @@
+# Instructions for AI agents
+
+Copy this template to `AGENTS.md` in the repository root before using it.
+`AGENTS.md` is ignored by Git; customize that local copy for your tools and environment.
+This example is not automatically loaded as an instruction file.
+
+## Project
+
+Yggvion is a personal calendar, task planner, Markdown notebook and time tracker.
+It works locally and optionally synchronizes encrypted data through a self-hosted Go server.
+
+| Path | Responsibility |
+| --- | --- |
+| `client/lib/data/` | SQLite storage, repositories, synchronization and integrations |
+| `client/lib/domain/` | Models and domain logic |
+| `client/lib/ui/` | Flutter screens and widgets |
+| `client/test/` | Client unit, widget and integration tests |
+| `server/` | Go API, storage and server tests |
+| `api/openapi.yaml` | Client/server contract |
+| `deploy/`, `tool/`, `tools/` | Deployment, build helpers and checks |
+| `docs/` | Features, architecture, setup and recovery documentation |
+
+Read [CONTRIBUTING.md](CONTRIBUTING.md), [Architecture](docs/architecture.md)
+and the documentation relevant to the task before changing behavior.
+
+## Working rules
+
+- Check `git status` and preserve existing uncommitted changes.
+- Inspect the actual implementation and relevant tests before editing. Use available semantic navigation tools where helpful.
+- Keep changes focused and follow existing patterns. Do not add dependencies or architecture layers without a concrete need.
+- Do not commit, push, publish, deploy or perform destructive operations without explicit authorization.
+- Do not edit generated files manually; update their sources and use the existing generator when applicable.
+- Use synthetic data in fixtures, screenshots and examples. Never commit or log passwords, tokens, private keys or personal data.
+- Preserve API compatibility unless a breaking change is explicitly requested. Update client, server, contract and tests together when the API changes.
+- Report checks actually performed, unverified behavior and migration/compatibility implications. Do not describe skipped tests as passing.
+
+## Flutter and Dart
+
+- Preserve the existing Riverpod/repository separation. Keep network requests, SQL and business logic out of widgets.
+- Use explicit types, null safety and predictable asynchronous error handling. Check `mounted` before using a context after an asynchronous operation.
+- Dispose controllers/subscriptions and avoid expensive work during `build()`.
+- Follow existing themes, localization, routing and responsive layouts. Consider loading, empty and error states.
+- Test meaningful logic changes and regressions with the existing unit/widget/integration infrastructure.
+- Use simulators/emulators or isolated profiles for automated checks. Do not install diagnostic builds on a physical device without explicit authorization.
+
+## Go and the API
+
+- Follow the existing packages, HTTP routing, configuration and database libraries.
+- Propagate contexts and deadlines. Handle errors explicitly, preserve cancellation and check concurrent access for races.
+- Validate authorization and input at the server boundary; use parameterized SQL, bounded request sizes and appropriate timeouts.
+- Preserve TLS and SSH host verification. Do not expose private API routes through the public sharing listener.
+- Respect the encryption boundary: clients validate decrypted personal content; the server validates access, encrypted envelopes, versions and quotas.
+- Use transactions for related changes and the existing migration system for schema updates. Never erase real data as a shortcut.
+- Add relevant handler/contract tests for API changes and use the race detector for concurrent code.
+
+## Verification
+
+Format changed Dart files with `dart format` and Go files with `gofmt -w`.
+Run checks appropriate to the affected components:
+
+```sh
+# From client/
+flutter analyze
+flutter test
+
+# From server/
+go test ./...
+go vet ./...
+```
+
+Run `flutter pub get` for initial setup or dependency changes. Use `go test -race ./...`
+for concurrency changes. Do not run `go mod tidy` as unrelated cleanup.
+
+See [Manual checks](CONTRIBUTING.md#manual-checks) for building the isolated Go test server,
+setting `YGGVION_TEST_SERVER`, and running installer/public-page checks. Without that environment
+variable, server-dependent client integration tests are skipped. CI is intentionally absent.
+
+Before finishing, review `git diff` and run `git diff --check`. State any checks that could not run.
+Do not access a real VPS, external backup account or existing user database for tests without authorization.

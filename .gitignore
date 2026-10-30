@@ -1,5 +1,8 @@
 .DS_Store
 .env
+.env.*
+!.env.example
+!.env.sample
 /data/
 /local/
 /server/data/
@@ -15,8 +18,26 @@ server/yggvion
 *.p12
 *.pem
 *.key
+*.p8
+*.jks
+*.keystore
+*.mobileprovision
+*.provisionprofile
+*.yggbackup
+*.ygglocal
+*.sqlite3
+*.sqlite3-shm
+*.sqlite3-wal
+__pycache__/
+*.py[cod]
+/backups/
+/dist/
+/server/yggvion-reminders
 /client/assets/server/yggvion-linux-*
 /client/assets/server/manifest.json
 /client/assets/server/install.sh
 /client/assets/server/uninstall.sh
 .serena/
+
+# Local AI-agent instructions; the shared template remains versioned.
+/AGENTS.md
