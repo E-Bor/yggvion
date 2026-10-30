@@ -12,7 +12,7 @@ Work locally. Sync across your devices with a server you control.
 
 </div>
 
-![Yggvion: a weekly calendar with projects and Markdown notes](docs/images/desktop.png)
+[![Move and resize a calendar event, then start and pause its timer](docs/images/desktop.gif)](docs/images/desktop.png)
 
 ### Make room for what matters
 
@@ -30,25 +30,25 @@ Dark and light themes. Six languages. One personal workspace.
 
 Pick a task from your list, place it in the calendar and adjust its time and duration. Keep unscheduled ideas and your schedule in view together.
 
-![Planner with an unscheduled task list beside a three-day calendar](docs/images/planner.png)
+[![Select a task, draw its time slot in Planner and adjust its duration](docs/images/planner.gif)](docs/images/planner.png)
 
 ### Kanban
 
 Move tasks through To do, In progress, Waiting and Done. Project colors keep different areas of your work easy to follow.
 
-![Kanban board with tasks grouped by status and colored by project](docs/images/kanban.png)
+[![Drag a task from To do to In progress, then to Done](docs/images/kanban.gif)](docs/images/kanban.png)
 
 ### Notes
 
 Write Markdown with live preview, organize notes in folders and connect them with `[[wiki links]]`. Keep checklists and attachments alongside your ideas.
 
-![Notes library with folders, a formatted Markdown note and a linked-note preview](docs/images/notes.png)
+[![Write Markdown with live preview, complete a checklist item and preview a linked note](docs/images/notes.gif)](docs/images/notes.png)
 
 ### Calendar sharing
 
 Send a link that expires in one hour. Guests see busy intervals without private event titles or descriptions, select a free slot and suggest a meeting. You can accept or reschedule it in Planner; the guest sees its updated status.
 
-![Guest calendar with anonymous busy intervals, proposed and confirmed slots, and a meeting proposal form](docs/images/calendar-sharing.png)
+[![Select a free interval, propose a meeting and see its status change after owner confirmation](docs/images/calendar-sharing.gif)](docs/images/calendar-sharing.png)
 
 [Explore calendar sharing](docs/synchronization.md#calendar-sharing).
 
@@ -56,7 +56,7 @@ Send a link that expires in one hour. Guests see busy intervals without private 
 
 Compare planned and tracked time, spot underestimation and overestimation, and see where your time goes by project. Follow workday trends, app usage and a year of activity in an accent-colored heatmap. Open **Settings → Statistics** to explore a week, a month or your full history.
 
-![Statistics with time totals, a planned-versus-actual line chart and estimate accuracy metrics](docs/images/statistics.png)
+[![Explore planned versus actual time, estimate accuracy, project totals and the activity calendar](docs/images/statistics.gif)](docs/images/statistics.png)
 
 [Explore the metrics](docs/features.md#statistics).
 
@@ -64,14 +64,16 @@ Compare planned and tracked time, spot underestimation and overestimation, and s
 
 Keep a local workspace on every device and sync changes when you reconnect. Set up an Ubuntu/Debian VPS with systemd on x86_64 or ARM64 directly from the app — no domain or manual shell setup needed.
 
-1. Open **Settings → Synchronization → Set up VPS**. Enter the server IP, SSH port and a root or sudo account, using a password or SSH key.
+[![Open Sync settings and fill in the VPS setup form without connecting to a server](docs/images/synchronization.gif)](docs/images/synchronization.png)
+
+1. Open **Settings → Sync → Set up VPS**. Enter the server IP, SSH port and a root or sudo account, using a password or SSH key.
 2. Verify the SSH host fingerprint against your hosting provider's information. Choose a synchronization port and allow it in the provider's firewall.
 3. Let Yggvion install the service and configure automatically renewed TLS certificates. Set your workspace encryption password; it stays on your devices.
 4. Choose **Connect a device** to invite another device with a one-time link or QR code. Enter the same encryption password there to access your data.
 
 [VPS setup and server management](docs/synchronization.md#install-on-a-vps) · [Include the installer when building from source](docs/building.md#client-with-the-vps-installer)
 
-All screenshots use synthetic demo data.
+Click any demo for a still image. Demos use synthetic data; the sharing demo simulates the owner's response, and the VPS preview stops before connecting.
 
 ---
 
