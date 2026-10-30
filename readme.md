@@ -50,7 +50,28 @@ Send a link that expires in one hour. Guests see busy intervals without private 
 
 ![Guest calendar with anonymous busy intervals, proposed and confirmed slots, and a meeting proposal form](docs/images/calendar-sharing.png)
 
-[Explore calendar sharing](docs/synchronization.md#calendar-sharing). Screenshots use synthetic demo data.
+[Explore calendar sharing](docs/synchronization.md#calendar-sharing).
+
+### Statistics
+
+Compare planned and tracked time, spot underestimation and overestimation, and see where your time goes by project. Follow workday trends, app usage and a year of activity in an accent-colored heatmap. Open **Settings → Statistics** to explore a week, a month or your full history.
+
+![Statistics with time totals, a planned-versus-actual line chart and estimate accuracy metrics](docs/images/statistics.png)
+
+[Explore the metrics](docs/features.md#statistics).
+
+### Synchronization on your own VPS
+
+Keep a local workspace on every device and sync changes when you reconnect. Set up an Ubuntu/Debian VPS with systemd on x86_64 or ARM64 directly from the app — no domain or manual shell setup needed.
+
+1. Open **Settings → Synchronization → Set up VPS**. Enter the server IP, SSH port and a root or sudo account, using a password or SSH key.
+2. Verify the SSH host fingerprint against your hosting provider's information. Choose a synchronization port and allow it in the provider's firewall.
+3. Let Yggvion install the service and configure automatically renewed TLS certificates. Set your workspace encryption password; it stays on your devices.
+4. Choose **Connect a device** to invite another device with a one-time link or QR code. Enter the same encryption password there to access your data.
+
+[VPS setup and server management](docs/synchronization.md#install-on-a-vps) · [Include the installer when building from source](docs/building.md#client-with-the-vps-installer)
+
+All screenshots use synthetic demo data.
 
 ---
 
