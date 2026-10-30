@@ -11,6 +11,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../data/clipboard.dart';
 import '../domain/models.dart';
 import '../domain/markdown_blocks.dart';
+import '../domain/markdown_links.dart';
 import '../domain/markdown_tasks.dart';
 import 'markdown_tasks.dart';
 import 'markdown_live_controller.dart';
@@ -163,7 +164,7 @@ class MarkdownPreview extends ConsumerWidget {
         );
       },
       fitContent: false,
-      inlineSyntaxes: [_WikiLinkSyntax()],
+      inlineSyntaxes: [_WikiLinkSyntax(), MarkdownAutolinkSyntax()],
       selectable: selectable,
       styleSheet: MarkdownStyleSheet.fromTheme(Theme.of(context)).copyWith(
         p: TextStyle(height: 1.65, color: context.palette.text),

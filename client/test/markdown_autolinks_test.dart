@@ -51,7 +51,37 @@ void main() {
         .setMockMethodCallHandler(launcher, null);
   });
 
+  const route =
+      'https://2gis.ru/moscow/directions/tab/bus/points/'
+      '37.6,55.7;123456789%7C37.7,55.8;987654321';
+  const encoded = 'https://example.com/a%2Fb?next=%2Fdone%3Fx%3D1#part%20two';
+  const literalPercent = 'https://example.com/a%252Fb?percent=%25&pipe=%7c';
   const cases = [
+    (route, route, route),
+    ('Маршрут ($route).', route, route),
+    ('<$route>', route, route),
+    ('[Маршрут]($route)', 'Маршрут', route),
+    (encoded, encoded, encoded),
+    (
+      literalPercent,
+      literalPercent,
+      'https://example.com/a%252Fb?percent=%25&pipe=%7C',
+    ),
+    (
+      'https://example.com/100%?invalid=%zz',
+      'https://example.com/100%?invalid=%zz',
+      'https://example.com/100%25?invalid=%25zz',
+    ),
+    (
+      '[https://example.com/a%2Fb](https://example.com/a%252Fb)',
+      'https://example.com/a%2Fb',
+      'https://example.com/a%252Fb',
+    ),
+    (
+      'www.example.com/a%20b',
+      'www.example.com/a%20b',
+      'http://www.example.com/a%20b',
+    ),
     (
       'Открыть https://example.com/docs?q=1&mode=2#part сейчас',
       'https://example.com/docs?q=1&mode=2#part',

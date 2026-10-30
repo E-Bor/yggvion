@@ -2,6 +2,7 @@ import '../l10n/strings.dart';
 import 'package:flutter/material.dart';
 import 'package:markdown/markdown.dart' as md;
 import '../domain/markdown_blocks.dart';
+import '../domain/markdown_links.dart';
 import 'theme.dart';
 
 /// A single source document and native selection/IME connection. Presentation
@@ -26,9 +27,10 @@ class MarkdownLiveController extends TextEditingController {
   static final _embed = RegExp(
     r'^\s*(?:!\[[^\]]*\]\([^\n]+\)|\[\[[^\]\n]+\]\]|\[[^\]]*\]\(note:[a-zA-Z0-9_-]+\))\s*$',
   );
-  static final _autolinkSyntax = md.AutolinkExtensionSyntax();
+  static final _autolinkSyntax = MarkdownAutolinkSyntax();
   static final _autolinkDocument = md.Document(
     encodeHtml: false,
+    inlineSyntaxes: [_autolinkSyntax],
     extensionSet: md.ExtensionSet.gitHubFlavored,
   );
   static final _autolinkBoundary = RegExp(r'[\s*_~(>]');
