@@ -129,6 +129,8 @@ class MarkdownPreview extends ConsumerWidget {
     return MarkdownBody(
       key: ValueKey(onChanged != null),
       data: text,
+      // Match the editor: a single Enter stays a visible line break.
+      softLineBreak: true,
       builders: {'pre': CodeBlockBuilder(selectable: selectable)},
       paddingBuilders: {'li': MarkdownTaskListBuilder()},
       checkboxBuilder: (checked) {
