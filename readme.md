@@ -75,6 +75,14 @@ Keep a local workspace on every device and sync changes when you reconnect. Set 
 
 Click any demo for a still image. Demos use synthetic data; the sharing demo simulates the owner's response, and the VPS preview stops before connecting.
 
+### Support
+
+For help with Yggvion, email [qwert.zxcqe.iop@mail.ru](mailto:qwert.zxcqe.iop@mail.ru).
+
+You can also [report a bug or suggest a feature](https://github.com/E-Bor/yggvion/issues). Please include your app version, device, operating system and steps to reproduce the issue.
+
+For security reports, follow our [security reporting instructions](SECURITY.md).
+
 ---
 
 Early development · Version 0.1 · [PolyForm Noncommercial 1.0.0](LICENSE)
