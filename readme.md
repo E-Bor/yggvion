@@ -77,6 +77,8 @@ Click any demo for a still image. Demos use synthetic data; the sharing demo sim
 
 ---
 
-Early development · Version 0.1 · Project license pending selection
+Early development · Version 0.1 · [PolyForm Noncommercial 1.0.0](LICENSE)
 
-[Contribute](CONTRIBUTING.md) · [Security](SECURITY.md) · [Third-party notices](THIRD_PARTY_NOTICES.md)
+Source available for noncommercial use under the terms of the license. Third-party components retain their own licenses.
+
+[Contribute](CONTRIBUTING.md) · [Security](SECURITY.md) · [Privacy](PRIVACY.md) · [Third-party notices](THIRD_PARTY_NOTICES.md)

@@ -6,7 +6,7 @@ This is a maintainer checklist for the first public source release. Preparing th
 
 ## Before making the repository public
 
-- Choose a project license and add its unmodified standard text as `LICENSE`, with the correct copyright holder. Update the license sections in the README and contribution guide. Do not label the repository open source while this is unresolved.
+- Preserve the [PolyForm Noncommercial 1.0.0 license](../LICENSE) and applicable copyright notices. Describe the project as source available; its noncommercial restriction does not meet the OSI Open Source Definition.
 - Confirm that project-authored code and artwork may be distributed, and preserve the notices in [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md).
 - Review the **complete Git history**, including tags and branches, for credentials and private data. Inspect commit author names/emails as well as file contents. `.gitignore` affects future additions, not old commits.
 - Rotate any real leaked credential before considering a history rewrite. Do not rewrite existing history or force-push without a separate decision. A fresh public repository without private development history is another option.
@@ -22,7 +22,7 @@ Tracked database, backup, private-key and signing-container paths were also chec
 
 This was a targeted local review, not a guarantee that the repository contains no secrets. It does not inspect unpublished refs on a remote host, private hosting settings, arbitrary image contents, or credential formats outside those patterns. Re-run a dedicated secret scanner before publication and review its findings rather than suppressing all matches in tests. No history was rewritten.
 
-The license choice and the repository's private vulnerability-reporting setting remain maintainer decisions. There is no CI on ordinary pushes or pull requests; use the manual checks in [CONTRIBUTING.md](../CONTRIBUTING.md).
+PolyForm Noncommercial 1.0.0 has been selected for project-authored code. The repository's private vulnerability-reporting setting still needs maintainer verification. There is no CI on ordinary pushes or pull requests; use the manual checks in [CONTRIBUTING.md](../CONTRIBUTING.md).
 
 ### Clean-source verification on 2026-10-30
 
@@ -34,4 +34,4 @@ The prepared source was copied to a separate temporary directory without ignored
 - Both Linux server payloads and their SHA-256 manifest were generated successfully from the clean source.
 - iOS simulator configuration and CocoaPods setup succeeded. Xcode build settings for Runner and TrackingWidget were checked in Debug, Release and Profile: the clean copy had no Apple Team; the working checkout retained its team through the ignored local file.
 
-This check did not compile a complete native release or run on a physical phone, real VPS or external backup account. It does not enable repository hosting settings or select a license.
+This check did not compile a complete native release or run on a physical phone, real VPS or external backup account. It did not change repository hosting settings or select a license at that time.

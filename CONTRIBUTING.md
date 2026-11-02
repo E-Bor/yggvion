@@ -54,4 +54,4 @@ Use synthetic names, tasks, addresses and files in tests and screenshots. Do not
 
 Follow [SECURITY.md](SECURITY.md) for security reports. Do not test destructive operations, load attacks or recovery procedures against somebody else's server.
 
-The project license must be selected before external contributions are accepted; see the [publication checklist](docs/publication.md). Dependencies and third-party files retain their existing license notices.
+Project-authored code is licensed under [PolyForm Noncommercial 1.0.0](LICENSE). Contributions must be compatible with these terms. This is a source-available project with a noncommercial restriction, not an OSI open-source license. Dependencies and third-party files retain their existing license notices. See the [publication checklist](docs/publication.md) before publishing a fork or other distribution.
