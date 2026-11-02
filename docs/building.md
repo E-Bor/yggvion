@@ -46,7 +46,7 @@ For a physical device, copy `client/ios/Flutter/Signing.example.xcconfig` to `Si
 
 An independently distributed fork needs its own application identifiers and signing setup. Keep the TrackingWidget identifier consistent with its containing app, and review URL schemes/entitlements when renaming the application. `Signing.local.xcconfig` only supplies the team; it does not register bundle identifiers or provision a device.
 
-Android's current release configuration uses the development/debug signing configuration; configure your own release keystore before distributing an Android build. The Windows MSIX configuration also requires your own signing arrangements for distribution. Local builds are not store-ready release artifacts.
+Android release builds use a separate keystore supplied through `ANDROID_KEYSTORE_PATH`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS` and `ANDROID_KEY_PASSWORD`; without them, release output is unsigned. Debug builds retain their normal development key. The optional Windows MSIX configuration requires separate signing arrangements.
 
 ## Dropbox OAuth
 

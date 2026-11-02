@@ -22,7 +22,7 @@ Tracked database, backup, private-key and signing-container paths were also chec
 
 This was a targeted local review, not a guarantee that the repository contains no secrets. It does not inspect unpublished refs on a remote host, private hosting settings, arbitrary image contents, or credential formats outside those patterns. Re-run a dedicated secret scanner before publication and review its findings rather than suppressing all matches in tests. No history was rewritten.
 
-The license choice and the repository's private vulnerability-reporting setting remain maintainer decisions. CI is intentionally absent; use the manual checks in [CONTRIBUTING.md](../CONTRIBUTING.md).
+The license choice and the repository's private vulnerability-reporting setting remain maintainer decisions. There is no CI on ordinary pushes or pull requests; use the manual checks in [CONTRIBUTING.md](../CONTRIBUTING.md).
 
 ### Clean-source verification on 2026-10-30
 
@@ -35,13 +35,3 @@ The prepared source was copied to a separate temporary directory without ignored
 - iOS simulator configuration and CocoaPods setup succeeded. Xcode build settings for Runner and TrackingWidget were checked in Debug, Release and Profile: the clean copy had no Apple Team; the working checkout retained its team through the ignored local file.
 
 This check did not compile a complete native release or run on a physical phone, real VPS or external backup account. It does not enable repository hosting settings or select a license.
-
-## Before distributing binaries
-
-- Build from a reviewed commit with the documented toolchain and lockfiles.
-- Regenerate the Linux server payloads from that same source revision before building the Flutter app.
-- Configure platform signing, application identifiers and OAuth registration for the publisher. Do not distribute Android releases with debug signing.
-- Include complete third-party license notices for the bundled client, native components, fonts and Go payloads. Preserve source availability where required by dependency licenses.
-- Test backup restoration with disposable data, invitations/sync between isolated profiles, installer rollback on a test VPS, and native notifications on supported platforms.
-- Publish versioned artifacts with checksums and clear platform support notes. A checksum alone does not authenticate a release if its download page is compromised.
-- Configure repository access, branch protection and release permissions for the actual maintainers. Do not give contributors production server or signing credentials.

@@ -1,0 +1,230 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - '[0-9]+.[0-9]+.[0-9]+\+[0-9]+'
+  workflow_dispatch:
+    inputs:
+      target:
+        description: Platform to build
+        type: choice
+        default: all
+        options: [all, android, ios, macos, linux, windows]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    name: Version and server payloads
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      matrix: ${{ steps.version.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Validate version and select platforms
+        id: version
+        env:
+          RELEASE_TARGET: ${{ inputs.target || 'all' }}
+        run: python3 tool/ci/release_version.py --target "$RELEASE_TARGET"
+      - name: Check release helpers without signing credentials
+        run: python3 -m unittest discover -s tool/tests -p 'test_*release*.py'
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: server/go.mod
+          cache-dependency-path: server/go.sum
+      - name: Build VPS installer payloads from this revision
+        run: python3 tool/build_server_bundle.py
+      - uses: actions/upload-artifact@v7
+        with:
+          name: server-payloads
+          path: |
+            client/assets/server/yggvion-linux-*
+            client/assets/server/manifest.json
+            client/assets/server/install.sh
+            client/assets/server/uninstall.sh
+          if-no-files-found: error
+          retention-days: 1
+          overwrite: true
+
+  build:
+    name: ${{ matrix.target }}
+    needs: prepare
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.prepare.outputs.matrix) }}
+    env:
+      RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v8
+        with:
+          name: server-payloads
+          path: client/assets/server
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.38.8'
+          channel: stable
+          cache: true
+      - name: Enable Flutter target
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          case "$TARGET" in
+            android|ios) flutter config "--enable-$TARGET" ;;
+            *) flutter config "--enable-$TARGET-desktop" ;;
+          esac
+      - uses: actions/setup-java@v4
+        if: matrix.target == 'android'
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Bound Android build memory on the hosted runner
+        if: matrix.target == 'android'
+        run: |
+          mkdir -p "$HOME/.gradle"
+          cat > "$HOME/.gradle/gradle.properties" <<'PROPERTIES'
+          org.gradle.jvmargs=-Xmx3G -XX:MaxMetaspaceSize=1G -XX:ReservedCodeCacheSize=256m
+          org.gradle.workers.max=2
+          org.gradle.parallel=false
+          org.gradle.daemon=false
+          PROPERTIES
+      - name: Install Linux build dependencies
+        if: matrix.target == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev libayatana-appindicator3-dev
+      - name: Setup Ruby for CocoaPods and signing configuration
+        if: matrix.target == 'ios' || matrix.target == 'macos'
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.3'
+      - name: Install CocoaPods and check Apple toolchain
+        if: matrix.target == 'ios' || matrix.target == 'macos'
+        shell: bash
+        run: |
+          gem install cocoapods --version 1.16.2 --no-document
+          xcodebuild -version
+          python3 - <<'PY'
+          import subprocess
+          sdk = subprocess.check_output(['xcrun', '--sdk', 'iphoneos', '--show-sdk-version'], text=True).strip()
+          if int(sdk.split('.')[0]) < 26:
+              raise SystemExit('App Store Connect requires the iOS 26 SDK or later.')
+          PY
+      - name: Check both iOS targets on a temporary project copy
+        if: matrix.target == 'ios'
+        run: |
+          ruby -rxcodeproj -e ''
+          python3 -m unittest tool.tests.test_apple_release.IOSSigningProjectTest
+      - name: Install Windows installer compiler
+        if: matrix.target == 'windows'
+        shell: pwsh
+        run: choco install innosetup --no-progress -y
+      - name: Build signed Android APK
+        if: matrix.target == 'android'
+        shell: bash
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: python3 tool/ci/build_release.py --platform android --version "$RELEASE_VERSION"
+      - name: Remove temporary Android signing key
+        if: always() && matrix.target == 'android'
+        shell: bash
+        run: rm -f -- "$RUNNER_TEMP/yggvion-release.jks"
+      - name: Build desktop installer
+        if: matrix.target == 'linux' || matrix.target == 'windows'
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+        run: python tool/ci/build_release.py --platform "$TARGET" --version "$RELEASE_VERSION"
+      - name: Build signed Apple release
+        if: matrix.target == 'ios' || matrix.target == 'macos'
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+          APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+          APP_STORE_CONNECT_PRIVATE_KEY_BASE64: ${{ secrets.APP_STORE_CONNECT_PRIVATE_KEY_BASE64 }}
+          IOS_DISTRIBUTION_P12_BASE64: ${{ matrix.target == 'ios' && secrets.IOS_DISTRIBUTION_P12_BASE64 || '' }}
+          IOS_DISTRIBUTION_P12_PASSWORD: ${{ matrix.target == 'ios' && secrets.IOS_DISTRIBUTION_P12_PASSWORD || '' }}
+          IOS_PROVISIONING_PROFILE_BASE64: ${{ matrix.target == 'ios' && secrets.IOS_PROVISIONING_PROFILE_BASE64 || '' }}
+          IOS_WIDGET_PROVISIONING_PROFILE_BASE64: ${{ matrix.target == 'ios' && secrets.IOS_WIDGET_PROVISIONING_PROFILE_BASE64 || '' }}
+          MACOS_DEVELOPER_ID_P12_BASE64: ${{ matrix.target == 'macos' && secrets.MACOS_DEVELOPER_ID_P12_BASE64 || '' }}
+          MACOS_DEVELOPER_ID_P12_PASSWORD: ${{ matrix.target == 'macos' && secrets.MACOS_DEVELOPER_ID_P12_PASSWORD || '' }}
+        run: |
+          upload_args=()
+          if [[ "$TARGET" == ios && "$GITHUB_REF_TYPE" == tag ]]; then
+            upload_args+=(--upload)
+          fi
+          python3 tool/ci/apple_release.py build --platform "$TARGET" --version "$RELEASE_VERSION" "${upload_args[@]}"
+      - name: Clean up Apple signing credentials
+        if: always() && (matrix.target == 'ios' || matrix.target == 'macos')
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+        run: python3 tool/ci/apple_release.py cleanup --platform "$TARGET"
+      - name: Upload notarization diagnostics
+        if: failure() && matrix.target == 'macos'
+        uses: actions/upload-artifact@v7
+        with:
+          name: macos-notarization-diagnostics
+          path: client/build/apple-release/macos/notarization*.json
+          if-no-files-found: ignore
+          retention-days: 7
+          overwrite: true
+      - name: Save installer in this workflow
+        id: installer
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.installer }}
+          path: dist/${{ matrix.installer }}
+          archive: false
+          if-no-files-found: error
+          retention-days: 14
+          overwrite: true
+      - name: Installer and distribution summary
+        shell: bash
+        env:
+          INSTALLER_NAME: ${{ matrix.installer }}
+          INSTALLER_URL: ${{ steps.installer.outputs.artifact-url }}
+          TARGET: ${{ matrix.target }}
+        run: |
+          python3 - <<'PY'
+          import hashlib, os
+          from pathlib import Path
+          path = Path('dist') / os.environ['INSTALLER_NAME']
+          digest = hashlib.sha256()
+          with path.open('rb') as source:
+              for chunk in iter(lambda: source.read(1024 * 1024), b''):
+                  digest.update(chunk)
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a', encoding='utf-8') as summary:
+              summary.write(f"### [{path.name}]({os.environ['INSTALLER_URL']})\n\n")
+              summary.write(f"Version: {os.environ['RELEASE_VERSION']} · {path.stat().st_size / 1_000_000:.1f} MB\n\n")
+              summary.write(f"SHA-256: `{digest.hexdigest()}`\n\n")
+              if os.environ['TARGET'] == 'ios':
+                  summary.write('Uploaded to App Store Connect; wait for processing. App Review was not submitted.\n'
+                                if os.environ['GITHUB_REF_TYPE'] == 'tag'
+                                else 'Signed IPA exported only. Run on a new release tag to upload.\n')
+              elif os.environ['TARGET'] == 'macos':
+                  summary.write('Developer ID signed, notarization Accepted, ticket stapled, Gatekeeper verified.\n')
+          PY

@@ -2,7 +2,7 @@
 
 [Documentation](README.md) · [Contributing](../CONTRIBUTING.md) · [Publication checklist](publication.md)
 
-Checks run manually. There are no automatic GitHub Actions workflows. Use synthetic data and isolated profiles; never point recovery or integration tests at a personal application database or VPS.
+Contributor checks run manually; there is no CI on ordinary pushes or pull requests. Use synthetic data and isolated profiles; never point recovery or integration tests at a personal application database or VPS.
 
 ## Run the checks
 

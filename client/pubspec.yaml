@@ -1,7 +1,7 @@
 name: yggvion
 description: "Личная система планирования, времени и заметок."
 publish_to: 'none'
-version: 0.1.0
+version: 0.1.0+1
 
 environment:
   sdk: ^3.10.7
