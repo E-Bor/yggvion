@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:crypto/crypto.dart';
 import 'package:dartssh2/dartssh2.dart';
 import 'package:flutter/services.dart';
+import 'server_script.dart';
 import 'sync.dart';
 
 enum ServerOperation { install, update, uninstall }
@@ -154,13 +155,10 @@ class ServerInstaller {
 
       onStatus(tr("Передаём сервер по защищённому соединению"));
       if (bytes != null) await upload('yggvion', bytes);
-      final script = operation == ServerOperation.uninstall
-          ? 'uninstall.sh'
-          : 'install.sh';
       await upload(
         'install.sh',
-        Uint8List.fromList(
-          utf8.encode(await rootBundle.loadString('assets/server/$script')),
+        await loadServerScript(
+          uninstall: operation == ServerOperation.uninstall,
         ),
       );
       onStatus(switch (operation) {

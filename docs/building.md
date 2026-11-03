@@ -10,6 +10,8 @@ The currently used versions are Flutter **3.38.8**, Dart **3.10.7** (included wi
 
 Install the native tools for your target: Xcode/CocoaPods for Apple platforms, Android SDK/JDK for Android, Visual Studio with Desktop development with C++ for Windows, or the Flutter Linux desktop build dependencies. Run `flutter doctor -v` to identify missing platform tools. Windows and Linux native builds need their respective hosts.
 
+`client/cargokit_options.yaml` enables the plugin author's signed precompiled Rust libraries for `super_native_extensions`. CargoKit verifies the downloads using the public key bundled with the dependency, even when Rust is installed. This avoids unnecessary Rust target downloads and compilation on CI. If an artifact is unavailable, CargoKit falls back to building from source and requires Rust and the target toolchains.
+
 ## Local application
 
 ```sh
@@ -32,6 +34,8 @@ flutter build macos --release
 ```
 
 The script builds Linux `amd64` and `arm64` Go binaries with `CGO_ENABLED=0`, copies the installer/uninstaller, and writes a SHA-256 manifest under `client/assets/server/`. These generated files are ignored by Git. Regenerate them after server changes; do not package stale payloads. An app built without them can be used locally but cannot install/update a VPS.
+
+On iOS, the Xcode build moves the unchanged `.sh` files from the embedded `App.framework` to `Runner.app/ServerInstaller/` as non-executable resources, renews the framework signature, and then lets Xcode sign the containing app. The iOS client reads them through a platform channel and sends them to the VPS; the scripts are never executed on iOS. Other platforms continue to use Flutter assets.
 
 ## iOS signing
 

@@ -7,6 +7,7 @@ import UserNotifications
   private var iconChannel: FlutterMethodChannel?
   private var notificationSettingsChannel: FlutterMethodChannel?
   private var storagePolicyChannel: FlutterMethodChannel?
+  private var serverInstallerChannel: FlutterMethodChannel?
   private var trackingChannel: TrackingChannel?
 
   override func application(
@@ -18,6 +19,30 @@ import UserNotifications
     let launched = super.application(application, didFinishLaunchingWithOptions: launchOptions)
     if let controller = window?.rootViewController as? FlutterViewController {
       trackingChannel = TrackingChannel(messenger: controller.binaryMessenger)
+      let installer = FlutterMethodChannel(name: "dev.yggvion/server_installer",
+                                           binaryMessenger: controller.binaryMessenger)
+      installer.setMethodCallHandler { call, result in
+        guard call.method == "loadScript" else {
+          result(FlutterMethodNotImplemented)
+          return
+        }
+        guard let name = call.arguments as? String,
+              ["install.sh", "uninstall.sh"].contains(name) else {
+          result(FlutterError(code: "invalid_script", message: "Unknown installer resource", details: nil))
+          return
+        }
+        guard let url = Bundle.main.url(forResource: name, withExtension: nil,
+                                        subdirectory: "ServerInstaller") else {
+          result(FlutterError(code: "missing_script", message: "Installer resource is not bundled", details: nil))
+          return
+        }
+        do {
+          result(FlutterStandardTypedData(bytes: try Data(contentsOf: url)))
+        } catch {
+          result(FlutterError(code: "unreadable_script", message: "Cannot read installer resource", details: nil))
+        }
+      }
+      serverInstallerChannel = installer
       let storage = FlutterMethodChannel(name: "dev.yggvion/storage_policy",
                                          binaryMessenger: controller.binaryMessenger)
       storage.setMethodCallHandler { call, result in

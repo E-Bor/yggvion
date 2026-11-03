@@ -182,6 +182,12 @@ class AppleReleaseFlowTest(unittest.TestCase):
             (app / "Info.plist").write_bytes(plistlib.dumps({
                 "CFBundleIdentifier": release.BUNDLE_ID, "CFBundleShortVersionString": "2.3.4",
                 "CFBundleVersion": "56"}))
+            if ctx.platform == "ios":
+                resources = app / "ServerInstaller"
+                resources.mkdir()
+                for name in ("install.sh", "uninstall.sh"):
+                    (resources / name).write_bytes(b"#!/bin/sh\nexit 0\n")
+                    (resources / name).chmod(0o644)
             if ctx.platform == "ios" and self.include_widget:
                 widget = app / "PlugIns/TrackingWidget.appex"
                 widget.mkdir(parents=True)
@@ -235,6 +241,14 @@ class AppleReleaseFlowTest(unittest.TestCase):
     def test_manual_branch_export_does_not_upload(self):
         self.context.execute(upload=False)
         self.assertEqual([o["destination"] for o in self.exports], ["export"])
+        self.assert_cleaned()
+
+    def test_invalid_ios_resources_stop_before_export_and_cleanup_signing(self):
+        with patch.object(release, "verify_scripts", side_effect=ValueError("Invalid app resources")):
+            with self.assertRaisesRegex(ValueError, "Invalid app resources"):
+                self.context.execute(upload=True)
+        self.assertEqual(self.exports, [])
+        self.assertFalse(self.context.output.exists())
         self.assert_cleaned()
 
     def test_missing_or_mismatched_widget_fails_before_upload(self):

@@ -283,6 +283,7 @@
 				9705A1C41CF9048500538489 /* Embed Frameworks */,
 				4CEA6889AAC3BB2A247D7F44 /* Embed App Extensions */,
 				3B06AD1E1E4923F5004D2608 /* Thin Binary */,
+				B8CD8C4D0D1D47D6828BF25A /* Stage VPS scripts as app resources */,
 				6E1BF4FD5FC4F2486B1A6417 /* [CP] Embed Pods Frameworks */,
 			);
 			buildRules = (
@@ -387,6 +388,22 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXShellScriptBuildPhase section */
+		B8CD8C4D0D1D47D6828BF25A /* Stage VPS scripts as app resources */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputPaths = (
+			);
+			name = "Stage VPS scripts as app resources";
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "python3 \"$SRCROOT/../../tool/ios_server_scripts.py\"\n";
+			showEnvVarsInLog = 0;
+		};
 		3B06AD1E1E4923F5004D2608 /* Thin Binary */ = {
 			isa = PBXShellScriptBuildPhase;
 			alwaysOutOfDate = 1;

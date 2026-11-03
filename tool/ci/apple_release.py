@@ -23,6 +23,7 @@ import sys
 if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from tool.ci.release_version import parse_version
+from tool.ios_server_scripts import verify_scripts
 
 BUNDLE_ID = "dev.yggvion.yggvion"
 WIDGET_BUNDLE_ID = BUNDLE_ID + ".Tracking"
@@ -313,6 +314,7 @@ class AppleRelease:
         if len(apps) != 1:
             raise ReleaseError("Expected one iOS application in the archive")
         self.check_version(apps[0])
+        verify_scripts(apps[0])
         extensions = list((apps[0] / "PlugIns").glob("*.appex"))
         if len(extensions) != 1:
             raise ReleaseError("Expected the TrackingWidget extension in the iOS archive")
