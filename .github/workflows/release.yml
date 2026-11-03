@@ -228,3 +228,27 @@ jobs:
               elif os.environ['TARGET'] == 'macos':
                   summary.write('Developer ID signed, notarization Accepted, ticket stapled, Gatekeeper verified.\n')
           PY
+
+  publish:
+    name: Publish GitHub pre-release
+    needs: [prepare, build]
+    if: github.event_name == 'push' && github.ref_type == 'tag'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Download installers from this run
+        uses: actions/download-artifact@v8
+        with:
+          pattern: yggvion.*
+          merge-multiple: true
+          path: dist
+      - name: Publish complete pre-release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
+        run: python3 tool/ci/publish_release.py --version "$RELEASE_VERSION"

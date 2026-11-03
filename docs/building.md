@@ -52,6 +52,23 @@ An independently distributed fork needs its own application identifiers and sign
 
 Android release builds use a separate keystore supplied through `ANDROID_KEYSTORE_PATH`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS` and `ANDROID_KEY_PASSWORD`; without them, release output is unsigned. Debug builds retain their normal development key. The optional Windows MSIX configuration requires separate signing arrangements.
 
+## Releases from tags
+
+The [Release workflow](../.github/workflows/release.yml) runs when a tag in the form `0.1.0+4` is pushed. The tag supplies the application version and build number. Commit and push the intended changes first, then create and push a new, unused tag:
+
+```sh
+git tag 0.1.0+4
+git push origin 0.1.0+4
+```
+
+After all five platform jobs succeed, the workflow creates a **published pre-release** in this repository with `yggvion.apk`, `yggvion.ipa`, `yggvion.dmg`, `yggvion.deb` and `yggvion.exe` attached. The description includes download links and [Yggvion on the App Store](https://apps.apple.com/app/id6829935844). The IPA uses App Store distribution signing; iPhone/iPad users install through the store. The App Store link becomes available after the first approved release, and the store's version may differ from a GitHub pre-release.
+
+The publishing job uses the built-in `GITHUB_TOKEN` with `contents: write`; it needs no additional repository secret. Build jobs retain read-only repository permissions. Every job has a 15-minute timeout. Manual **Run workflow** builds do not create a GitHub release.
+
+Uploads are staged in a draft and published as a pre-release only after all installers upload successfully. For a transient build failure, rerun the failed jobs. Changes to source code or the workflow need a new commit and tag; rerunning an old tag uses its original revision. If only publishing fails, rerun that job; it resumes the draft. A rerun leaves an already published release's files, description and pre-release/release status unchanged.
+
+When ready, open **Releases → Edit**, clear **This is a pre-release**, select **Set as latest release**, and save with **Update release**. This promotes the same binaries without rebuilding. GitHub's promotion does not submit or release the iOS version in App Store Connect; Apple's review and release remain separate.
+
 ## Dropbox OAuth
 
 The bundled Dropbox app key is a **public OAuth client identifier**, not a password or access token. No Dropbox app secret belongs in the client. Official builds use the included registration; independently distributed forks should create their own Dropbox application and set its public key at build time:
