@@ -1,1 +1,2 @@
 "NSCameraUsageDescription" = "相机用于扫描连接到你服务器的邀请二维码。";
+"NSPhotoLibraryUsageDescription" = "Yggvion 需要访问你的照片图库，以便将照片作为附件添加到笔记中。";

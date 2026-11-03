@@ -314,6 +314,11 @@ class AppleRelease:
         if len(apps) != 1:
             raise ReleaseError("Expected one iOS application in the archive")
         self.check_version(apps[0])
+        info = plistlib.loads((apps[0] / "Info.plist").read_bytes())
+        photo_purpose = info.get("NSPhotoLibraryUsageDescription")
+        if not isinstance(photo_purpose, str) or not photo_purpose.strip():
+            raise ReleaseError("The iOS archive needs a non-empty NSPhotoLibraryUsageDescription "
+                               "for the bundled photo picker APIs")
         verify_scripts(apps[0])
         extensions = list((apps[0] / "PlugIns").glob("*.appex"))
         if len(extensions) != 1:

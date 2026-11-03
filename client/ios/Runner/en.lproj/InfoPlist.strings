@@ -1,1 +1,2 @@
 "NSCameraUsageDescription" = "The camera scans an invitation to connect to your server.";
+"NSPhotoLibraryUsageDescription" = "Yggvion needs access to your photo library to add photos as attachments to your notes.";

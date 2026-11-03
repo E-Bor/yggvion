@@ -1,1 +1,2 @@
 "NSCameraUsageDescription" = "Mit der Kamera wird eine Einladung zum Verbinden mit deinem Server gescannt.";
+"NSPhotoLibraryUsageDescription" = "Yggvion benötigt Zugriff auf deine Fotomediathek, um Fotos als Anhänge zu deinen Notizen hinzuzufügen.";

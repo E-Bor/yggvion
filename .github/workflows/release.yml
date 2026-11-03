@@ -23,7 +23,7 @@ jobs:
   prepare:
     name: Version and server payloads
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 15
     outputs:
       version: ${{ steps.version.outputs.version }}
       matrix: ${{ steps.version.outputs.matrix }}
@@ -60,7 +60,7 @@ jobs:
     name: ${{ matrix.target }}
     needs: prepare
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 10
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.prepare.outputs.matrix) }}

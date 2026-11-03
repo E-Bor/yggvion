@@ -144,6 +144,7 @@ class AppleReleaseFlowTest(unittest.TestCase):
         self.notary_exit_error = False
         self.widget_version = "2.3.4"
         self.include_widget = True
+        self.photo_purpose = "Add photos as attachments to notes."
         self.context = release.AppleRelease("ios", "2.3.4+56", self.root / "state", root=self.root, env=environment())
         mock_run = patch.object(release, "run", side_effect=self.fake_run)
         mock_home = patch.object(release.Path, "home", return_value=self.home)
@@ -179,9 +180,12 @@ class AppleReleaseFlowTest(unittest.TestCase):
             else:
                 app = ctx.build / "DerivedData/Build/Products/Release/Yggvion.app/Contents"
             app.mkdir(parents=True)
-            (app / "Info.plist").write_bytes(plistlib.dumps({
+            info = {
                 "CFBundleIdentifier": release.BUNDLE_ID, "CFBundleShortVersionString": "2.3.4",
-                "CFBundleVersion": "56"}))
+                "CFBundleVersion": "56"}
+            if ctx.platform == "ios" and self.photo_purpose is not None:
+                info["NSPhotoLibraryUsageDescription"] = self.photo_purpose
+            (app / "Info.plist").write_bytes(plistlib.dumps(info))
             if ctx.platform == "ios":
                 resources = app / "ServerInstaller"
                 resources.mkdir()
@@ -242,6 +246,17 @@ class AppleReleaseFlowTest(unittest.TestCase):
         self.context.execute(upload=False)
         self.assertEqual([o["destination"] for o in self.exports], ["export"])
         self.assert_cleaned()
+
+    def test_missing_or_invalid_photo_purpose_stops_before_export_and_upload(self):
+        for purpose in (None, "", " \n", 1):
+            self.photo_purpose = purpose
+            self.calls.clear()
+            with self.subTest(purpose=purpose), self.assertRaisesRegex(
+                    release.ReleaseError, "NSPhotoLibraryUsageDescription"):
+                self.context.execute(upload=True)
+            self.assertEqual(self.exports, [])
+            self.assertFalse(self.context.output.exists())
+            self.assert_cleaned()
 
     def test_invalid_ios_resources_stop_before_export_and_cleanup_signing(self):
         with patch.object(release, "verify_scripts", side_effect=ValueError("Invalid app resources")):
