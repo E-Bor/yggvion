@@ -91,7 +91,9 @@ class _WorkspaceState extends ConsumerState<Workspace>
     with WidgetsBindingObserver {
   static const plannerModeHeight = 36.0;
   PageKind page = PageKind.today;
-  String projectId = '', query = '';
+  // null shows all projects; an empty ID shows tasks without a project.
+  String? projectId;
+  final plannerSearch = TextEditingController();
   Task? selected;
   String? selectedNote;
   String? newNoteId;
@@ -213,11 +215,18 @@ class _WorkspaceState extends ConsumerState<Workspace>
 
   @override
   void dispose() {
+    plannerSearch.dispose();
     ticker?.cancel();
     invitationLinks?.cancel();
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
+
+  void selectProject(String? id) => setState(() {
+    projectId = id;
+    selected = null;
+    if (id == null) plannerSearch.clear();
+  });
 
   void go(PageKind next) {
     if (page == PageKind.notes && next != PageKind.notes) {
@@ -271,7 +280,7 @@ class _WorkspaceState extends ConsumerState<Workspace>
       );
       go(PageKind.today);
       setState(() {
-        projectId = '';
+        projectId = null;
         homeDate = at;
         homeFocus = CalendarFocus(result.block!.id, at);
       });
@@ -319,11 +328,12 @@ class _WorkspaceState extends ConsumerState<Workspace>
       ref.read(openNoteProvider.notifier).state = null;
     });
     ref.listen(appProvider, (_, current) {
-      if (projectId.isNotEmpty &&
+      if (projectId != null &&
+          projectId!.isNotEmpty &&
           !current.snapshot.projects.any(
             (project) => project.id == projectId,
           )) {
-        setState(() => projectId = '');
+        selectProject(null);
       }
     });
     final desktop = !usesMobileLayout(context);
@@ -621,21 +631,30 @@ class _WorkspaceState extends ConsumerState<Workspace>
               if (!desktop &&
                   page != PageKind.settings &&
                   page != PageKind.notes &&
-                  repo.snapshot.projects.isNotEmpty)
-                PopupMenuButton<String>(
+                  (repo.snapshot.projects.isNotEmpty || projectId != null))
+                // Wrap the nullable ID so "all projects" isn't a dismissed menu.
+                PopupMenuButton<({String? projectId})>(
                   tooltip: tr("Фильтр проектов"),
+                  initialValue: (projectId: projectId),
                   icon: Icon(
                     Icons.filter_list_rounded,
-                    color: projectId.isEmpty
+                    color: projectId == null
                         ? context.palette.muted
                         : context.accentColor,
                   ),
-                  onSelected: (value) => setState(() => projectId = value),
+                  onSelected: (value) => selectProject(value.projectId),
                   itemBuilder: (_) => [
-                    PopupMenuItem(value: '', child: Text(tr("Все проекты"))),
+                    PopupMenuItem(
+                      value: (projectId: null),
+                      child: Text(tr("Все проекты")),
+                    ),
+                    PopupMenuItem(
+                      value: (projectId: ''),
+                      child: Text(tr("Без проекта")),
+                    ),
                     for (final project in repo.snapshot.projects)
                       PopupMenuItem(
-                        value: project.id,
+                        value: (projectId: project.id),
                         child: Text(project.title),
                       ),
                   ],
@@ -777,6 +796,55 @@ class _WorkspaceState extends ConsumerState<Workspace>
       });
     }
 
+    Widget projectFilter(String id, String title, Color color) {
+      final active = projectId == id;
+      final key = id.isEmpty
+          ? const ValueKey('sidebar-without-project')
+          : ValueKey('sidebar-project-$id');
+      void toggle() => selectProject(active ? null : id);
+      if (collapsed) {
+        return Padding(
+          padding: const EdgeInsets.only(bottom: 4),
+          child: Semantics(
+            selected: active,
+            child: IconButton(
+              key: key,
+              tooltip: title,
+              style: IconButton.styleFrom(
+                minimumSize: const Size(44, 44),
+                backgroundColor: active
+                    ? color.withValues(alpha: .14)
+                    : Colors.transparent,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  side: BorderSide(
+                    color: active
+                        ? color.withValues(alpha: .45)
+                        : Colors.transparent,
+                  ),
+                ),
+              ),
+              onPressed: toggle,
+              icon: Icon(Icons.circle, size: 12, color: color),
+            ),
+          ),
+        );
+      }
+      return ListTile(
+        key: key,
+        dense: true,
+        leading: Icon(Icons.circle, size: 8, color: color),
+        title: Text(
+          title,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: const TextStyle(fontSize: 12),
+        ),
+        selected: active,
+        onTap: toggle,
+      );
+    }
+
     final logo = Container(
       width: 30,
       height: 30,
@@ -912,64 +980,13 @@ class _WorkspaceState extends ConsumerState<Workspace>
                     child: ListView(
                       padding: const EdgeInsets.symmetric(horizontal: 14),
                       children: [
+                        projectFilter(
+                          '',
+                          tr("Без проекта"),
+                          context.accentColor,
+                        ),
                         for (final p in repo.snapshot.projects)
-                          if (collapsed)
-                            Padding(
-                              padding: const EdgeInsets.only(bottom: 4),
-                              child: Semantics(
-                                selected: projectId == p.id,
-                                child: IconButton(
-                                  key: ValueKey('sidebar-project-${p.id}'),
-                                  tooltip: p.title,
-                                  style: IconButton.styleFrom(
-                                    minimumSize: const Size(44, 44),
-                                    backgroundColor: projectId == p.id
-                                        ? Color(p.color).withValues(alpha: .14)
-                                        : Colors.transparent,
-                                    shape: RoundedRectangleBorder(
-                                      borderRadius: BorderRadius.circular(12),
-                                      side: BorderSide(
-                                        color: projectId == p.id
-                                            ? Color(
-                                                p.color,
-                                              ).withValues(alpha: .45)
-                                            : Colors.transparent,
-                                      ),
-                                    ),
-                                  ),
-                                  onPressed: () => setState(
-                                    () => projectId = projectId == p.id
-                                        ? ''
-                                        : p.id,
-                                  ),
-                                  icon: Icon(
-                                    Icons.circle,
-                                    size: 12,
-                                    color: Color(p.color),
-                                  ),
-                                ),
-                              ),
-                            )
-                          else
-                            ListTile(
-                              key: ValueKey('sidebar-project-${p.id}'),
-                              dense: true,
-                              leading: Icon(
-                                Icons.circle,
-                                size: 8,
-                                color: Color(p.color),
-                              ),
-                              title: Text(
-                                p.title,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(fontSize: 12),
-                              ),
-                              selected: projectId == p.id,
-                              onTap: () => setState(
-                                () => projectId = projectId == p.id ? '' : p.id,
-                              ),
-                            ),
+                          projectFilter(p.id, p.title, Color(p.color)),
                         if (repo.snapshot.projects.isEmpty && !collapsed)
                           TextButton.icon(
                             onPressed: () => go(PageKind.settings),
@@ -1220,8 +1237,8 @@ class _WorkspaceState extends ConsumerState<Workspace>
     bool matches(Task task) =>
         task.seriesId.isEmpty &&
         repo.snapshot.unscheduled(task, repo.now()) &&
-        (projectId.isEmpty || task.projectId == projectId) &&
-        task.title.toLowerCase().contains(query.toLowerCase());
+        (projectId == null || task.projectId == projectId) &&
+        task.title.toLowerCase().contains(plannerSearch.text.toLowerCase());
     final matching = repo.snapshot.tasks.reversed.where(matches).toList();
     final tasks = [
       ...matching.where((t) => t.isProposed),
@@ -1233,7 +1250,8 @@ class _WorkspaceState extends ConsumerState<Workspace>
         Padding(
           padding: const EdgeInsets.all(14),
           child: TextField(
-            onChanged: (v) => setState(() => query = v),
+            controller: plannerSearch,
+            onChanged: (_) => setState(() {}),
             decoration: InputDecoration(
               hintText: tr("Найти задачу"),
               prefixIcon: const Icon(Icons.search_rounded, size: 18),

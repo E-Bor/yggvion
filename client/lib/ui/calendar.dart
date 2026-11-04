@@ -232,7 +232,7 @@ class CalendarPane extends ConsumerStatefulWidget {
     super.key,
     this.selectedTask,
     this.onPlaced,
-    this.projectId = '',
+    this.projectId,
     this.initialDate,
     this.planner = false,
     this.showToolbar = true,
@@ -247,7 +247,9 @@ class CalendarPane extends ConsumerStatefulWidget {
   });
   final Task? selectedTask;
   final VoidCallback? onPlaced;
-  final String projectId;
+
+  /// null shows all projects; an empty ID shows tasks without a project.
+  final String? projectId;
   final DateTime? initialDate;
   final bool planner;
   final bool showToolbar;
@@ -940,7 +942,7 @@ class _CalendarPaneState extends ConsumerState<CalendarPane>
                 !(t.isBirthday && t.done) &&
                 (!widget.planner || !t.isBirthday) &&
                 (t.isBirthday ||
-                    widget.projectId.isEmpty ||
+                    widget.projectId == null ||
                     t.projectId == widget.projectId);
           }).toList();
     if (widget.planningPreview) blocks.addAll(widget.entries);
@@ -2031,7 +2033,7 @@ class _CalendarPaneState extends ConsumerState<CalendarPane>
         )
         .where(
           (s) =>
-              widget.projectId.isEmpty ||
+              widget.projectId == null ||
               repo.snapshot.task(s.taskId)?.projectId == widget.projectId,
         )
         .map((s) {

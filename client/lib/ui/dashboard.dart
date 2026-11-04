@@ -14,7 +14,7 @@ class Dashboard extends ConsumerStatefulWidget {
     this.focus,
     this.onDateChanged,
   });
-  final String projectId;
+  final String? projectId;
   final DateTime? date;
   final CalendarFocus? focus;
   final ValueChanged<DateTime>? onDateChanged;

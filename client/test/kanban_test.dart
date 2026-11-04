@@ -13,6 +13,32 @@ void main() {
     projectId: projectId,
   ).change({'status': 'done', if (at != null) 'completed_at': wireTime(at)});
 
+  test('all board statuses distinguish unassigned tasks from all projects', () {
+    for (final status in TaskStatus.values) {
+      final snapshot = Snapshot([
+        ...Repository.workspaceDefaults('UTC'),
+        for (final id in ['project', 'personal', 'legacy'])
+          Task.create(id, id, projectId: id == 'project' ? 'p' : '').change({
+            'status': status.wire,
+            'completed_at': wireTime(now),
+            if (id == 'legacy') 'project_id': null,
+          }),
+      ]);
+      expect(
+        snapshot.boardTasks(status, now).map((task) => task.id),
+        unorderedEquals(['project', 'personal', 'legacy']),
+      );
+      expect(
+        snapshot.boardTasks(status, now, projectId: '').map((task) => task.id),
+        unorderedEquals(['personal', 'legacy']),
+      );
+      expect(
+        snapshot.boardTasks(status, now, projectId: 'p').map((task) => task.id),
+        ['project'],
+      );
+    }
+  });
+
   test('Done shows seven calendar days and keeps undated tasks in history', () {
     final boundary = DateTime.utc(2026, 10, 13);
     final snapshot = Snapshot([
@@ -100,6 +126,12 @@ void main() {
             .boardTasks(TaskStatus.done, now, projectId: 'p')
             .map((t) => t.id),
         ['project'],
+      );
+      expect(
+        snapshot
+            .boardTasks(TaskStatus.done, now, projectId: '')
+            .map((t) => t.id),
+        ['personal'],
       );
       expect(
         snapshot

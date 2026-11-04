@@ -518,10 +518,11 @@ class Snapshot {
     return result;
   }
 
+  /// A null project ID includes all tasks; an empty ID selects unassigned tasks.
   List<Task> boardTasks(
     TaskStatus status,
     DateTime now, {
-    String projectId = '',
+    String? projectId,
     int? doneDays = 7,
   }) {
     DateTime? cutoff;
@@ -542,7 +543,7 @@ class Snapshot {
           task.seriesId.isNotEmpty ||
           task.isProposed ||
           task.status != status ||
-          (projectId.isNotEmpty && task.projectId != projectId)) {
+          (projectId != null && task.projectId != projectId)) {
         return false;
       }
       // Tasks without a known completion date remain accessible in all history.

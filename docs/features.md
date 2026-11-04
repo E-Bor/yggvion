@@ -6,7 +6,7 @@
 
 On desktop, Today combines a calendar with two pinned notes underneath. Drag the horizontal divider to resize the calendar and the vertical divider to change the notes' proportions. Double-click a divider to restore its default position. Sizes are saved on the current device.
 
-The sidebar resizes from its right edge. Release it below half its original width to collapse it into a rail of icons; drag outward to expand it. Project colors remain clickable filters in the collapsed rail. Clicking the selected project again clears its filter. Narrow desktop layouts turn header actions into icons.
+The sidebar resizes from its right edge. Release it below half its original width to collapse it into a rail of icons; drag outward to expand it. Project colors remain clickable filters in the collapsed rail. **No project**, shown in the app's accent color, filters Today, Planner and Kanban to tasks without a project. Selecting a project replaces the current filter; clicking the selected filter again shows all projects and clears Planner search. The phone's project menu also includes **No project**. Narrow desktop layouts turn header actions into icons.
 
 On phones, the bottom navigation runs **Kanban → Planner → Notes → Today**. Today opens by default. Two buttons near the bottom-right create an event or a note; their position stays consistent across sections. The pinned notes appear first in Notes. A new or recently opened ordinary note can temporarily appear above them for quick access.
 
