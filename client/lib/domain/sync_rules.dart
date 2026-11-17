@@ -37,22 +37,7 @@ Future<bool> reconcileEncryptedRecords(
       if (task.seriesId.isEmpty) continue;
       final series = byId[task.seriesId];
       if (series == null) continue;
-      final occurrence = DateTime.tryParse(task.occurrence);
-      final cutoff = DateTime.tryParse(
-        series.data['cancelled_from'] as String? ?? '',
-      );
-      final exceptions = (series.data['exceptions'] as List? ?? [])
-          .whereType<String>();
-      final cancelled =
-          series.deleted ||
-          (occurrence != null &&
-              ((cutoff != null && !occurrence.isBefore(cutoff)) ||
-                  exceptions.any(
-                    (s) =>
-                        DateTime.tryParse(s)?.isAtSameMomentAs(occurrence) ==
-                        true,
-                  )));
-      if (cancelled) changes[e.id] = e.tombstone();
+      if (task.cancelledBySeries(series)) changes[e.id] = e.tombstone();
     }
     for (final e in all.where(
       (e) => !e.deleted && {'block', 'session', 'snooze'}.contains(e.kind),

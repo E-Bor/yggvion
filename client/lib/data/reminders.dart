@@ -31,10 +31,26 @@ class PlannedReminder {
 }
 
 List<PlannedReminder> remindersFor(Snapshot snapshot, DateTime now) {
+  final seriesById = {
+    for (final entity in snapshot.entities.where((e) => e.kind == 'series'))
+      entity.id: entity,
+  };
+  final activeTasks = <String, Task>{};
+  for (final task in snapshot.tasks) {
+    if (task.entity.deleted || task.done) continue;
+    final series = seriesById[task.seriesId];
+    // Old clients or a partial sync can leave instances after their series
+    // was removed or cancelled. Never recreate notifications for them.
+    if (task.seriesId.isNotEmpty &&
+        (series == null || task.cancelledBySeries(series))) {
+      continue;
+    }
+    activeTasks[task.id] = task;
+  }
   final result = <PlannedReminder>[];
   for (final block in snapshot.blocks) {
-    final task = snapshot.task(block.taskId);
-    if (task == null || task.done || block.historical) continue;
+    final task = activeTasks[block.taskId];
+    if (task == null || block.entity.deleted || block.historical) continue;
     if (block.reminderAt.isNotEmpty) {
       for (var index = 0; index < block.reminderAt.length; index++) {
         final at = block.reminderAt[index];
@@ -70,10 +86,11 @@ List<PlannedReminder> remindersFor(Snapshot snapshot, DateTime now) {
       }
     }
   }
-  for (final e in snapshot.entities.where((e) => e.kind == 'snooze')) {
-    final task = snapshot.task(e.data['task_id'] as String),
-        at = parseTime(e.data['at']);
-    if (task != null && !task.done && at.isAfter(now)) {
+  for (final e in snapshot.entities.where(
+    (e) => e.kind == 'snooze' && !e.deleted,
+  )) {
+    final task = activeTasks[e.data['task_id']], at = parseTime(e.data['at']);
+    if (task != null && at.isAfter(now)) {
       result.add(
         PlannedReminder(
           e.id,

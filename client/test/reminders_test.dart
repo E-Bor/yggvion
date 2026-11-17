@@ -9,6 +9,7 @@ import 'package:yggvion/data/reminders.dart';
 import 'package:yggvion/data/repository.dart';
 import 'package:yggvion/domain/birthdays.dart';
 import 'package:yggvion/domain/models.dart';
+import 'package:yggvion/domain/recurrence.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -217,6 +218,107 @@ void main() {
       expect(pending.containsKey(ReminderService.testNotificationId), isTrue);
     },
   );
+
+  test(
+    'startup clears stale native reminders when the calendar is empty',
+    () async {
+      service.dispose();
+      pending[12345] = {
+        'id': 12345,
+        'title': 'Deleted recurring task',
+        'body': '',
+        'payload': 'deleted-task',
+      };
+      service = ReminderService(repo);
+      await service.initialize();
+      expect(service.error, isNull);
+      expect(pending, isEmpty);
+    },
+  );
+
+  for (final cancellation in ['deleted', 'missing', 'exception', 'following']) {
+    test(
+      'old recurring reminders are cancelled for a $cancellation series',
+      () async {
+        final task = await repo.createTask(
+          'Recurring reminder',
+          start: repo.now().add(const Duration(hours: 2)),
+        );
+        final recurrence = RecurrenceService(repo);
+        await recurrence.create(
+          task,
+          repo.snapshot.taskBlocks(task.id).single,
+          'FREQ=DAILY;COUNT=3',
+        );
+        final current = repo.snapshot.task(task.id)!;
+        await repo.snooze(current.id, const Duration(minutes: 10));
+        await service.refresh();
+        expect(
+          pending.values.where((r) => r['payload'] == task.id),
+          hasLength(2),
+        );
+        final series = (await repo.db.entity(current.seriesId))!;
+        // Simulate records left by an older client or an interrupted sync.
+        if (cancellation == 'missing') {
+          repo.snapshot = Snapshot(
+            repo.snapshot.entities.where((e) => e.id != series.id).toList(),
+          );
+        } else {
+          await repo.commit([
+            switch (cancellation) {
+              'deleted' => series.tombstone(),
+              'exception' => series.change({
+                'exceptions': [current.occurrence],
+              }),
+              _ => series.change({'cancelled_from': current.occurrence}),
+            },
+          ]);
+        }
+        await service.refresh();
+        expect(service.error, isNull);
+        expect(pending.values.where((r) => r['payload'] == task.id), isEmpty);
+        expect(pending, hasLength(cancellation == 'exception' ? 2 : 0));
+      },
+    );
+  }
+
+  for (final scope in RepeatScope.values) {
+    test(
+      'deleting a recurring $scope cancels native notices and snoozes',
+      () async {
+        final task = await repo.createTask(
+          'Series to delete',
+          start: repo.now().add(const Duration(hours: 2)),
+        );
+        final recurrence = RecurrenceService(repo);
+        await recurrence.create(
+          task,
+          repo.snapshot.taskBlocks(task.id).single,
+          'FREQ=DAILY;COUNT=3',
+        );
+        final tasks = repo.snapshot.tasks.toList()
+          ..sort((a, b) => a.occurrence.compareTo(b.occurrence));
+        final selected = tasks[1];
+        await repo.snooze(selected.id, const Duration(minutes: 10));
+        await service.refresh();
+        expect(pending, hasLength(4));
+        await recurrence.delete(selected, scope);
+        await service.refresh();
+        final remaining = switch (scope) {
+          RepeatScope.instance => {tasks.first.id, tasks.last.id},
+          RepeatScope.following => {tasks.first.id},
+          RepeatScope.series => <String>{},
+        };
+        expect(pending.values.map((r) => r['payload']).toSet(), remaining);
+        await recurrence.expand(
+          repo.now(),
+          repo.now().add(const Duration(days: 7)),
+        );
+        await service.refresh();
+        expect(pending.values.map((r) => r['payload']).toSet(), remaining);
+      },
+    );
+  }
 
   test('scheduling error is visible and retries successfully', () async {
     failScheduling = true;

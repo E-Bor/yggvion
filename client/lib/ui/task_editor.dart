@@ -505,8 +505,6 @@ class TaskEditor extends ConsumerStatefulWidget {
 class _TaskEditorState extends ConsumerState<TaskEditor> {
   final title = TextEditingController();
   final descriptionKey = GlobalKey<LiveMarkdownEditorState>();
-  final projectScroll = ScrollController();
-  final selectedProjectKey = GlobalKey();
   String description = '',
       projectId = '',
       rule = '',
@@ -552,19 +550,11 @@ class _TaskEditorState extends ConsumerState<TaskEditor> {
     reminders = [
       ...originalBlock?.reminders ?? repo.snapshot.settings.reminders,
     ];
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted || !projectScroll.hasClients) return;
-      final target = selectedProjectKey.currentContext?.findRenderObject();
-      if (target != null) {
-        projectScroll.position.ensureVisible(target, alignment: .5);
-      }
-    });
   }
 
   @override
   void dispose() {
     title.dispose();
-    projectScroll.dispose();
     super.dispose();
   }
 
@@ -734,55 +724,49 @@ class _TaskEditorState extends ConsumerState<TaskEditor> {
     final activeId = repo.snapshot.projects.any((p) => p.id == projectId)
         ? projectId
         : '';
-    Widget tag(String id, String title, Color color) => Padding(
-      padding: const EdgeInsets.only(right: 8),
-      child: Tooltip(
-        key: activeId == id ? selectedProjectKey : null,
-        message: title,
-        child: ChoiceChip(
-          key: ValueKey('task-project-$id'),
-          selected: activeId == id,
-          showCheckmark: false,
-          avatar: Icon(
-            id.isEmpty ? Icons.folder_outlined : Icons.circle,
-            size: id.isEmpty ? 16 : 9,
-            color: color,
-          ),
-          label: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 170),
-            child: Text(title, maxLines: 1, overflow: TextOverflow.ellipsis),
-          ),
-          labelStyle: TextStyle(
-            fontSize: 13,
-            color: activeId == id ? color : context.palette.muted,
-          ),
-          backgroundColor: context.palette.surface,
-          selectedColor: color.withValues(alpha: .14),
-          side: BorderSide(
-            color: activeId == id
-                ? color.withValues(alpha: .5)
-                : context.palette.border,
-          ),
-          shape: const StadiumBorder(),
-          onSelected: saving ? null : (_) => setState(() => projectId = id),
+    Widget tag(String id, String title, Color color) => Tooltip(
+      message: title,
+      child: ChoiceChip(
+        key: ValueKey('task-project-$id'),
+        selected: activeId == id,
+        showCheckmark: false,
+        avatar: Icon(
+          id.isEmpty ? Icons.folder_outlined : Icons.circle,
+          size: id.isEmpty ? 16 : 9,
+          color: color,
         ),
+        label: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 170),
+          child: Text(title, maxLines: 1, overflow: TextOverflow.ellipsis),
+        ),
+        labelStyle: TextStyle(
+          fontSize: 13,
+          color: activeId == id ? color : context.palette.muted,
+        ),
+        backgroundColor: context.palette.surface,
+        selectedColor: color.withValues(alpha: .14),
+        side: BorderSide(
+          color: activeId == id
+              ? color.withValues(alpha: .5)
+              : context.palette.border,
+        ),
+        shape: const StadiumBorder(),
+        onSelected: saving ? null : (_) => setState(() => projectId = id),
       ),
     );
-    return SingleChildScrollView(
+    return Wrap(
       key: const ValueKey('task-projects'),
-      controller: projectScroll,
-      scrollDirection: Axis.horizontal,
-      child: Row(
-        children: [
-          tag('', tr("Без проекта"), context.accentColor),
-          for (final project in repo.snapshot.projects)
-            tag(
-              project.id,
-              project.title,
-              context.palette.accent(Color(project.color)),
-            ),
-        ],
-      ),
+      spacing: 8,
+      runSpacing: 4,
+      children: [
+        tag('', tr("Без проекта"), context.accentColor),
+        for (final project in repo.snapshot.projects)
+          tag(
+            project.id,
+            project.title,
+            context.palette.accent(Color(project.color)),
+          ),
+      ],
     );
   }
 

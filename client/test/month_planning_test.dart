@@ -125,7 +125,7 @@ void main() {
           find.byKey(ValueKey('planning-busy-${occupied.id}')),
           findsOneWidget,
         );
-        await tapTime(tester, 10 * 60 + 15, mobile: mobile);
+        await tapTime(tester, 10 * 60 + 8, mobile: mobile);
         await extendDraft(tester, 12, mobile: mobile);
         expect(
           inside(find.byKey(const ValueKey('month-plan-time'))),

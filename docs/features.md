@@ -14,13 +14,13 @@ On phones, the bottom navigation runs **Kanban → Planner → Notes → Today**
 
 Choose day, three-day, week or month views. Today and Planner remember their views independently on each device. Horizontal swipes change the date range on phones; a wide week scrolls through its hidden columns before changing the range.
 
-In Planner, select an unscheduled task and choose a time in the calendar. A click uses the default duration from settings, initially 30 minutes. Drag to choose a longer interval. On phones, hold until the haptic response and then drag; an ordinary swipe scrolls the calendar.
+In Planner, select an unscheduled task and choose a time in the calendar. New events snap to the nearest quarter hour (00, 15, 30 or 45 minutes). A click uses the default duration from settings, initially 30 minutes. Drag to choose an interval with both endpoints snapped to quarter hours. On phones, hold until the haptic response and then drag; an ordinary swipe scrolls the calendar.
 
 Desktop events move with the pointer and resize from either edge. On phones, holding an event reveals its resize handles. Completion and timer buttons remain usable on short events. Trackpad scrolling does not create a new event or move an existing one.
 
 While dragging or resizing:
 
-- A guide line and label show the exact target time in five-minute increments.
+- A guide line and label show the exact target time. Moving or resizing an existing event retains five-minute increments; creating a new event uses fifteen-minute increments.
 - The top and bottom 20% of the visible calendar scroll time continuously, faster near the edge.
 - Moving an endpoint into the next day previews the continuation before release.
 - Holding beyond a desktop calendar's left or right boundary for 650 ms changes the date range. On a narrow view, hidden columns of the current range are revealed first. Leaving the edge or cancelling the gesture stops the pending change.
@@ -43,11 +43,11 @@ Done defaults to the last seven calendar days in the application's time zone. Ch
 
 Planner lists new tasks first within the incoming-proposal and ordinary-task groups. Editing an older task does not move it to the top. A card's menu opens its editor; clicking the card selects it for planning. Incoming proposals are described in [calendar sharing](synchronization.md#calendar-sharing).
 
-Creation and editing use the same form: a single-line title, compact date/time controls, recurrence and a reminder dropdown. The end date is shown only for events spanning multiple days. Projects appear as horizontal tags. Less-used block and time-entry controls are expandable; the description stays open at the bottom. Opening an event from the calendar edits the selected block's schedule and reminders.
+Creation and editing use the same form: a single-line title, compact date/time controls, recurrence and a reminder dropdown. The end date is shown only for events spanning multiple days. Project tags flow from left to right and wrap onto additional rows without horizontal scrolling. Less-used block and time-entry controls are expandable; the description stays open at the bottom. Opening an event from the calendar edits the selected block's schedule and reminders.
 
 Recurrence supports every N days, weeks, months or years, selected weekdays, a day of the month, or an ordinal weekday. Edits and deletions can apply to one instance, this and subsequent instances, or the entire series. Changing a schedule from an instance preserves already completed work. There is no separate recurrence end-date field; stop a series by deleting the remaining instances. Instances have independent statuses and time entries.
 
-Create reminders using custom numbers of weeks, days, hours or minutes. Default reminders and the IANA time zone are configured in settings. Reminders support a ten-minute snooze. Planning settings save immediately; an invalid duration does not overwrite the last saved value, and save failures can be retried.
+Create reminders using custom numbers of weeks, days, hours or minutes. Default reminders and the IANA time zone are configured in settings. Reminders support a ten-minute snooze. Cancelled recurring instances are excluded from reminders and snoozes even if older records remain on the device; opening the app reconciles pending notifications. Planning settings save immediately; an invalid duration does not overwrite the last saved value, and save failures can be retried.
 
 An `.ics` export from Google Calendar can be imported once with a preview and project selection. Reimporting the same data does not create duplicates. `RECURRENCE-ID` exceptions become separate tasks and exclude their original dates from the series. Unsupported `RDATE`, `EXRULE`, `RANGE` and some reminder forms are reported before import. This is an import feature, not a Google Calendar synchronization service.
 

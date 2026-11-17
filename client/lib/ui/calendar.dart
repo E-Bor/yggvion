@@ -580,15 +580,23 @@ class _CalendarPaneState extends ConsumerState<CalendarPane>
   DateTime firstDay(CalendarView view) => view == CalendarView.week
       ? _date(date.year, date.month, date.day - (date.weekday - 1))
       : date;
+  int get selectionStepMinutes => enteringTime ? 5 : 15;
+
+  int selectionMinute(Offset position) {
+    final minutes =
+        (position.dy / hourHeight * 60 / selectionStepMinutes).round() *
+        selectionStepMinutes;
+    return minutes.clamp(0, enteringTime ? 1435 : 1440);
+  }
+
   DateTime at(Offset position, double width, int count, DateTime first) {
     final column = ((position.dx - gutter) / width).floor().clamp(0, count - 1);
-    final minutes = ((position.dy / hourHeight * 60) / 5).round() * 5;
     return _date(
       first.year,
       first.month,
       first.day + column,
       0,
-      minutes.clamp(0, 1435),
+      selectionMinute(position),
     );
   }
 
@@ -638,7 +646,15 @@ class _CalendarPaneState extends ConsumerState<CalendarPane>
 
   void updateInteraction(Offset global) {
     if (drag == null && workdayDrag == null && selectionAnchor == null) return;
+    final previousMinute = selectionAnchor == null
+        ? null
+        : selectionMinute(contentPosition(pointer!));
     pointer = global;
+    if (previousMinute != null &&
+        previousMinute != selectionMinute(contentPosition(global))) {
+      // The guide can move even when the range still matches the default duration.
+      setState(() {});
+    }
     updatePreview();
     updateEdgeScroll();
     updateEdgePage();
@@ -740,7 +756,7 @@ class _CalendarPaneState extends ConsumerState<CalendarPane>
       final start = next.isBefore(anchor) ? next : anchor;
       final end = next.isAfter(anchor)
           ? next
-          : anchor.add(const Duration(minutes: 5));
+          : anchor.add(Duration(minutes: selectionStepMinutes));
       if (start != selectionStart || end != selectionEnd) {
         setState(() {
           selectionStart = start;
@@ -1600,13 +1616,16 @@ class _CalendarPaneState extends ConsumerState<CalendarPane>
               ? active.end
               : active.start),
     );
-    final endOfWorkday =
-        workdayDrag != null &&
-        !workdayDrag!.start &&
-        value.hour == 0 &&
-        value.minute == 0 &&
-        _dayIndex(_midnight(value), interactionFirst) > 0;
-    final y = endOfWorkday
+    final endOfDay =
+        (workdayDrag != null &&
+            !workdayDrag!.start &&
+            value.hour == 0 &&
+            value.minute == 0 &&
+            _dayIndex(_midnight(value), interactionFirst) > 0) ||
+        (workdayDrag == null &&
+            active == null &&
+            selectionMinute(contentPosition(pointer!)) == 1440);
+    final y = endOfDay
         ? 24 * hourHeight
         : (value.hour + value.minute / 60) * hourHeight;
     final left = horizontal.hasClients ? horizontal.offset : 0.0;
@@ -1635,7 +1654,7 @@ class _CalendarPaneState extends ConsumerState<CalendarPane>
               borderRadius: BorderRadius.circular(5),
             ),
             child: Text(
-              endOfWorkday ? '24:00' : DateFormat('HH:mm').format(value),
+              endOfDay ? '24:00' : DateFormat('HH:mm').format(value),
               key: const ValueKey('calendar-time-label'),
               textAlign: TextAlign.center,
               style: TextStyle(

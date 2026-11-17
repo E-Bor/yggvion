@@ -167,6 +167,19 @@ class Task {
       DateTime.tryParse(entity.data['completed_at'] as String? ?? '');
   bool get isBirthday =>
       (entity.data['birthday_date'] as String? ?? '').isNotEmpty;
+  bool cancelledBySeries(Entity series) {
+    if (series.deleted) return true;
+    final at = DateTime.tryParse(occurrence);
+    if (at == null) return false;
+    final cutoff = DateTime.tryParse(
+      series.data['cancelled_from'] as String? ?? '',
+    );
+    if (cutoff != null && !at.isBefore(cutoff)) return true;
+    return (series.data['exceptions'] as List? ?? []).whereType<String>().any(
+      (value) => DateTime.tryParse(value)?.isAtSameMomentAs(at) == true,
+    );
+  }
+
   static Entity create(
     String id,
     String title, {
